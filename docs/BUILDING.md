@@ -132,6 +132,7 @@ CMake options:
 | `DOD3_SYMBOLS` | ON | Windows: `/Z7` on the port's and the runtime's sources, `/DEBUG` at link, for the profiler and the crash handler |
 | `DOD3_CONSOLE` | OFF | Windows: link as a console program |
 | `LIBSRE_PRX` | the submodule's | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`) |
+| `DOD3_PGO` | empty | profile-guided optimisation of the lifted code alone, in a build folder of its own: `generate` instruments it (the game then writes the profile named by `LLVM_PROFILE_FILE` every 30 s and on exit), `use:<profdata>` compiles it on a merged profile (`llvm-profdata merge -o lifted.profdata *.profraw`) |
 
 The replay tool (`rsx_replay`, for the rendering regression) is not part of
 the default target: `cmake --build build --target rsx_replay`, or
@@ -179,3 +180,4 @@ Both refuse to package anything of the game's.
 | `src/apu/mp3dec_tables.h` | `python tools/gen_mp3_tables.py <minimp3.h> > src/apu/mp3dec_tables.h` |
 | `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
 | `src/res/app.ico` | `python tools/make_icon.py src/res/app.ico` |
+| `src/patches/collision_native.cpp` | `python tools/lift_native.py recompiled_101/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp` after a re-lift (the lifted body it translates may have moved to another unit: `grep -l func_00272E58_lifted recompiled_101/*.cpp`) |

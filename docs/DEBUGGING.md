@@ -11,14 +11,20 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   skips the cutscenes until the battle HUD is on screen, then fights), and
   a summary of its frame times (`tools/bench_summary.py`). Frame rates from
   a run a person played in are not comparable. Run-to-run variance is 5-15%,
-  so compare pairs, or use `DOD3_AB`.
+  so compare pairs, or use `DOD3_AB`. `AUTOPLAY_CUTSCENE=1` instead skips
+  the chapter's opening movie and presses nothing more: the game idles at
+  its starting spot while the area streams in, then stands still, the same
+  every run (`FROM=120` for the steady part); the closest thing to a
+  deterministic benchmark of the main thread, for comparing two builds of
+  the lifted code. The hooked collision test's cycles per call
+  (`DOD3_HOT_LOG=1`) is the other low-noise signal for such changes.
 - `DOD3_AB=<switch>[,<seconds>]`: an A/B test inside one run. It flips one
   run-time switch every few seconds, counts the frames in each window and
   reports the paired difference with its standard error, and (Windows) each
   thread's CPU time per frame in either state. Switches: `stores`, `icall`,
   `labelwake`, `querysync`, `jcpar`, `bufpool`, `kickbusy`, `msdsp`,
   `texwatch`, `patchhook`, `lzfmemo`, `vcwatch`, `snapincr`, `aniso`,
-  `none` (the control, which must report no difference). `DOD3_AB_FROM=<s>`
+  `collnative`, `none` (the control, which must report no difference). `DOD3_AB_FROM=<s>`
   skips the boot and menus (default 70).
 - `tools/replay_regress.sh`: the rendering regression. Replays RSX captures
   through the engine headlessly and compares the frames with a reference set
@@ -91,6 +97,7 @@ relative to the read index.
 | Switch | |
 |---|---|
 | `DOD3_GC_NATIVE=0 / 1 / check` | the lifted reachability pass, the native one (default), or both compared |
+| `DOD3_COLLISION_NATIVE=0 / 1 / check` | the lifted collision test, the native one (default; `src/patches/collision_native.cpp`, generated from the lifted body by `tools/lift_native.py`), or both on every call with the nine words they write and the result compared (the first differences printed, a count every 100,000 calls) |
 | `DOD3_GC_PAR=<n>` | worker threads for the collector's mark phase (8; 0 serial); `DOD3_GC_DEFER=0` collects where the game asks instead of in the limiter's sleep; `DOD3_GC_PREFETCH=0` |
 | `DOD3_SPU_NATIVE=0` | the SPU hooks off; `DOD3_SPU_NATIVE_CHECK=1` runs each hooked stretch twice and compares every register and the local store |
 | `DOD3_SPU_PATCH_HOOK=0`, `DOD3_LZF_MEMO=0` (`DOD3_LZF_MEMO_LOG=1`), `DOD3_MSDSP_NATIVE=0` | one path at a time |

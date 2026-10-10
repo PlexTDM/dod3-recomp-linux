@@ -34,6 +34,9 @@
 #                           checking the HUD (each check grabs a frame, a GPU
 #                           readback that costs the game a hitch), so the
 #                           frame times after it are the game's own
+#   AUTOPLAY_CUTSCENE=1     press nothing after New Game: the chapter's
+#                           opening cutscenes play, the same every run -- a
+#                           deterministic benchmark (see below)
 log=$1; pad=$2; grab=$3
 [ -n "$log" ] && [ -n "$pad" ] || { echo "usage: $0 <log> <padfile> [grab-prefix]"; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
@@ -80,6 +83,23 @@ for i in $(seq 1 20); do
 done
 wait_for "BG00_CHC_10_MAP.XXX" 30 || { echo "[autoplay] new game NOT reached"; exit 1; }
 echo "$(date +%H:%M:%S) [autoplay] chapter 1 loading"
+
+# AUTOPLAY_CUTSCENE=1: the chapter's opening movie is skipped (a pre-rendered
+# film at 30 fps, 150 s of it), the tutorial prompt dismissed, and nothing
+# else is pressed: the game idles at its starting spot while the area
+# streams in and then stands still. No path to vary and no frame grabs: the
+# nearest thing to a deterministic benchmark of the game's main thread
+# (bench_summary from FROM=120 or so, once the streaming settles).
+if [ -n "$AUTOPLAY_CUTSCENE" ]; then
+  sleep 8
+  for i in 1 2 3; do
+    press $START "skip opening movie #$i"; sleep 0.8
+    press $CROSS "confirm skip #$i"; sleep 2.5
+  done
+  sleep 6; press $CROSS "dismiss the tutorial"
+  echo "$(date +%H:%M:%S) [autoplay] idle benchmark: no more input"
+  exit 0
+fi
 
 if [ -z "$grab" ]; then
   for i in $(seq 1 15); do

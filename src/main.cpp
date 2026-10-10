@@ -525,11 +525,33 @@ static int unfocused_hold(uint64_t now_us)
  * and the audio device until Task Manager found it. The guest threads cannot
  * be joined (they run lifted code with no exit path), so this is a hard exit
  * after the logs are flushed. */
+#ifdef DOD3_PGO_GENERATE
+/* DOD3_PGO=generate (CMakeLists.txt): the lifted code carries profile
+ * counters. They are written to LLVM_PROFILE_FILE every 30 s and before the
+ * hard exit below, because the bench kills the game rather than closing it
+ * and a kill writes nothing. */
+extern "C" int __llvm_profile_write_file(void);
+static void pgo_writer_start(void)
+{
+    std::thread([] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            __llvm_profile_write_file();
+        }
+    }).detach();
+}
+static void pgo_write(void) { __llvm_profile_write_file(); }
+#else
+static void pgo_writer_start(void) {}
+static void pgo_write(void) {}
+#endif
+
 [[noreturn]] static void window_closed_exit(void)
 {
     fprintf(stderr, "[rsx] window closed -- exiting\n");
     fflush(stdout);
     fflush(stderr);
+    pgo_write();
 #ifdef _WIN32
     TerminateProcess(GetCurrentProcess(), 0);
 #else
@@ -785,6 +807,8 @@ extern "C" int g_eng_aniso_on;    /* rsx_d3d12_engine.c, rsx_metal_backend.m: RS
 static void ab_aniso(int on) { g_eng_aniso_on = on; }
 #endif
 extern "C" uint32_t g_rsx_engine_hitches;   /* rsx_draw_engine.c: presents over 25 ms apart */
+extern "C" int g_dod3_collision_native;     /* src/cpu/hot.cpp: the collision test native (1) or lifted (0) */
+static void ab_collnative(int on) { g_dod3_collision_native = on; }
 static void ab_none(int) {}
 static const struct {
     const char* name;
@@ -797,6 +821,7 @@ static const struct {
 #endif
     { "kickbusy", ab_kickbusy },   { "msdsp", ab_msdsp },     { "texwatch", ab_texwatch },
     { "patchhook", ab_patchhook }, { "lzfmemo", ab_lzfmemo }, { "vcwatch", ab_vcwatch },
+    { "collnative", ab_collnative },
 #ifdef _WIN32
     { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin },
 #endif
@@ -1649,6 +1674,7 @@ int main(int argc, char** argv)
     timeBeginPeriod(1);
     setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
     win_stdio_buffer();                 /* ...except into a file or a pipe: buffered, flushed every 200 ms */
+    pgo_writer_start();                 /* nothing unless DOD3_PGO=generate */
 #endif
 
     printf("=== Drakengard 3 Recompiled %s (BLUS31197 %s) ===\n", DOD3_VERSION_STRING, DOD3_EBOOT_NAME);
