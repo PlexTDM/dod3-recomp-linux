@@ -184,4 +184,8 @@ Measured as no gain, so nobody repeats them: pinning to the P-cores, EcoQoS
 opt-out, skipping the occlusion-query sync (`RSX_QUERY_NOSYNC`, also
 flickers), submitting partial batches early, parallel job-chain workers
 (`SPURS_JC_PAR`: the jobs are too small), vsync off at a cap, the five-test
-inline store path.
+inline store path, `-O3` on the lifted units (byte-identical objects),
+profile-guided optimisation of the lifted units (`DOD3_PGO`, an IR profile
+of a battle run and an idle run: the idle scene 8% slower, the collision
+test 10% more cycles per call -- the layout the profile asks for does the
+huge units no good).
