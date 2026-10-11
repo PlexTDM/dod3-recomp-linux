@@ -112,6 +112,12 @@ cat > "$app/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+# Nothing of this machine's file metadata goes along: files the game wrote
+# here (the shader cache) carry com.apple.provenance, and ditto would put each
+# such attribute into the archive as a "._name" entry beside its file -- which
+# a plain unzip then writes out as a file inside the signed bundle.
+xattr -cr "$out"
+
 # Ad-hoc signatures, inside out. No hardened runtime: its library validation
 # refuses dylibs without a Team ID, which ad-hoc signing does not give.
 if grep -rq -e "/Users/" -e "$HOME" "$app"; then
@@ -144,6 +150,9 @@ for bad in EBOOT.ELF EBOOT_101.ELF EBOOT.BIN flashMP3.pic PARAM.SFO keys.txt; do
   if find "$out" -iname "$bad" | grep -q .; then echo "package_mac: $bad in the package"; exit 1; fi
 done
 
-(cd dist && ditto -c -k --keepParent "$name" "$name.zip")
+(cd dist && ditto -c -k --norsrc --noextattr --noacl --keepParent "$name" "$name.zip")
+if unzip -Z1 "dist/$name.zip" | grep -q -e '/\._' -e '__MACOSX'; then
+    echo "package_mac: the archive has metadata entries (._name or __MACOSX)"; exit 1
+fi
 ls -la "dist/$name.zip"
 shasum -a 256 "$app/Contents/MacOS/dod3"
