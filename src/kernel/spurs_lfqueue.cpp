@@ -218,7 +218,7 @@ static void lfq_push_body(ppu_context* ctx)
     ctx->gpr[3] = (int64_t)(int32_t)rc;
 
     static int s_n = 0;
-    if (rc || s_n++ < 64)
+    if (rc || (s_n < 64 && ++s_n))
         fprintf(stderr, "[lfq] push q=0x%08X pos=%d blocking=%u rc=0x%08X lr=0x%08X tid=%u\n", q, pos, blocking, rc,
                 (uint32_t)ctx->lr, (unsigned)ctx->thread_id);
 }

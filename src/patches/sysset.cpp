@@ -346,7 +346,7 @@ void dod3_sysset_poll()
          * these values, comes later. */
         if (!vm_read32(kData + 0x390u)) return;
         static int settle = 0;
-        if (settle++ < 50) return;  /* ~0.1 s for LoadFromIni to finish the floats and texture groups */
+        if (settle < 50 && ++settle) return;  /* ~0.1 s for LoadFromIni to finish the floats and texture groups */
         state = 1;
         s_loaded = true;
         if (getenv("DOD3_SYSSET_DUMP")) dump();
