@@ -15,6 +15,8 @@ is no emulation at run time.
 Drakengard 3: the US disc and the game's 1.01 update, plus whatever DLC you
 own. The installer takes them from there.
 
+If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
+
 ## Installing
 
 What you need:
