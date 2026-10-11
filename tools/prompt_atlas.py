@@ -9,6 +9,11 @@ src/res/prompts that the build embeds and src/patches/prompts.cpp serves.
 Nothing here comes from the game's art: the rectangles are the layout's
 numbers, the glyphs are drawn from scratch.
 
+For the keyboard and mouse the atlas depends on the player's bindings, so
+what is drawn is a sheet of key caps, one tile a key (keys.png, each tile's
+name and rectangle in a "tiles" text chunk); the port lays the bound keys'
+tiles into the rectangles when it starts.
+
 usage: python tools/prompt_atlas.py --font <bold sans .ttf> [--out DIR] [--scale 4] [SET ...]
 
 The committed PNGs were drawn with Roboto Bold (Apache License 2.0). Needs
@@ -18,7 +23,7 @@ import argparse
 import math
 import os
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, PngImagePlugin
 
 W, H = 256, 128   # the game's atlas, in its own texels
 
@@ -65,13 +70,10 @@ SETS = {
     "switch": dict(face={"cross": ("B", WHITE), "circle": ("A", WHITE), "square": ("Y", WHITE), "triangle": ("X", WHITE)},
                    l1="L", l2="ZL", r1="R", r2="ZR", start=("plus", None), select=("minus", None),
                    ls="L", rs="R", l3="LS", r3="RS"),
-    # The keyboard that stands in for a pad (ps3recomp/libs/input/cellPad.c):
-    # Z X A S, Q W, 1 2, Enter, Tab. Windows: the arrows are the D-pad and the
-    # left stick. macOS: the arrows are the left stick, T F G H the D-pad,
-    # I J K L the right stick.
-    "keyboard": dict(face={"cross": ("Z", WHITE), "circle": ("X", WHITE), "square": ("A", WHITE), "triangle": ("S", WHITE)},
-                     l1="Q", l2="1", r1="W", r2="2", start=("key", "Enter"), select=("key", "Tab"),
-                     ls="L", rs="R", l3="L3", r3="R3", keys=dict(dpad=ARROWS, ls=ARROWS)),
+    # The keyboard that stands in for a pad on macOS, a fixed set of keys
+    # (ps3recomp/libs/input/cellPad.c): Z X A S, Q W, 1 2, Return, Tab; the
+    # arrows are the left stick, T F G H the D-pad, I J K L the right stick.
+    # (Windows has bindings of its own: the key sheet below.)
     "keyboard_mac": dict(face={"cross": ("Z", WHITE), "circle": ("X", WHITE), "square": ("A", WHITE), "triangle": ("S", WHITE)},
                          l1="Q", l2="1", r1="W", r2="2", start=("key", "Return"), select=("key", "Tab"),
                          ls="L", rs="R", l3="L3", r3="R3",
@@ -86,9 +88,9 @@ LIT = (92, 222, 200, 255)
 class Pen:
     """Drawing in the atlas's texels, on a canvas `scale * 4` times larger."""
 
-    def __init__(self, scale, font):
+    def __init__(self, scale, font, w=W, h=H):
         self.scale, self.z = scale, scale * 4
-        self.im = Image.new("RGBA", (W * self.z, H * self.z), (0, 0, 0, 0))
+        self.im = Image.new("RGBA", (w * self.z, h * self.z), (0, 0, 0, 0))
         self.d = ImageDraw.Draw(self.im)
         self.font = font
 
@@ -299,6 +301,106 @@ def draw(name, scale, font):
     return finish(p.im, (W * scale, H * scale))
 
 
+# ---- the key sheet ----------------------------------------------------------
+
+TILE = 32          # a tile's height in atlas texels: more than any rectangle a key is drawn in
+SHEET_W = 512
+
+# a key's name in dod3.ini (src/input/kbm.cpp) -> what its cap says
+WORDS = {"Space": "Space", "Enter": "Enter", "Tab": "Tab", "Esc": "Esc", "Backspace": "Bksp", "Shift": "Shift",
+         "Ctrl": "Ctrl", "Alt": "Alt", "LShift": "L Shift", "RShift": "R Shift", "LCtrl": "L Ctrl", "RCtrl": "R Ctrl",
+         "LAlt": "L Alt", "RAlt": "R Alt", "Insert": "Ins", "Delete": "Del", "Home": "Home", "End": "End",
+         "PageUp": "PgUp", "PageDown": "PgDn", "CapsLock": "Caps", "Minus": "-", "Equals": "=", "LBracket": "[",
+         "RBracket": "]", "Semicolon": ";", "Quote": "'", "Comma": ",", "Period": ".", "Slash": "/", "Backslash": "\\",
+         "Grave": "`", "Unbound": "?"}
+ARROW_KEYS = {"Up": (0, -1), "Down": (0, 1), "Left": (-1, 0), "Right": (1, 0)}
+MOUSE = ("Mouse1", "Mouse2", "Mouse3", "Mouse4", "Mouse5", "WheelUp", "WheelDown", "MouseMove")
+SYMBOLS = ("Star", "Registered", "Copyright")
+
+
+def key_names():
+    names = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") + ["F%d" % n for n in range(1, 13)]
+    names += list(ARROW_KEYS) + list(WORDS) + ["Num%d" % n for n in range(10)] + list(MOUSE) + list(SYMBOLS)
+    return names
+
+
+def draw_mouse(p, x0, y0, name):
+    """A mouse seen from above, the button or the wheel that is meant lit."""
+    cx = x0 + TILE / 2
+    bx0, bx1, by0, by1 = cx - 8.5, cx + 8.5, y0 + 3.0, y0 + 29.0
+    body, lit, line = (44, 46, 52, 255), (240, 240, 240, 255), (176, 180, 188, 255)
+    if name == "MouseMove":      # smaller, with the four ways it moves around it
+        bx0, bx1, by0, by1 = cx - 5.5, cx + 5.5, y0 + 7.5, y0 + 24.5
+    p.rrect(bx0, by0, bx1, by1, (bx1 - bx0) * 0.45, body, rim=line, rw=1.1)
+    split = by0 + (by1 - by0) * 0.42
+    p.line([(bx0 + 1.2, split), (bx1 - 1.2, split)], line, 0.8)
+    p.line([(cx, by0 + 1.2), (cx, split)], line, 0.8)
+    if name in ("Mouse1", "Mouse2"):
+        half = Image.new("L", p.im.size, 0)
+        d = ImageDraw.Draw(half)
+        if name == "Mouse1": d.rectangle(p.P(bx0, by0, cx - 0.5, split - 0.5), fill=255)
+        else: d.rectangle(p.P(cx + 0.5, by0, bx1, split - 0.5), fill=255)
+        shape = Image.new("L", p.im.size, 0)
+        ImageDraw.Draw(shape).rounded_rectangle(p.P(bx0 + 1.6, by0 + 1.6, bx1 - 1.6, by1 - 1.6),
+                                                 radius=(bx1 - bx0) * 0.45 * p.z - 1.6 * p.z, fill=255)
+        p.im.paste(lit, (0, 0), ImageChops.multiply(half, shape))
+    wheel = lit if name in ("Mouse3", "WheelUp", "WheelDown") else (96, 100, 108, 255)
+    wh = (by1 - by0) * 0.11
+    p.rrect(cx - 1.7, by0 + (split - by0) * 0.5 - wh, cx + 1.7, by0 + (split - by0) * 0.5 + wh, 1.6, wheel, rim=body, rw=0.6)
+    if name in ("Mouse4", "Mouse5"):
+        p.text(cx, by0 + (by1 - by0) * 0.72, name[-1], 11, lit)
+    if name in ("WheelUp", "WheelDown"):
+        dy = -1 if name == "WheelUp" else 1
+        p.arrow(cx, by0 + (by1 - by0) * 0.74 + dy * 0.5, 0, dy, 3.4, lit)
+    if name == "MouseMove":
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            p.arrow(cx + dx * 11.5, (by0 + by1) / 2 + dy * 12.5, dx, dy, 2.6, lit)
+
+
+def draw_keys(scale, font):
+    """The sheet and its index: [(name, x, y, w, h)] in the sheet's pixels."""
+    names = key_names()
+    def width(n):
+        if n in MOUSE or n in SYMBOLS or n in ARROW_KEYS: return TILE
+        label = WORDS.get(n, n if not n.startswith("Num") else "Num " + n[3:])
+        return TILE if len(label) <= 2 else (44 if len(label) == 3 else 56)
+    rows = 1
+    x = 0
+    for n in names:
+        if x + width(n) > SHEET_W: rows += 1; x = 0
+        x += width(n)
+    p = Pen(scale, font, SHEET_W, rows * TILE)
+    index = []
+    x = y = 0
+    grey = (124, 126, 124, 255)
+    for n in names:
+        w = width(n)
+        if x + w > SHEET_W: x = 0; y += TILE
+        index.append((n, x * scale, y * scale, w * scale, TILE * scale))
+        cx, cy = x + w / 2, y + TILE / 2
+        if n in MOUSE:
+            draw_mouse(p, x, y, n)
+        elif n == "Star":
+            pts = []
+            for i in range(11):
+                ang = -math.pi / 2 + i * math.pi / 5
+                rr = 13.5 if i % 2 == 0 else 13.5 * 0.42
+                pts.append((cx + rr * math.cos(ang), cy + 1 + rr * math.sin(ang)))
+            p.line(pts, grey, 1.8)
+        elif n in ("Registered", "Copyright"):
+            p.ring(cx, cy, 13.5, grey, 2.2)
+            p.text(cx, cy, n[0], 19, grey)
+        else:
+            label = WORDS.get(n, n if not n.startswith("Num") else "Num " + n[3:])
+            c = p.keycap(x + 1.5, y + 1.5, x + w - 1.5, y + TILE - 1.5, "arrow" if n in ARROW_KEYS else label,
+                         19 if len(label) <= 2 else 16)
+            if c:
+                dx, dy = ARROW_KEYS[n]
+                p.arrow(c[0], c[1], dx, dy, 6.0, WHITE + (255,))
+        x += w
+    return finish(p.im, (SHEET_W * scale, rows * TILE * scale)), index
+
+
 def finish(im, size):
     """Down to the atlas's size with the alpha weighted in, then the colour of
     each glyph's edge spread into the transparent texels beside it, so that a
@@ -314,17 +416,23 @@ def finish(im, size):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("sets", nargs="*", metavar="SET", help="default: all of " + " ".join(sorted(SETS)))
+    ap.add_argument("sets", nargs="*", metavar="SET", help="default: all of " + " ".join(sorted(SETS)) + " keys")
     ap.add_argument("--font", required=True, help="a bold sans-serif TrueType font")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "res", "prompts"))
     ap.add_argument("--scale", type=int, default=4, help="times the game's 256x128 (default 4)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    for name in a.sets or sorted(SETS):
-        if name not in SETS:
-            ap.error("no set named " + name)
+    for name in a.sets or sorted(SETS) + ["keys"]:
         path = os.path.join(a.out, name + ".png")
-        draw(name, a.scale, a.font).save(path, optimize=True)
+        if name == "keys":
+            im, index = draw_keys(a.scale, a.font)
+            info = PngImagePlugin.PngInfo()
+            info.add_text("tiles", "".join("%s %d %d %d %d\n" % t for t in index))
+            im.save(path, optimize=True, pnginfo=info)
+        elif name in SETS:
+            draw(name, a.scale, a.font).save(path, optimize=True)
+        else:
+            ap.error("no set named " + name)
         print("wrote", os.path.normpath(path))
 
 

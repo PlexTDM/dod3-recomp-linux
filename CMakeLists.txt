@@ -313,6 +313,9 @@ set_property(SOURCE ${IMGUI_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "-w")
 # SPU_SOURCES, with the lifted SPU code's options).
 set(PORT_CPU_SOURCES                 # the lifted code's glue
     src/cpu/hot.cpp)
+set(PORT_INPUT_SOURCES               # the camera's stick; the keyboard and mouse as the pad
+    src/input/camera.cpp
+    src/input/kbm.cpp)
 set(PORT_KERNEL_SOURCES              # the port's own HLE
     src/kernel/hle.cpp
     src/kernel/spurs_lfqueue.cpp
@@ -333,6 +336,7 @@ set(PORT_SOURCES
     src/util.cpp
     src/install/iso.cpp              # the disc reader, which the game uses too
     ${PORT_CPU_SOURCES}
+    ${PORT_INPUT_SOURCES}
     ${PORT_KERNEL_SOURCES}
     ${PORT_PATCH_SOURCES}
     ${PORT_UI_SOURCES}
@@ -415,12 +419,17 @@ file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/app_version.h" CONTENT
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/gen")
 
 # The button-prompt atlases (src/res/prompts, drawn by tools/prompt_atlas.py)
-# as arrays in gen/prompts_data.h, for src/patches/prompts.cpp. The keyboard's
-# is the one for this platform's keys.
+# as arrays in gen/prompts_data.h, for src/patches/prompts.cpp: the pads',
+# the sheet of key caps the keyboard's is made from, and on macOS the fixed
+# one of the built-in keys.
 set(_prompt_h "/* Generated from src/res/prompts by CMakeLists.txt. */\n")
-foreach(_set ps4 ps5 xbox switch keyboard)
+set(_prompt_sets ps4 ps5 xbox switch keys)
+if(APPLE)
+    list(APPEND _prompt_sets keyboard)
+endif()
+foreach(_set IN LISTS _prompt_sets)
     set(_png "${CMAKE_CURRENT_SOURCE_DIR}/src/res/prompts/${_set}.png")
-    if(APPLE AND _set STREQUAL "keyboard")
+    if(_set STREQUAL "keyboard")
         set(_png "${CMAKE_CURRENT_SOURCE_DIR}/src/res/prompts/keyboard_mac.png")
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_png}")

@@ -135,6 +135,13 @@ two lines per SPURS job at 2,700 jobs a second).
 - `DOD3_FOCUS_FILE=<path>`: "out of focus" is the existence of that file, for
   testing `DOD3_UNFOCUSED`.
 - `DOD3_LOG_FILE=1` writes `dod3.log` even with a console.
+- `DOD3_CAM_LOG=1`: a line a frame with the view's rotation, the camera
+  stick's value, the mouse's share and the frame time (the script reports
+  the view through the settings bridge). `DOD3_CAM_TEST_FILE=<path>` adds
+  the two numbers in the file to the camera stick's values, read 50 times
+  a second: how the camera's response was measured
+  (`src/input/camera.cpp`). `DOD3_KBM_LOG=1`: a line whenever what the keys
+  and mouse buttons hold as a pad changes.
 - `DOD3_PROMPTS_CYCLE=<seconds>`: step through every set of button prompts
   (`src/patches/prompts.cpp`), to look at the atlases on any screen that
   shows buttons. `python tools/ue3 info <package> 99999` lists a package's

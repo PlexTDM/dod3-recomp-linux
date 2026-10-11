@@ -93,7 +93,7 @@ anti-aliasing (FXAA, or MSAA 2x/4x/8x), texture filtering and field of
 view. Settings > System Settings sets whether the logos and opening movie
 are skipped, what the game does while its window is in the background
 (keep running, mute, or pause), which controller's buttons the game shows,
-and the renderer. Settings > Advanced
+the mouse's sensitivity, and the renderer. Settings > Advanced
 Graphics sets the engine's own shadow quality, motion blur and
 post-processing. Confirm with X to save them; everything but the renderer,
 Skip Intro and Shadow Quality changes at once (a second of black while the
@@ -122,6 +122,9 @@ folder above). It explains each setting:
 | DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
 | DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
 | DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
+| DOD3_MOUSE_SENS | Windows: how far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
+| KEY_CROSS, KEY_MOVE_UP, ... | Windows: the keys for each pad button and stick direction (the file lists them all) |
+| DOD3_CAMERA_SPEED | original gives the camera stick the game's own speed, which falls as the frame rate rises; unset keeps it at the console's |
 | RSX_BACKEND | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12 |
 
 
@@ -134,17 +137,53 @@ bottom face button is Cross whatever the pad prints on it.
 
 The game shows the buttons of the controller you hold: A and B on an Xbox
 pad, B and A on a Switch one, the DualShock 4's or the DualSense's own, the
-keys when you play on the keyboard. It changes when you plug another pad in;
+keys when you play on the keyboard. It changes when you plug another pad in
+or pick up the other of pad and keyboard;
 Settings > System Settings > Button Prompts fixes it to one (PlayStation 3
 is the game's original art). A few places still name the PlayStation 3
 pad whatever you choose: "Press the START Button" on the title screen,
 "Press START to Skip" in cutscenes, the Circle on the dragon's icon, and
 the picture on the controller settings page.
 
-Without a controller the keyboard stands in: arrows move, Z/X/A/S are
-Cross/Circle/Square/Triangle, Q/W L1/R1, 1/2 L2/R2, Enter Start, Tab
-Select (on macOS the arrows are the left stick, TFGH the d-pad and IJKL
-the right stick).
+The camera stick turns the camera at the speed it has on the console
+whatever the frame rate. The game itself slows it as the frame rate rises
+(a quarter of the speed at 120 frames a second); DOD3_CAMERA_SPEED =
+original in dod3.ini gives that back. The game's own Controller Settings
+(camera sensitivity, inverted axes, the chase camera) work as before.
+
+### Keyboard and mouse (Windows)
+
+The mouse turns the camera and the keys are the pad's buttons, with or
+without a controller plugged in: use either at any moment, and the prompts
+on screen follow the one you touched last.
+
+| Key | Button | In play |
+|---|---|---|
+| W A S D | Left stick | Move |
+| Mouse | Right stick | Camera |
+| Left mouse button | Square | Attack |
+| Right mouse button | Triangle | Strong attack |
+| Space | Cross | Jump; confirm in menus |
+| E, Backspace | Circle | Guard; back in menus |
+| Shift | R1 | Evade |
+| Q, middle mouse button | L1 | Lock on |
+| Mouse wheel | Right stick left and right | Switch target |
+| R, F | L2, R2 | Weapon menus |
+| V | L3 and R3 together | Intoner Mode (C and X press one each) |
+| Arrow keys, 1 2 3 4 | D-pad | Menus; items |
+| Esc, Enter | Start | Pause |
+| Tab | Select | The select menu |
+
+Every key can be changed in dod3.ini, which lists them, and the prompts
+show the keys you chose. Settings > System Settings > Mouse Sensitivity
+sets how far the mouse turns the camera; the game's own camera settings
+apply to the mouse as they do to the stick. Escape pauses, so it no longer
+closes the game: Alt+F4 does.
+
+On macOS the keyboard is still a fixed set with no mouse: the arrows are
+the left stick, T F G H the D-pad, I J K L the right stick, Z X A S
+Cross, Circle, Square and Triangle, Q W L1 and R1, 1 2 L2 and R2, Return
+Start, Tab Select.
 
 
 ## Japanese voices

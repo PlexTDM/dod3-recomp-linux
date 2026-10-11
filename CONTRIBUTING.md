@@ -24,7 +24,8 @@ path (`#include "install/pkg.h"`).
 | Folder | What is in it |
 |---|---|
 | `src/main.cpp`, `src/util.*` | the runner (boot, the frame clock, the settings file) and the helpers every module shares |
-| `src/cpu/` | the lifted code's glue: the guest memory base and tail-call trampoline (`ppu.h`), every address the port knows per EBOOT version (`eboot.h`), the timing wrappers and cycle counter, the SPU fast-path check mode |
+| `src/cpu/` | the lifted code's glue: the guest memory base and tail-call trampoline (`ppu.h`), every address the port knows per EBOOT version (`eboot.h`), the timing wrappers and cycle counter, the SPU fast-path check mode, what a replaced script native needs of the UnrealScript VM (`uscript.h`) |
+| `src/input/` | the camera stick on its way to the game (its speed at any frame rate, the mouse as the camera) and the keyboard and mouse as the pad |
 | `src/kernel/` | the port's own HLE: its handler registration, the SPURS queue and LFQueue paths on Sony's lifted code, the installed DLC |
 | `src/patches/` | the game's own code done natively: the garbage collector and its reachability pass, the Edge zlib inflate, ShaderPatching's LZF loops (`spu_hooks.c`), the settings-menu patch and the engine's graphics switches; and the button prompts in other pads' glyphs (`prompts.cpp`) |
 | `src/apu/` | audio: MultiStream's MP3 decoder and DSP biquads, natively |

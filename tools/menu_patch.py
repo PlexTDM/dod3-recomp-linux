@@ -27,11 +27,20 @@ Bridge: 0 begin (pending = current), 1 change(row, dir), 2 is-default(row),
 7 open(root entry: 3 + page, or 3 + PAGES = Restore Defaults = every page),
 8 the open page's row count, 9 the camera's field of view, 10 is the
 Graphics page on screen? (in play the pause screen's dimming and frost are
-left out while it is, so what a setting changes can be seen behind it).
+left out while it is, so what a setting changes can be seen behind it),
+11 the frame's fDelta (and: is the pawn the dragon?), 12 is the mouse
+turning the camera?, 13 the camera
+stick's value (axis, the title's own) -> the one to use, 14 the view's
+rotation.
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
 use -- the Field of View setting, applied to the gameplay camera only.
+
+Also: Sqex03GamePlayerController's camera stick -- GetCameraMoveX,
+GetCameraMoveY, CheckCameraMoveKey -- goes through the port on its way to
+the pawn (bridge 11 to 13: the stick scaled for the frame rate, the mouse
+added), and UpdateViewTarget reports the view's rotation (bridge 14).
 
 Also: the title's boot chain (Sqex03GameHUDTitle's pages Install,
 VersionCheck, Rogo -- the company, middleware and UE3 logos -- Moive -- the
@@ -48,7 +57,7 @@ MAGIC = 900000
 MAX_ROWS = 7     # the layout's
 PAGES = 3        # our root entries: Graphics, System, Advanced Graphics
 CMD_BEGIN, CMD_CHANGE, CMD_ISDEF, CMD_RESET, CMD_APPLY, CMD_CHANGED, CMD_SKIPINTRO, CMD_OPEN, CMD_ROWS, CMD_FOV, \
-    CMD_GRAPHICS_SHOWN = range(11)
+    CMD_GRAPHICS_SHOWN, CMD_CAM_DT, CMD_CAM_ACTIVE, CMD_CAM_AXIS, CMD_CAM_VIEW = range(15)
 
 GAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'game', 'disc')
 ROOT = os.path.join(GAME, 'PS3_GAME', 'USRDIR', 'SQEX03GAME')
@@ -241,6 +250,50 @@ def main():
     call = bridge(CMD_FOV, clone(fov), clone(third))
     subst(call, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
     st.insert(i + 1, pk.let(clone(fov), call))
+    # ... and the view's rotation (a Rotator: the port reads Pitch and Yaw),
+    # which the mouse's vertical gain goes by and DOD3_CAM_LOG prints.
+    rot = st[pk.find(st, 'self.m_rMatineeInterpRotation = out OutVT.POV.Rotation')].parts[1][1]
+    view = bridge(CMD_CAM_VIEW, clone(rot), clone(third))
+    subst(view, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
+    st.insert(i + 2, view)
+    new[f] = st
+
+    # ---- the camera's stick: through the port ----
+    # Sqex03GamePlayerController.SendOrder hands the pawn's native code the
+    # camera stick as GetCameraMoveX() and GetCameraMoveY() (floats, the
+    # right stick's GetAxis unless the sticks are swapped), with
+    # CheckCameraMoveKey() saying whether it is off its centre. The port
+    # gets each value on its way (src/input/camera.cpp): it scales the
+    # stick's for the frame rate -- the native code turns the view by
+    # value x fDelta squared -- and adds the mouse's motion. So it is told
+    # the frame's fDelta first, where SendOrder asks CheckCameraMoveKey, and
+    # whether the pawn is the dragon (whose camera has not been measured:
+    # its stick is left as it is).
+    PC = 'Sqex03GamePlayerController'
+    f = pk.func(PC, 'GetCameraMoveX'); st = pk.parse(f)
+    lock = pk.find(st, 'if !(OrOr_BoolBool(self.m_xGamePawn.GetAnimSequence().self.m_bLockCamX, self.m_xGamePawn.self.m_xGameInfo.self.m_bToggleCamMove)) goto 0x0077')
+    gi_pc = findnode(st[lock], 'self.m_xGamePawn.self.m_xGameInfo')
+    def pc_bridge(cmd, a=None, b=None):
+        c = bridge(cmd, a, b)
+        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_pc))
+        return c
+    for fn, axis, texts in (('GetCameraMoveX', 0, ('return self.m_xGameInput.GetAxis(b0)', 'return self.m_xGameInput.GetAxis(b2)')),
+                            ('GetCameraMoveY', 1, ('return self.m_xGameInput.GetAxis(b1)', 'return self.m_xGameInput.GetAxis(b3)'))):
+        f = pk.func(PC, fn); st = pk.parse(f)
+        for t in texts:
+            r = st[pk.find(st, t)]
+            r.parts[0] = ('e', pc_bridge(CMD_CAM_AXIS, pk.int_(axis), r.parts[0][1]))
+        new[f] = st
+    f = pk.func(PC, 'CheckCameraMoveKey'); st = pk.parse(f)
+    for i in pk.find(st, 'return false', 2):
+        st[i].parts[0] = ('e', pk.native('NotEqual_IntInt', pc_bridge(CMD_CAM_ACTIVE), pk.int_(0)))
+    new[f] = st
+    f = pk.func(PC, 'SendOrder'); st = pk.parse(f)
+    i = pk.find(st, 'if !(CheckCameraMoveKey()) goto 0x06d7')
+    dragon = st[pk.find(st, 'if !(self.m_xGamePawn.IsPlayerDragon()) goto 0x0d2c')].parts[1][1]
+    dt = pc_bridge(CMD_CAM_DT, pk.local(f, 'fDelta'), clone(dragon))
+    dt.mem = st[i].mem        # the jumps to the test land on this, before it
+    st.insert(i, dt)
     new[f] = st
 
     if show:

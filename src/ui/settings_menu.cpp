@@ -28,11 +28,13 @@
  *     8 the page's rows
  *     9 the camera's FOV   10 is the Graphics page on screen? (in play,
  *     the pause screen's dimming and frost are then left out)
+ *     11 to 14: the camera's stick and the view's rotation, for
+ *     src/input/camera.cpp
  *
  * Both natives' exec thunks are replaced in the function registry the
  * script VM calls them through. A thunk evaluates its own arguments from the
  * caller's FFrame (Object at +0x14, Code at +0x18) by running the native
- * for each opcode out of GNatives -- step() below does the same.
+ * for each opcode out of GNatives -- src/cpu/uscript.h does the same.
  *
  * The values are the dod3.ini keys (RSX_SCALE, RSX_DISPLAY, DOD3_FPS,
  * RSX_VSYNC, RSX_AA, RSX_ANISO, DOD3_FOV; RSX_BACKEND, DOD3_SKIP_INTRO,
@@ -51,6 +53,8 @@
  * zooms keep their proportion. Cutscene cameras are left alone. */
 #include "cpu/ppu.h"
 #include "cpu/eboot.h"       /* the EBOOT version's addresses */
+#include "cpu/uscript.h"     /* the script VM, for the two thunks */
+#include "input/camera.h"    /* bridge 11 to 14: the camera's stick and the mouse */
 #include "patches/prompts.h"     /* DOD3_PROMPTS: the button prompts' glyphs */
 #include "patches/sysset.h"      /* the Advanced Graphics page's rows */
 #include "util.h"
@@ -62,7 +66,6 @@
 #include <string>
 #include <vector>
 
-extern "C" void ps3_indirect_call(ppu_context* ctx);
 extern "C" void ppu_register_function(uint64_t addr, void (*fn)(ppu_context*));
 const char* dod3_settings_path();   /* main.cpp: the dod3.ini read at boot, or the one to create */
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
@@ -76,45 +79,12 @@ extern "C" int g_rsx_aa;            /* rsx_draw_engine.c: 1 = FXAA at present */
 namespace {
 
 /* the EBOOT's (src/cpu/eboot.h) */
-const uint32_t GNATIVES = DOD3_A_GNATIVES;        /* 8 bytes an opcode: function, this-adjust */
 const uint32_t THUNK_GETSTRING = DOD3_A_EXEC_GETSTRING;  /* USqex03DataMessage::execGetString */
 const uint32_t THUNK_BRIDGE = DOD3_A_EXEC_BRIDGE;     /* USqex03GameOption::execUpdateDisplayParam */
-const uint32_t FRAME_OBJECT = 0x14, FRAME_CODE = 0x18;
+const uint32_t FRAME_CODE = uscript::kFrameCode;
+using uscript::eval_int;
 
 const int MAGIC = 900000;
-
-/* One FFrame::Step: the native for the opcode at Code, with the result
- * written to `result` (guest). */
-void step(ppu_context* ctx, uint32_t stack, uint32_t result)
-{
-    const uint32_t obj = vm_read32(stack + FRAME_OBJECT);
-    const uint32_t code = vm_read32(stack + FRAME_CODE);
-    const uint32_t op = vm_read8(code);
-    vm_write32(stack + FRAME_CODE, code + 1);
-    uint32_t fn = vm_read32(GNATIVES + op * 8);
-    const uint32_t self = obj + vm_read32(GNATIVES + op * 8 + 4);
-    if (fn & 1) fn = vm_read32(vm_read32(self) + fn - 1);   /* virtual: the vtable slot */
-    ctx->gpr[2] = vm_read32(fn + 4);
-    ctx->gpr[3] = self;
-    ctx->gpr[4] = stack;
-    ctx->gpr[5] = result;
-    ctx->ctr = vm_read32(fn);
-    ps3_indirect_call(ctx);
-    dod3_drain(ctx);
-}
-
-/* Evaluate one int argument, in a frame of our own below the caller's. */
-int32_t eval_int(ppu_context* ctx, uint32_t stack)
-{
-    const uint64_t sp = ctx->gpr[1];
-    const uint32_t nsp = ((uint32_t)sp - 0x90u) & ~0xFu;
-    vm_write64(nsp, sp);
-    vm_write32(nsp + 0x80, 0);
-    ctx->gpr[1] = nsp;
-    step(ctx, stack, nsp + 0x80);
-    ctx->gpr[1] = sp;
-    return (int32_t)vm_read32(nsp + 0x80);
-}
 
 uint32_t app_realloc(ppu_context* ctx, uint32_t p, uint32_t size)
 {
@@ -314,6 +284,25 @@ void init_rows()
                        true });
     s_rows.back().page = 1;
     s_rows.back().apply_fn = [](const char*) { dod3_prompts_poll(true); };
+#ifdef _WIN32   /* where the mouse is the camera (src/input/kbm.cpp) */
+    s_rows.push_back({ "DOD3_MOUSE_SENS",
+                       "Mouse Sensitivity",
+                       "How far the mouse turns the camera.",
+                       { { "0.25", "1" },
+                         { "0.4", "2" },
+                         { "0.55", "3" },
+                         { "0.75", "4" },
+                         { NULL, "5" },
+                         { "1.3", "6" },
+                         { "1.7", "7" },
+                         { "2.2", "8" },
+                         { "3", "9" },
+                         { "4", "10" } },
+                       4,
+                       true });
+    s_rows.back().page = 1;
+    s_rows.back().apply_fn = [](const char*) { dod3_camera_reload(); };
+#endif
 #ifdef _WIN32
     s_rows.push_back({ "RSX_BACKEND",
                        "Renderer",
@@ -365,7 +354,7 @@ bool menu_text(int i, std::string& out)
     else if (k == 2)
         out = "System Settings";
     else if (k == 3)
-        out = "Adjust the start-up, focus, button prompt and renderer options.";
+        out = "Adjust the start-up, focus, prompt, mouse and renderer options.";
     else if (k == 4)
         out = "Advanced Graphics";
     else if (k == 5)
@@ -486,7 +475,7 @@ std::chrono::steady_clock::time_point s_page_drawn;   /* the page's last is-defa
 
 int bridge(int cmd, int a, int b)
 {
-    init_rows();
+    if (cmd < 11) init_rows();
     switch (cmd) {
     case 0: /* begin: edit the saved values */ each([](Row& r) { r.pending = r.saved; }); return 0;
     case 1: { /* change row a by b */
@@ -530,6 +519,22 @@ int bridge(int cmd, int a, int b)
                    ? 1
                    : 0;
     case 8: /* the open page's rows */ return (int)s_page_rows[s_page > 0 ? s_page : 0].size();
+    /* the camera's stick on its way to the pawn (src/input/camera.cpp) */
+    case 11: { /* the frame's fDelta (float bits); b: the pawn is the dragon */
+        float dt;
+        memcpy(&dt, &a, 4);
+        dod3_camera_frame(dt, b);
+        return 0;
+    }
+    case 12: /* is the mouse turning the camera? */ return dod3_camera_active();
+    case 13: { /* the stick's value on axis a (float bits) -> the one to use */
+        float v;
+        memcpy(&v, &b, 4);
+        v = dod3_camera_axis(a, v);
+        int r;
+        memcpy(&r, &v, 4);
+        return r;
+    }
     case 9: { /* the camera's field of view (float bits); b: the gameplay camera's */
         float fov;
         memcpy(&fov, &a, 4);
@@ -591,12 +596,29 @@ void hook_bridge(ppu_context* ctx)
         ctx->lr = lr;
         return;
     }
-    int args[3] = { 0, 0, 0 };
-    for (int k = 0; k < 3 && vm_read8(vm_read32(stack + FRAME_CODE)) != 0x16; k++) args[k] = eval_int(ctx, stack);
+    int args[3] = { 0, 0, 0 }, rot_yaw = 0;
+    for (int k = 0; k < 3 && vm_read8(vm_read32(stack + FRAME_CODE)) != 0x16; k++) {
+        if (k == 1 && args[0] == 14) {   /* a Rotator -- Pitch, Yaw, Roll: the first two */
+            const uint64_t sp = ctx->gpr[1];
+            const uint32_t nsp = ((uint32_t)sp - 0xA0u) & ~0xFu;
+            vm_write64(nsp, sp);
+            ctx->gpr[1] = nsp;
+            uscript::step(ctx, stack, nsp + 0x80);
+            ctx->gpr[1] = sp;
+            args[1] = (int)vm_read32(nsp + 0x80);
+            rot_yaw = (int)vm_read32(nsp + 0x84);
+            continue;
+        }
+        args[k] = eval_int(ctx, stack);
+    }
     while (vm_read8(vm_read32(stack + FRAME_CODE)) != 0x16)   /* extra arguments: evaluate, drop */
         eval_int(ctx, stack);
     vm_write32(stack + FRAME_CODE, vm_read32(stack + FRAME_CODE) + 1);
-    const int v = bridge(args[0], args[1], args[2]);
+    int v = 0;
+    if (args[0] == 14)
+        dod3_camera_view(args[1], rot_yaw, args[2]);   /* the view's rotation; is it the gameplay camera's */
+    else
+        v = bridge(args[0], args[1], args[2]);
     if (result) vm_write32(result, (uint32_t)v);
     ctx->gpr[2] = r2;
     ctx->lr = lr;

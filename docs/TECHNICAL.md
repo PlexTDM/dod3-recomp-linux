@@ -140,6 +140,35 @@ Button" and "Press START to Skip" (textures of their own), the Circle
 drawn into the dragon's call icon, the pad pictured on the controller
 settings page, and the handful of messages that name a control in words.
 
+## Keyboard, mouse and the camera
+
+The pad library takes port 0's state from the port as well as from a real
+pad (`cellPad_set_host_input`): `src/input/kbm.cpp` turns the keys and
+mouse buttons held into buttons and stick directions by a table of
+bindings read from `dod3.ini`. The two are merged, and whichever was
+touched last decides the button prompts; the keyboard's prompt atlas is
+made at start-up from a sheet of key caps, so it shows the keys bound.
+
+The mouse is not a stick. The script hands the pawn's native code the
+camera stick as two floats (`GetCameraMoveX`, `GetCameraMoveY`); the
+settings patch routes them, and the frame's time, through the port
+(`src/input/camera.cpp`). Measured frame by frame with constant values in
+their place, the native code turns the view by 3440 x value x dt squared
+degrees, with no dead zone, limit or easing. So the mouse's motion since
+the last frame, a turn in degrees, divided by that is the value that makes
+exactly the turn: the view follows the hand to within a percent. The
+pitch's constant falls away towards the ends of its range and is read off
+the view's own pitch, which the script reports each frame. The window's
+side is raw input and a hidden, confined cursor while the game has the
+focus (`ps3recomp/libs/video/rsx_host_mouse.c`).
+
+The same measurement showed the stick's turn speed to be proportional to
+the frame time: right at the 30 frames a second the game was made for, a
+quarter of that at 120. The stick's value is scaled by (1/30)/dt above 30
+frames a second, so the camera turns as on the console at any rate
+(`DOD3_CAMERA_SPEED=original` for the game's own). The dragon's camera has
+not been measured and its stick is left alone.
+
 ## The 1.01 update
 
 The port runs the game's 1.01 update, as a PS3 with the update would. The
