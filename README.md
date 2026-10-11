@@ -9,7 +9,7 @@ into a normal executable, with the PS3's system libraries replaced by native
 implementations and the RSX graphics by Direct3D 12, Metal or Vulkan. There
 is no emulation at run time.
 
-![The chapter 1 battle, running natively on Windows](docs/images/battle.jpg)
+![The start of the game, running natively on Windows](docs/images/opening.jpg)
 
 **Nothing of the game is in this repository.** You need your own copy of
 Drakengard 3: the US disc and the game's 1.01 update, plus whatever DLC you
