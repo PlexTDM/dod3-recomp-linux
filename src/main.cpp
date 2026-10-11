@@ -444,6 +444,68 @@ static void apply_fps_unlock(void)
         fprintf(stderr, "[fps] frame rate uncapped (smoothing off, vblank %u Hz)\n", s_vblank_mult * s_fps_target);
 }
 
+/* The rendering thread's idle tick. With no render commands to run -- a
+ * movie playing, a loading screen up while the game thread loads -- Unreal's
+ * rendering thread ticks its tickables (the Bink player, the loading screen)
+ * itself, at most GRenderingThreadMaxIdleTickFrequency times a second: 40 in
+ * this title. A 29.97 fps movie's frames, each shown at the first tick after
+ * it is due, therefore came out on a 25 ms grid: 25, 25, 50 ms, over and
+ * over (measured: 1% of them within 3 ms of 33.4). The console's flip waited
+ * for a 60 Hz vblank on top of that; here a frame is shown as it is made, so
+ * the grid was the pacing.
+ *
+ * While a movie plays (the renderer sees its planes uploaded) the tick runs
+ * at 1000 Hz: the player only decodes and shows a frame when one is due, so
+ * nothing more is drawn, and the frames come 33.4 ms apart within a
+ * millisecond or two (96% within 3 ms). The thread's load is the same 35% of
+ * a core: its idle loop spins either way. Otherwise a tick draws a frame of
+ * the loading screen, so the tick is the frame-rate cap (DOD3_FPS; 120 when
+ * uncapped, the title's 40 with its own 30 fps scheme).
+ * DOD3_RENDER_TICK_HZ=<hz> fixes it at one value; 40 is the title's own. */
+extern "C" volatile unsigned g_rsx_video_plane_uploads;   /* rsx_draw_engine.c */
+static void render_tick_poll(uint64_t now)
+{
+    static uint64_t next, last_video;
+    static unsigned seen;
+    static float fixed = -1.0f, current = 40.0f;
+    static bool ok = true;
+    if (now < next || !ok) return;
+    next = now + 50000;
+    if (fixed < 0.0f) {
+        const char* e = getenv("DOD3_RENDER_TICK_HZ");
+        fixed = e && *e ? (float)atof(e) : 0.0f;
+        if (fixed != 0.0f && !(fixed >= 10.0f && fixed <= 2000.0f)) fixed = 0.0f;
+    }
+    const unsigned v = g_rsx_video_plane_uploads;
+    if (v != seen) {
+        seen = v;
+        last_video = now;
+    }
+    const bool movie = last_video && now - last_video < 500000;
+    float hz = fixed;
+    if (hz == 0.0f) {
+        if (movie)
+            hz = 1000.0f;
+        else if (s_fps_lock < 0)
+            hz = 40.0f;                                   /* the title's own scheme */
+        else
+            hz = s_fps_lock == 0 ? 120.0f : (float)(s_fps_lock < 40 ? 40 : s_fps_lock);
+    }
+    if (hz == current) return;
+    const uint32_t addr = DOD3_A_RENDER_IDLE_TICK_HZ;
+    uint32_t was, bits;
+    memcpy(&was, &current, 4);
+    if (vm_read32(addr) != was) {   /* 40.0f at first: anything else is another build */
+        fprintf(stderr, "[movie] the rendering thread's idle tick is not where it should be (0x%08X holds 0x%08X)\n",
+                addr, vm_read32(addr));
+        ok = false;
+        return;
+    }
+    memcpy(&bits, &hz, 4);
+    vm_write32(addr, bits);
+    current = hz;
+}
+
 /* src/ui/settings_menu.cpp, after it sets DOD3_FPS. */
 void dod3_fps_reload() { apply_fps_unlock(); }
 
@@ -1135,6 +1197,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         fps_install_override();
         dod3_sysset_poll();
         dod3_prompts_poll();
+        render_tick_poll(now);
         if (s_fps_gen.load() != vblank_gen) {
             vblank_gen = s_fps_gen.load();
             vblank_us = vblank_period();

@@ -56,6 +56,7 @@
 /* data */
 #define DOD3_A_FPS_NUMERATOR        0x008EDBCCu /* 1.0f in the frame limiter */
 #define DOD3_A_GENGINE              0x01999164u
+#define DOD3_A_RENDER_IDLE_TICK_HZ  0x01991234u /* GRenderingThreadMaxIdleTickFrequency (40.0f) */
 #define DOD3_A_SHA_TABLE_LO         0x019AD000u
 #define DOD3_A_SHA_TABLE_HI         0x019AD480u
 #define DOD3_A_GNATIVES             0x019BF2F0u
@@ -97,6 +98,7 @@
 #define DOD3_GC_CODE_SHIFT             0u
 #define DOD3_A_FPS_NUMERATOR           0x008EDC5Cu
 #define DOD3_A_GENGINE                 0x01999164u
+#define DOD3_A_RENDER_IDLE_TICK_HZ     0x01991234u /* as 1.01's: the data is laid out alike (checked by its value) */
 #define DOD3_A_SHA_TABLE_LO            0x019AD000u
 #define DOD3_A_SHA_TABLE_HI            0x019AD480u
 #define DOD3_A_GNATIVES                0x019BF370u
