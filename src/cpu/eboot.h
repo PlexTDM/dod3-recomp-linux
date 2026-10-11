@@ -36,6 +36,7 @@
 #define DOD3_FN_COLLISION_TEST         func_00272E58 /* src/cpu/hot.cpp */
 #define DOD3_FN_COLLISION_TEST_LIFTED  func_00272E58_lifted
 #define DOD3_FN_GET_MAX_TICK_RATE      func_00424380 /* UGameEngine::GetMaxTickRate, the title's own */
+#define DOD3_FN_PROCESS_ASYNC_LOADING  func_0005E59C /* UObject::ProcessAsyncLoading (src/patches/load_idle.cpp) */
 #define DOD3_FN_APP_REALLOC            func_0001028C
 #define DOD3_FN_EXEC_GETSTRING         func_0145E274 /* USqex03DataMessage::execGetString */
 #define DOD3_FN_EXEC_BRIDGE            func_013F43A0 /* USqex03GameOption::execUpdateDisplayParam */
@@ -56,6 +57,7 @@
 /* data */
 #define DOD3_A_FPS_NUMERATOR        0x008EDBCCu /* 1.0f in the frame limiter */
 #define DOD3_A_GENGINE              0x01999164u
+#define DOD3_A_GOBJ_ASYNC_PACKAGES  0x01A0C2A0u /* GObjAsyncPackages, a TArray: data, num, max (src/patches/load_idle.cpp) */
 #define DOD3_A_RENDER_IDLE_TICK_HZ  0x01991234u /* GRenderingThreadMaxIdleTickFrequency (40.0f) */
 #define DOD3_A_SHA_TABLE_LO         0x019AD000u
 #define DOD3_A_SHA_TABLE_HI         0x019AD480u

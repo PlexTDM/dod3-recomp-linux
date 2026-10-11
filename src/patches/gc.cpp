@@ -189,10 +189,9 @@ static int gc_defer(void)
     return on;
 }
 
-static void gc_usleep_pre(ppu_context* ctx, uint64_t* usec)
+/* The deferred purge, if one waits, in the limiter's sleep. */
+static void gc_in_limiter(ppu_context* ctx, uint64_t* usec)
 {
-    if ((uint32_t)ctx->lr != LIMITER_SLEEP_RET) return;
-    s_limiter_frame = g_rsx_engine_frame;
     if (!s_def_world) return;
     const uint32_t world = s_def_world;
     s_def_world = 0;
@@ -220,11 +219,22 @@ static void gc_usleep_pre(ppu_context* ctx, uint64_t* usec)
     *usec = spent >= *usec ? 0 : *usec - spent;
 }
 
+/* The limiter's sleep, and what the port does in it: the deferred purge, then
+ * the async loader (src/patches/load_idle.cpp). */
+void dod3_load_in_limiter(ppu_context* ctx, uint64_t* usec);
+static void limiter_usleep_pre(ppu_context* ctx, uint64_t* usec)
+{
+    if ((uint32_t)ctx->lr != LIMITER_SLEEP_RET) return;
+    s_limiter_frame = g_rsx_engine_frame;
+    gc_in_limiter(ctx, usec);
+    dod3_load_in_limiter(ctx, usec);
+}
+
 void DOD3_FN_COLLECT_GARBAGE(ppu_context* ctx)
 {
     const uint32_t caller = (uint32_t)ctx->lr;
+    g_lv2_usleep_pre = limiter_usleep_pre;               /* from the first collection (boot) on */
     if (gc_defer() && !s_in_deferred) {
-        g_lv2_usleep_pre = gc_usleep_pre;                /* from the first collection (boot) on */
         /* Only while the limiter is sleeping (a frame cap, frames within it):
          * uncapped, or over budget, there is no sleep to put it in. */
         const bool limiting = g_rsx_engine_frame - s_limiter_frame <= 2u;
