@@ -38,8 +38,9 @@ ap.add_argument("func", help="function name, e.g. func_00272E58 (its _lifted bod
 ap.add_argument("--name", required=True, help="the native function's name")
 ap.add_argument("--lifter", default="ps3recomp/tools/ppu_lifter.py", help="where the FP helpers are copied from")
 ap.add_argument("--inline-zero", metavar="CALLEE", default="",
-                help="a callee that stores r4 to the four words at r3 and returns (the title's 16-byte fill): "
-                     "its call, with the register-file round trip a lifted call costs, becomes the four stores")
+                help="a callee that zeroes r4, stores it to the four words at r3 and returns (the title's "
+                     "16-byte clear): its call, with the register-file round trip a lifted call costs, becomes "
+                     "that assignment and the four stores")
 ap.add_argument("-o", "--out", required=True)
 a = ap.parse_args()
 
@@ -68,8 +69,13 @@ out = []
 for l in body:
     if not l: continue
     if a.inline_zero and f"{a.inline_zero}(ctx);" in l:
-        out.append("st32(r3 + 0x0, (uint32_t)r4); st32(r3 + 0x4, (uint32_t)r4); st32(r3 + 0x8, (uint32_t)r4); "
-                   f"st32(r3 + 0xC, (uint32_t)r4);   /* {a.inline_zero}, inlined: four words of r4 at r3 */")
+        # The callee's whole body, its `li r4, 0` included: the caller's r4 is whatever it last held (0x1F0
+        # in the collision test), and r4 is 0 after the call. Without the assignment the 16 bytes were that
+        # value four times -- denormals as floats, which a thread with denormals-are-zero set computes with
+        # as zero, so the outputs matched on x86 and 0.8% of calls differed on arm64.
+        out.append("r4 = (int64_t)(int32_t)(0); st32(r3 + 0x0, (uint32_t)r4); st32(r3 + 0x4, (uint32_t)r4); "
+                   "st32(r3 + 0x8, (uint32_t)r4); "
+                   f"st32(r3 + 0xC, (uint32_t)r4);   /* {a.inline_zero}, inlined: r4 = 0, four words of it at r3 */")
         inlined += 1
         continue
     for m in re.finditer(r"\b(func_[0-9A-Fa-f]+)\(ctx\)", l):

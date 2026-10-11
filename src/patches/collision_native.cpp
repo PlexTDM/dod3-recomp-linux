@@ -145,7 +145,7 @@ void dod3_collision_native(ppu_context* ctx)
     r28 = r6 | 0x0;
     { uint64_t _a = r1; uint64_t _r = _a + (uint64_t)(int64_t)(0x70); r3 = _r; xer = (xer & ~(1u << 29)) | ((_r < _a) ? (1u << 29) : 0u); }
     r20 = r5 | 0x0;
-    st32(r3 + 0x0, (uint32_t)r4); st32(r3 + 0x4, (uint32_t)r4); st32(r3 + 0x8, (uint32_t)r4); st32(r3 + 0xC, (uint32_t)r4);   /* func_00252A70, inlined: four words of r4 at r3 */
+    r4 = (int64_t)(int32_t)(0); st32(r3 + 0x0, (uint32_t)r4); st32(r3 + 0x4, (uint32_t)r4); st32(r3 + 0x8, (uint32_t)r4); st32(r3 + 0xC, (uint32_t)r4);   /* func_00252A70, inlined: r4 = 0, four words of it at r3 */
     f0 = ldf(r24 + 0x0);
     f29 = ldf(r24 + 0x4);
     f9 = ldf(r25 + 0x0);
