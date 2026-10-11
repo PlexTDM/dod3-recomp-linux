@@ -219,6 +219,5 @@ folder.
 
 ## Known issues
 
-- Pre-rendered movies play with uneven frame pacing.
 - Tested on few machines so far (Windows: i9-13900K with an RTX 4090;
   macOS: M1 Pro). Reports from other hardware are welcome.

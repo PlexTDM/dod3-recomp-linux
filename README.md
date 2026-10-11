@@ -162,8 +162,7 @@ field of view, skipping the intro logos and movie, and pausing or muting when
 the window is in the background -- all from a Graphics Settings and a System
 Settings page added to the game's own Settings menu.
 
-Known issues: pre-rendered movies play with uneven frame pacing, and the game
-has been tested on few machines.
+Known issues: the game has been tested on few machines.
 
 ## How it fits together
 
