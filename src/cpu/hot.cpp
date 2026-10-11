@@ -12,7 +12,12 @@
  * DOD3_COLLISION_NATIVE=1 (default) the native one, 0 the lifted one, check
  * runs the lifted one and then the native one on the same input and compares
  * the nine words they write and r3 (the first differences are printed, then
- * a count every 100,000 calls).
+ * a count every 100,000 calls). A call that differs is run through the
+ * lifted one once more: the second run starts from the memory the first left
+ * (its frame, and whatever another thread wrote meanwhile), not from the
+ * call's own, so where the lifted code then gives the native answer the
+ * difference is the rerun's and not the native code's. The count says how
+ * many were of each kind.
  *
  * DOD3_HOT_LOG=1 prints, every 5 s, the calls per second and the cycles per
  * call, so a code-generation change can be measured on the function it
@@ -89,7 +94,7 @@ void hot_report(void)
  * native run and compared, with r3, the result. */
 void collision_check(ppu_context* ctx)
 {
-    static uint64_t calls = 0, bad = 0, shown = 0;
+    static uint64_t calls = 0, bad = 0, rerun = 0, shown = 0;
     const uint64_t sp = ctx->gpr[1];
     const uint32_t out_a = vm_read32(sp + 0x84), out_b = vm_read32(sp + 0x7C);
     ppu_context saved;
@@ -112,10 +117,27 @@ void collision_check(ppu_context* ctx)
     const bool differ = memcmp(la, na, sizeof la) || memcmp(lb, nb, sizeof lb) || lr3 != ctx->gpr[3];
     if (differ) {
         bad++;
+        /* The lifted one again, from where the native one started (see the head
+         * of the file); then the native run's registers and words are put back. */
+        ppu_context native;
+        memcpy(&native, ctx, sizeof native);
+        memcpy(ctx, &saved, sizeof saved);
+        DOD3_FN_COLLISION_TEST_LIFTED(ctx);
+        dod3_drain(ctx);
+        uint32_t ra[6], rb[3];
+        for (int i = 0; i < 6; i++) ra[i] = vm_read32(out_a + 4u * i);
+        for (int i = 0; i < 3; i++) rb[i] = vm_read32(out_b + 4u * i);
+        const uint64_t rr3 = ctx->gpr[3];
+        const bool again = !memcmp(ra, na, sizeof ra) && !memcmp(rb, nb, sizeof rb) && rr3 == native.gpr[3];
+        if (again) rerun++;
+        memcpy(ctx, &native, sizeof native);
+        for (int i = 0; i < 6; i++) vm_write32(out_a + 4u * i, na[i]);
+        for (int i = 0; i < 3; i++) vm_write32(out_b + 4u * i, nb[i]);
         if (shown < 8) {
             shown++;
-            fprintf(stderr, "[collision-check] call %llu differs: r3 %llu/%llu;", (unsigned long long)calls,
-                    (unsigned long long)lr3, (unsigned long long)ctx->gpr[3]);
+            fprintf(stderr, "[collision-check] call %llu differs%s: r3 %llu/%llu;", (unsigned long long)calls,
+                    again ? " (not when the lifted one is run again)" : "", (unsigned long long)lr3,
+                    (unsigned long long)ctx->gpr[3]);
             for (int i = 0; i < 6; i++)
                 if (la[i] != na[i]) fprintf(stderr, " a[%d] %08X/%08X", i, la[i], na[i]);
             for (int i = 0; i < 3; i++)
@@ -136,8 +158,8 @@ void collision_check(ppu_context* ctx)
         }
     }
     if (calls % 100000 == 0)
-        fprintf(stderr, "[collision-check] %llu calls, %llu differ\n", (unsigned long long)calls,
-                (unsigned long long)bad);
+        fprintf(stderr, "[collision-check] %llu calls, %llu differ, %llu of them not when the lifted one is run again\n",
+                (unsigned long long)calls, (unsigned long long)bad, (unsigned long long)rerun);
 }
 }  // namespace
 

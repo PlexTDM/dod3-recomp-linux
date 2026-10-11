@@ -97,7 +97,7 @@ relative to the read index.
 | Switch | |
 |---|---|
 | `DOD3_GC_NATIVE=0 / 1 / check` | the lifted reachability pass, the native one (default), or both compared |
-| `DOD3_COLLISION_NATIVE=0 / 1 / check` | the lifted collision test, the native one (default; `src/patches/collision_native.cpp`, generated from the lifted body by `tools/lift_native.py`), or both on every call with the nine words they write and the result compared (the first differences printed, a count every 100,000 calls) |
+| `DOD3_COLLISION_NATIVE=0 / 1 / check` | the lifted collision test, the native one (default; `src/patches/collision_native.cpp`, generated from the lifted body by `tools/lift_native.py`), or both on every call with the nine words they write and the result compared (the first differences printed, a count every 100,000 calls; a call that differs is run through the lifted one again, and the count says how many differences that second run does not show, which are the rerun's and not the native code's) |
 | `DOD3_GC_PAR=<n>` | worker threads for the collector's mark phase (8; 0 serial); `DOD3_GC_DEFER=0` collects where the game asks instead of in the limiter's sleep; `DOD3_GC_PREFETCH=0` |
 | `DOD3_SPU_NATIVE=0` | the SPU hooks off; `DOD3_SPU_NATIVE_CHECK=1` runs each hooked stretch twice and compares every register and the local store |
 | `DOD3_SPU_PATCH_HOOK=0`, `DOD3_LZF_MEMO=0` (`DOD3_LZF_MEMO_LOG=1`), `DOD3_MSDSP_NATIVE=0` | one path at a time |
