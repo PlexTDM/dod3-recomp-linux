@@ -115,6 +115,31 @@ the script already had (`GetString`, `UpdateDisplayParam`), whose exec
 thunks `src/ui/settings_menu.cpp` replaces; it owns the rows, the values
 and the `dod3.ini` writer.
 
+## Button prompts
+
+Every button the game draws, in its text, its menus' help bar and its HUD,
+is a sprite of one layout (`HUD_COMMON.menu.icon_button`, 28 rectangles)
+over one 256x128 atlas of DualShock 3 buttons
+(`HUD_COMMON.Texture.icon_button`); the text reaches it through a control
+code in the message tables. The cooker put the same atlas in seven
+packages, so its content hash names it wherever it was loaded from.
+
+The draw engine asks the port about each texture it uploads
+(`rsx_draw_engine_set_texture_standin`), and for that atlas
+`src/patches/prompts.cpp` answers with another: the same rectangles drawn
+for a DualShock 4, a DualSense, an Xbox pad, a Switch pad or the keyboard
+(`tools/prompt_atlas.py`, at four times the size). The rectangles reach the
+GPU as normalised coordinates, so the larger atlas is only sharper; it is
+handed over at the internal resolution's scale, because the game samples it
+without mip levels. Which set is shown follows player 1's pad as SDL names
+it, or `DOD3_PROMPTS`; a change asks the engine to put its question again,
+and only the atlas is uploaded anew.
+
+Not covered, and still the DualShock 3's: the words "Press the START
+Button" and "Press START to Skip" (textures of their own), the Circle
+drawn into the dragon's call icon, the pad pictured on the controller
+settings page, and the handful of messages that name a control in words.
+
 ## The 1.01 update
 
 The port runs the game's 1.01 update, as a PS3 with the update would. The

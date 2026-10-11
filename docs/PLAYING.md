@@ -92,7 +92,8 @@ Audio Settings) sets the resolution, display mode, frame rate, v-sync,
 anti-aliasing (FXAA, or MSAA 2x/4x/8x), texture filtering and field of
 view. Settings > System Settings sets whether the logos and opening movie
 are skipped, what the game does while its window is in the background
-(keep running, mute, or pause), and the renderer. Settings > Advanced
+(keep running, mute, or pause), which controller's buttons the game shows,
+and the renderer. Settings > Advanced
 Graphics sets the engine's own shadow quality, motion blur and
 post-processing. Confirm with X to save them; everything but the renderer,
 Skip Intro and Shadow Quality changes at once (a second of black while the
@@ -120,6 +121,7 @@ folder above). It explains each setting:
 | DOD3_POSTFX | 0 turns off depth of field, bloom and the colour grading |
 | DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
 | DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
+| DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
 | RSX_BACKEND | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12 |
 
 
@@ -129,6 +131,15 @@ Xbox, PlayStation (DualShock 4, DualSense) and Switch Pro controllers,
 wired or over Bluetooth, plugged in before or during the game; the first
 one connected is player 1. The buttons follow their positions, so the
 bottom face button is Cross whatever the pad prints on it.
+
+The game shows the buttons of the controller you hold: A and B on an Xbox
+pad, B and A on a Switch one, the DualShock 4's or the DualSense's own, the
+keys when you play on the keyboard. It changes when you plug another pad in;
+Settings > System Settings > Button Prompts fixes it to one (PlayStation 3
+is the game's original art). A few places still name the PlayStation 3
+pad whatever you choose: "Press the START Button" on the title screen,
+"Press START to Skip" in cutscenes, the Circle on the dragon's icon, and
+the picture on the controller settings page.
 
 Without a controller the keyboard stands in: arrows move, Z/X/A/S are
 Cross/Circle/Square/Triangle, Q/W L1/R1, 1/2 L2/R2, Enter Start, Tab

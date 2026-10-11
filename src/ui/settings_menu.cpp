@@ -51,6 +51,7 @@
  * zooms keep their proportion. Cutscene cameras are left alone. */
 #include "cpu/ppu.h"
 #include "cpu/eboot.h"       /* the EBOOT version's addresses */
+#include "patches/prompts.h"     /* DOD3_PROMPTS: the button prompts' glyphs */
 #include "patches/sysset.h"      /* the Advanced Graphics page's rows */
 #include "util.h"
 #include <stdio.h>
@@ -299,6 +300,20 @@ void init_rows()
                        0,
                        true });
     s_rows.back().page = 1;
+    s_rows.push_back({ "DOD3_PROMPTS",
+                       "Button Prompts",
+                       "The buttons the game shows. Auto follows the pad you hold.",
+                       { { NULL, "Auto" },
+                         { "ps3", "PlayStation 3" },
+                         { "ps4", "PlayStation 4" },
+                         { "ps5", "PlayStation 5" },
+                         { "xbox", "Xbox" },
+                         { "switch", "Nintendo Switch" },
+                         { "keyboard", "Keyboard" } },
+                       0,
+                       true });
+    s_rows.back().page = 1;
+    s_rows.back().apply_fn = [](const char*) { dod3_prompts_poll(true); };
 #ifdef _WIN32
     s_rows.push_back({ "RSX_BACKEND",
                        "Renderer",
@@ -350,7 +365,7 @@ bool menu_text(int i, std::string& out)
     else if (k == 2)
         out = "System Settings";
     else if (k == 3)
-        out = "Adjust the start-up, the background behaviour and the renderer.";
+        out = "Adjust the start-up, focus, button prompt and renderer options.";
     else if (k == 4)
         out = "Advanced Graphics";
     else if (k == 5)

@@ -42,6 +42,7 @@
 #include "ppu_recomp.h"                  /* the lifter's: ppu_context and the function table */
 #include "cpu/eboot.h"              /* the EBOOT version's addresses */
 #include "apu/mp3_standin.h"        /* our flashMP3.pic (tools/make_spu_overlays.py standin) */
+#include "patches/prompts.h"            /* the button prompts in the pad's own glyphs */
 #include "patches/sysset.h"             /* the engine's graphics switches */
 #include "util.h"
 #include "app_version.h"              /* generated: the port's version label */
@@ -1132,6 +1133,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         uint64_t now = dod3_now_us();
         fps_install_override();
         dod3_sysset_poll();
+        dod3_prompts_poll();
         if (s_fps_gen.load() != vblank_gen) {
             vblank_gen = s_fps_gen.load();
             vblank_us = vblank_period();
@@ -1812,6 +1814,7 @@ int main(int argc, char** argv)
 
     ppu_recomp_register();   /* lifted function table -> address map */
     dod3_settings_menu_install();   /* the Graphics Settings page's two natives */
+    dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
     ppu_hle_init();          /* firmware import NID -> HLE handlers */
     ppu_sysprx_register();   /* boot-critical CRT */

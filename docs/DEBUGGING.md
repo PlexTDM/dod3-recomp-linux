@@ -135,3 +135,8 @@ two lines per SPURS job at 2,700 jobs a second).
 - `DOD3_FOCUS_FILE=<path>`: "out of focus" is the existence of that file, for
   testing `DOD3_UNFOCUSED`.
 - `DOD3_LOG_FILE=1` writes `dod3.log` even with a console.
+- `DOD3_PROMPTS_CYCLE=<seconds>`: step through every set of button prompts
+  (`src/patches/prompts.cpp`), to look at the atlases on any screen that
+  shows buttons. `python tools/ue3 info <package> 99999` lists a package's
+  exports, its textures and menu layouts among them, when one more needs
+  finding.

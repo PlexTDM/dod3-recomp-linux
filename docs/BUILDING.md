@@ -180,4 +180,5 @@ Both refuse to package anything of the game's.
 | `src/apu/mp3dec_tables.h` | `python tools/gen_mp3_tables.py <minimp3.h> > src/apu/mp3dec_tables.h` |
 | `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
 | `src/res/app.ico` | `python tools/make_icon.py src/res/app.ico` |
+| `src/res/prompts/*.png` | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases; the build embeds them as `gen/prompts_data.h`) |
 | `src/patches/collision_native.cpp` | `python tools/lift_native.py recompiled_101/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp` after a re-lift (the lifted body it translates may have moved to another unit: `grep -l func_00272E58_lifted recompiled_101/*.cpp`) |
