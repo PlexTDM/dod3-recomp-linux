@@ -122,7 +122,7 @@ folder above). It explains each setting:
 | DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
 | DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
 | DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
-| DOD3_MOUSE_SENS | Windows: how far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
+| DOD3_MOUSE_SENS | How far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
 | KEY_CROSS, KEY_MOVE_UP, ... | Windows: the keys for each pad button and stick direction (the file lists them all) |
 | DOD3_CAMERA_SPEED | original gives the camera stick the game's own speed, which falls as the frame rate rises; unset keeps it at the console's |
 | RSX_BACKEND | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12 |
@@ -151,7 +151,7 @@ whatever the frame rate. The game itself slows it as the frame rate rises
 original in dod3.ini gives that back. The game's own Controller Settings
 (camera sensitivity, inverted axes, the chase camera) work as before.
 
-### Keyboard and mouse (Windows)
+### Keyboard and mouse
 
 The mouse turns the camera and the keys are the pad's buttons, with or
 without a controller plugged in: use either at any moment, and the prompts
@@ -178,12 +178,12 @@ Every key can be changed in dod3.ini, which lists them, and the prompts
 show the keys you chose. Settings > System Settings > Mouse Sensitivity
 sets how far the mouse turns the camera; the game's own camera settings
 apply to the mouse as they do to the stick. Escape pauses, so it no longer
-closes the game: Alt+F4 does.
+closes the game: Alt+F4 does, or Cmd+Q on a Mac.
 
-On macOS the keyboard is still a fixed set with no mouse: the arrows are
-the left stick, T F G H the D-pad, I J K L the right stick, Z X A S
-Cross, Circle, Square and Triangle, Q W L1 and R1, 1 2 L2 and R2, Return
-Start, Tab Select.
+While the game is in front the cursor is hidden and the mouse is the
+game's; switch to another application (Alt+Tab, Cmd+Tab on a Mac) and it
+is yours again. On a Mac the keys are places on the keyboard, the same on
+every layout; Alt is the Option key, and CapsLock cannot be used.
 
 
 ## Japanese voices

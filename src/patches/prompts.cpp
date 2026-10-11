@@ -23,8 +23,8 @@
  * button is laid into its rectangles from a sheet of key caps
  * (src/res/prompts/keys.png, each tile named in the PNG's "tiles" text) --
  * the four keys of a stick or of the D-pad in a plus, the mouse for the
- * camera. Where the port has no bindings of its own (macOS for now) it is
- * the fixed atlas of the toolkit's built-in keys.
+ * camera. With the port's keyboard off (DOD3_KEYBOARD=0) there are no
+ * bindings to draw, and the game's own art stays.
  *
  *   DOD3_PROMPTS   unset: by player 1's pad (the keyboard's keys with none,
  *                  or when the keyboard was touched last)
@@ -78,11 +78,7 @@ const struct {
     { "ps5", "PlayStation 5", kPromptPng_ps5, sizeof kPromptPng_ps5 },
     { "xbox", "Xbox", kPromptPng_xbox, sizeof kPromptPng_xbox },
     { "switch", "Nintendo Switch", kPromptPng_switch, sizeof kPromptPng_switch },
-#ifdef __APPLE__
-    { "keyboard", "keyboard", kPromptPng_keyboard, sizeof kPromptPng_keyboard },   /* the built-in keys' */
-#else
     { "keyboard", "keyboard", nullptr, 0 },   /* made from the bindings: compose_keyboard */
-#endif
 };
 
 std::atomic<int> s_set{ kOriginal };   /* the set shown */
@@ -410,11 +406,7 @@ int wanted_set()
     case PAD_XBOX:
     case PAD_OTHER: return kXbox;   /* what a pad of no known family is laid out as */
     default:   /* nothing plugged in, or the keyboard touched last: the keys */
-#ifdef __APPLE__
-        return kKeyboard;
-#else
         return dod3_kbm_present() ? kKeyboard : kOriginal;
-#endif
     }
 }
 

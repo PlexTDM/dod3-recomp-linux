@@ -142,6 +142,12 @@ two lines per SPURS job at 2,700 jobs a second).
   a second: how the camera's response was measured
   (`src/input/camera.cpp`). `DOD3_KBM_LOG=1`: a line whenever what the keys
   and mouse buttons hold as a pad changes.
+- `PS3RECOMP_METAL_EVENT_FILE=<path>` (macOS): keys, modifiers, mouse
+  motion, buttons and the wheel from a file, for a run with no one at the
+  keyboard. When the file appears its lines (`key <keycode> <1|0>`,
+  `flags <modifier flags>`, `move <dx> <dy>`, `button <n> <1|0>`,
+  `wheel <notches>`) are sent to the window as events, through the same
+  code as the real ones, and the file is removed.
 - `DOD3_PROMPTS_CYCLE=<seconds>`: step through every set of button prompts
   (`src/patches/prompts.cpp`), to look at the atlases on any screen that
   shows buttons. `python tools/ue3 info <package> 99999` lists a package's

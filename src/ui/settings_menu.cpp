@@ -284,7 +284,6 @@ void init_rows()
                        true });
     s_rows.back().page = 1;
     s_rows.back().apply_fn = [](const char*) { dod3_prompts_poll(true); };
-#ifdef _WIN32   /* where the mouse is the camera (src/input/kbm.cpp) */
     s_rows.push_back({ "DOD3_MOUSE_SENS",
                        "Mouse Sensitivity",
                        "How far the mouse turns the camera.",
@@ -302,7 +301,6 @@ void init_rows()
                        true });
     s_rows.back().page = 1;
     s_rows.back().apply_fn = [](const char*) { dod3_camera_reload(); };
-#endif
 #ifdef _WIN32
     s_rows.push_back({ "RSX_BACKEND",
                        "Renderer",

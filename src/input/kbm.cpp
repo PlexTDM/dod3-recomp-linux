@@ -28,8 +28,18 @@
  * (left) Mouse2 (right) Mouse3 (middle) Mouse4 Mouse5, WheelUp WheelDown.
  *
  * V presses both sticks in (Intoner Mode); Escape is Start, so the window no
- * longer closes on it (Alt+F4 does). With a pad plugged in as well, either
- * can be used at any moment: the prompts follow the one touched last.
+ * longer closes on it (Alt+F4 does; Cmd+Q on macOS). With a pad plugged in
+ * as well, either can be used at any moment: the prompts follow the one
+ * touched last.
+ *
+ * Where the keys' state comes from is the one part that differs by platform
+ * (a table of names and key_held, below). Windows asks the system for a
+ * virtual key. macOS has the Metal window's own record of the key and mouse
+ * button events it was sent (ps3recomp/libs/video/rsx_metal_backend.m), by
+ * virtual keycode -- a place on the keyboard, whatever the layout prints on
+ * it -- so a key is only ever held while the game is in front; Alt is the
+ * Option key, and CapsLock cannot be bound (it reports its lock, not the
+ * key).
  *
  *   DOD3_KEYBOARD=0   the toolkit's built-in keys instead (no mouse)
  *   DOD3_KBM_LOG=1    a line whenever what the keys hold changes
@@ -45,11 +55,17 @@
 #include "rsx_host_mouse.h"
 #include "util.h"
 
+#if defined(_WIN32) || defined(__APPLE__)
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <strings.h>
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+#endif
 
 extern "C" {
 /* ps3recomp/libs/input/cellPad.h */
@@ -60,11 +76,84 @@ typedef struct CellPadHostInput {
 } CellPadHostInput;
 typedef int (*cellPad_host_input_fn)(void* user, int focused, CellPadHostInput* out);
 void cellPad_set_host_input(cellPad_host_input_fn fn, void* user);
+#ifdef __APPLE__
+/* ps3recomp/libs/video/rsx_metal_backend.h */
+int rsx_metal_backend_key_down(unsigned keycode);
+int rsx_metal_backend_mouse_button_down(unsigned button);
+#endif
 }
 
 namespace {
 
 const int kWheelUp = -1, kWheelDown = -2;   /* not keys: notches, each a short press */
+
+#ifdef __APPLE__
+/* A key is its macOS virtual keycode (kVK_* in HIToolbox/Events.h). Above
+ * those: the names that mean either of two keys, the mouse's buttons, and
+ * the one key that cannot be read. */
+const int kEitherShift = 0x100, kEitherCtrl = 0x101, kEitherAlt = 0x102, kEitherEnter = 0x103;
+const int kMouseButton = 0x200;   /* + 0 left, 1 right, 2 middle, 3, 4 */
+const int kNoSuchKey = 0x300;
+
+const struct {
+    const char* name;
+    int vk;
+} kKeys[] = {
+    { "Space", 0x31 },         { "Enter", kEitherEnter },   { "Tab", 0x30 },
+    { "Esc", 0x35 },           { "Backspace", 0x33 },       { "Shift", kEitherShift },
+    { "Ctrl", kEitherCtrl },   { "Alt", kEitherAlt },       { "LShift", 0x38 },
+    { "RShift", 0x3C },        { "LCtrl", 0x3B },           { "RCtrl", 0x3E },
+    { "LAlt", 0x3A },          { "RAlt", 0x3D },            { "Up", 0x7E },
+    { "Down", 0x7D },          { "Left", 0x7B },            { "Right", 0x7C },
+    { "Insert", 0x72 },        { "Delete", 0x75 },          { "Home", 0x73 },
+    { "End", 0x77 },           { "PageUp", 0x74 },          { "PageDown", 0x79 },
+    { "CapsLock", kNoSuchKey }, { "Minus", 0x1B },          { "Equals", 0x18 },
+    { "LBracket", 0x21 },      { "RBracket", 0x1E },        { "Semicolon", 0x29 },
+    { "Quote", 0x27 },         { "Comma", 0x2B },           { "Period", 0x2F },
+    { "Slash", 0x2C },         { "Backslash", 0x2A },       { "Grave", 0x32 },
+    { "Mouse1", kMouseButton + 0 }, { "Mouse2", kMouseButton + 1 }, { "Mouse3", kMouseButton + 2 },
+    { "Mouse4", kMouseButton + 3 }, { "Mouse5", kMouseButton + 4 }, { "WheelUp", kWheelUp },
+    { "WheelDown", kWheelDown },
+};
+
+/* 'A'-'Z' and '0'-'9': the ANSI layout's places. */
+int letter_key(char c)
+{
+    static const uint8_t az[26] = { 0x00, 0x0B, 0x08, 0x02, 0x0E, 0x03, 0x05, 0x04, 0x22, 0x26, 0x28, 0x25, 0x2E,
+                                    0x2D, 0x1F, 0x23, 0x0C, 0x0F, 0x01, 0x11, 0x20, 0x09, 0x0D, 0x07, 0x10, 0x06 };
+    static const uint8_t digit[10] = { 0x1D, 0x12, 0x13, 0x14, 0x15, 0x17, 0x16, 0x1A, 0x1C, 0x19 };
+    return c >= 'A' ? az[c - 'A'] : digit[c - '0'];
+}
+int function_key(int n)   /* 1-12 */
+{
+    static const uint8_t f[12] = { 0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F };
+    return f[n - 1];
+}
+int numpad_key(int n)   /* 0-9 */
+{
+    static const uint8_t num[10] = { 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C };
+    return num[n];
+}
+bool key_held(int k)
+{
+    const auto key = [](unsigned kc) { return rsx_metal_backend_key_down(kc) != 0; };
+    switch (k) {
+    case kEitherShift: return key(0x38) || key(0x3C);
+    case kEitherCtrl: return key(0x3B) || key(0x3E);
+    case kEitherAlt: return key(0x3A) || key(0x3D);
+    case kEitherEnter: return key(0x24) || key(0x4C);   /* Return, and the keypad's Enter */
+    case kNoSuchKey: return false;
+    }
+    if (k >= kMouseButton) return rsx_metal_backend_mouse_button_down((unsigned)(k - kMouseButton)) != 0;
+    return key((unsigned)k);
+}
+#else
+/* A key is its Windows virtual-key code. */
+const int kNoSuchKey = -3;   /* every key here can be read */
+int letter_key(char c) { return c; }   /* 'A'-'Z' and '0'-'9' are their own codes */
+int function_key(int n) { return VK_F1 + n - 1; }
+int numpad_key(int n) { return VK_NUMPAD0 + n; }
+bool key_held(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
 const struct {
     const char* name;
@@ -86,6 +175,7 @@ const struct {
     { "Mouse4", VK_XBUTTON1 },   { "Mouse5", VK_XBUTTON2 }, { "WheelUp", kWheelUp },
     { "WheelDown", kWheelDown },
 };
+#endif
 
 const struct {
     const char* key;        /* dod3.ini */
@@ -131,23 +221,23 @@ bool lookup(const std::string& word, Key& out)
     if (word.size() == 1) {
         const char c = word[0];
         if (c >= 'a' && c <= 'z') {
-            out = { std::string(1, (char)(c - 32)), c - 32 };
+            out = { std::string(1, (char)(c - 32)), letter_key((char)(c - 32)) };
             return true;
         }
         if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-            out = { word, c };
+            out = { word, letter_key(c) };
             return true;
         }
     }
     if ((word[0] == 'F' || word[0] == 'f') && word.size() <= 3) {
         const int n = atoi(word.c_str() + 1);
         if (n >= 1 && n <= 12) {
-            out = { "F" + std::to_string(n), VK_F1 + n - 1 };
+            out = { "F" + std::to_string(n), function_key(n) };
             return true;
         }
     }
     if (word.size() == 4 && !_strnicmp(word.c_str(), "Num", 3) && word[3] >= '0' && word[3] <= '9') {
-        out = { std::string("Num") + word[3], VK_NUMPAD0 + word[3] - '0' };
+        out = { std::string("Num") + word[3], numpad_key(word[3] - '0') };
         return true;
     }
     for (const auto& k : kKeys)
@@ -171,6 +261,8 @@ void parse(int b, const char* list)
             Key k;
             if (!_stricmp(word.c_str(), "none")) {
                 /* no key */
+            } else if (lookup(word, k) && k.vk == kNoSuchKey) {
+                fprintf(stderr, "[keyboard] %s: %s cannot be bound on this system\n", kBind[b].key, k.name.c_str());
             } else if (lookup(word, k)) {
                 s_keys[b].push_back(k);
             } else {
@@ -189,7 +281,7 @@ bool down(int b, uint64_t now)
             if (now < s_wheel_until[0]) return true;
         } else if (k.vk == kWheelDown) {
             if (now < s_wheel_until[1]) return true;
-        } else if (GetAsyncKeyState(k.vk) & 0x8000)
+        } else if (key_held(k.vk))
             return true;
     }
     return false;

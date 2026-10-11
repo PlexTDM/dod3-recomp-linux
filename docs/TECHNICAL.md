@@ -160,7 +160,11 @@ exactly the turn: the view follows the hand to within a percent. The
 pitch's constant falls away towards the ends of its range and is read off
 the view's own pitch, which the script reports each frame. The window's
 side is raw input and a hidden, confined cursor while the game has the
-focus (`ps3recomp/libs/video/rsx_host_mouse.c`).
+focus (`ps3recomp/libs/video/rsx_host_mouse.c`). On macOS the Metal
+backend does it for its own window (`rsx_metal_backend.m`): the cursor is
+hidden and detached from the mouse, whose events still carry the motion,
+and the keys and mouse buttons the bindings read are that window's record
+of the events it was sent, so nothing is held unless the game is in front.
 
 The same measurement showed the stick's turn speed to be proportional to
 the frame time: right at the 30 frames a second the game was made for, a

@@ -70,15 +70,6 @@ SETS = {
     "switch": dict(face={"cross": ("B", WHITE), "circle": ("A", WHITE), "square": ("Y", WHITE), "triangle": ("X", WHITE)},
                    l1="L", l2="ZL", r1="R", r2="ZR", start=("plus", None), select=("minus", None),
                    ls="L", rs="R", l3="LS", r3="RS"),
-    # The keyboard that stands in for a pad on macOS, a fixed set of keys
-    # (ps3recomp/libs/input/cellPad.c): Z X A S, Q W, 1 2, Return, Tab; the
-    # arrows are the left stick, T F G H the D-pad, I J K L the right stick.
-    # (Windows has bindings of its own: the key sheet below.)
-    "keyboard_mac": dict(face={"cross": ("Z", WHITE), "circle": ("X", WHITE), "square": ("A", WHITE), "triangle": ("S", WHITE)},
-                         l1="Q", l2="1", r1="W", r2="2", start=("key", "Return"), select=("key", "Tab"),
-                         ls="L", rs="R", l3="L3", r3="R3",
-                         keys=dict(dpad={"u": "T", "d": "G", "l": "F", "r": "H"}, ls=ARROWS,
-                                   rs={"u": "I", "d": "K", "l": "J", "r": "L"})),
 }
 
 RIM = (150, 154, 160, 255)

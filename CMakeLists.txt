@@ -420,18 +420,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/gen")
 
 # The button-prompt atlases (src/res/prompts, drawn by tools/prompt_atlas.py)
 # as arrays in gen/prompts_data.h, for src/patches/prompts.cpp: the pads',
-# the sheet of key caps the keyboard's is made from, and on macOS the fixed
-# one of the built-in keys.
+# and the sheet of key caps the keyboard's is made from.
 set(_prompt_h "/* Generated from src/res/prompts by CMakeLists.txt. */\n")
 set(_prompt_sets ps4 ps5 xbox switch keys)
-if(APPLE)
-    list(APPEND _prompt_sets keyboard)
-endif()
 foreach(_set IN LISTS _prompt_sets)
     set(_png "${CMAKE_CURRENT_SOURCE_DIR}/src/res/prompts/${_set}.png")
-    if(_set STREQUAL "keyboard")
-        set(_png "${CMAKE_CURRENT_SOURCE_DIR}/src/res/prompts/keyboard_mac.png")
-    endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_png}")
     file(READ "${_png}" _hex HEX)
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
