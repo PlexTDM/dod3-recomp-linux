@@ -31,6 +31,23 @@ fork.
   function registry so it returns n (the game's own smoothing, a 300-frame
   running average clamped to 22-30 fps, is bypassed) and runs the vblank at
   8n Hz so a late frame is late by a millisecond, not a vblank.
+- **Movies.** With no render commands to run, Unreal's rendering thread
+  ticks the Bink player itself, at most `GRenderingThreadMaxIdleTickFrequency`
+  times a second: 40 in this title. A 29.97 fps movie's frames, each shown
+  at the first tick after it is due, came out 25, 25 and 50 ms apart. While
+  a movie plays (the renderer counts the uploads of its planes) the port
+  sets that rate to 1000 and the frames come 33.4 ms apart; the rest of the
+  time it is the frame-rate cap. `DOD3_RENDER_TICK_HZ=<hz>` holds it at one
+  value (40 is the title's).
+- **Loading screens.** A chapter's packages come in through Unreal's async
+  loader, which runs once a frame, for 5 ms at most, and gives the frame up
+  whenever the read it needs next has not come back; the rest of the frame
+  the game thread sleeps in the limiter. So a loading screen lasted a number
+  of frames, not an amount of work: 265 for the first chapter's, which is
+  4.5 s at 60 fps and 9 s at the console's 30. While no scene is drawn and
+  packages are pending, the port spends the limiter's sleep in the loader
+  (`src/patches/load_idle.cpp`): that screen takes 2.7 s, and the frame rate
+  is what it was. `DOD3_LOAD_IDLE=0` turns it off.
 - **Out of focus.** `DOD3_UNFOCUSED=pause` stops the frame clock, holds the
   audio mixer and freezes the guest clocks (`mftb`, the system time, the SPU
   decrementer, RSX timestamps: ps3recomp's `sys_timer.c`), so the game never
@@ -91,6 +108,14 @@ SPIR-V). What this game needed from the engine:
   present passes (`rsx_present_passes.h`).
 - **Live changes**: the settings page asks the engine to re-read the display
   settings; a new scale remakes every target under the same handle.
+- **Memory by the block**, for a level's first frame, which brings some 500
+  textures and 25 MB of vertices at once. A texture is placed in a 64 MB
+  heap and a vertex-cache buffer is a range of a 32 MB mapped page (D3D12;
+  the Vulkan engine sub-allocates its device memory), where each used to be
+  an allocation in the driver; and what a submit stages is a chain of 16 MB
+  chunks, where it used to be one arena grown by copying it out of
+  write-combined memory. That frame went from 0.84 s to 0.2 s, the
+  renderer's share of it from 0.68 s to 0.07 s.
 
 The replay tool (`rsx_replay`) replays captured command streams
 (`RSX_CAPTURE`) headlessly through the engine: the rendering regression.

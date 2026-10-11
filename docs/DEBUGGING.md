@@ -45,7 +45,9 @@ executable when it has no console; the previous run is `dod3.prev.log`.
 - `RSX_FRAMETIME=0` turns off the `[frametime]` line every 5 s (fps, mean and
   worst frame, frames over 34 ms).
 - `RSX_HITCH_LOG=<ms>` lists frames over that, with the walker's GPU-blocked
-  time; with `DOD3_PROF` also the sampled stacks of the frame;
+  time and what it uploaded in the frame (textures: creating, decoding and
+  staging them; vertex buffers; pipelines); with `DOD3_PROF` also the
+  sampled stacks of the frame;
   `DOD3_TRACE_HITCH=1` adds the events of the frame before it (guest sleeps,
   drains, label writes, flips, ring recycles) as `[trace]` lines.
 - `DOD3_FRAME_CPU=<ms>` (Windows): for each frame longer than that, the
@@ -57,7 +59,8 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   counts; `=2` the costliest passes. `RSX_DRAW_STATS=1`, `RSX_SNAP_STATS=1`
   (snapshots), `RSX_SYNC_STATS=1` (the walker's GPU waits), `RSX_PIPE_LOG=1`
   (pipelines built), `RSX_SURF_DUMP_DIR=<dir>` (every surface).
-- `D3D12_DBG=1` the Direct3D debug layer; `RSX_VK_VALIDATION=1` the Vulkan
+- `D3D12_DBG=1` the Direct3D debug layer, its errors and warnings on stderr
+  (the first three of each kind); `RSX_VK_VALIDATION=1` the Vulkan
   validation layer.
 
 ## Profiling
@@ -75,7 +78,8 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   `DOD3_STALL_SAMPLE=<dir>` or the log. On macOS the same switch runs
   `sample`; `tools/stack_summary.py` condenses its output.
 - `PPU_WAITPROF=1`: time in syscalls by thread and guest call site, every
-  5 s, with the fence poll's statistics.
+  5 s, with the fence poll's statistics; `=2` adds the most frequent calls
+  (who sends or signals how often: which thread answers a wait).
 - `DOD3_HOT_LOG=1`: calls per second and cycles per call of the hooked hot
   functions (the collision test).
 - `DOD3_GC_LOG=1` times every garbage collection over 1 ms (`=2` adds the
@@ -112,7 +116,12 @@ Each turns a change back off, to bisect a regression: `PPU_SLOW_STORES=1`
 `LWM_KERNEL=1` (kernel lwmutex), `PS3_LWCOND_SLEEP=1`, `GCM_POS_FLIP=0`,
 `RSX_TEX_WATCH=0` (hash textures every frame), `RSX_VCACHE=0` /
 `RSX_VCACHE_CHECK=1` / `RSX_VC_WATCH_CHECK=1`, `RSX_BUF_POOL=0`,
-`RSX_SNAP_INCR=0` (full snapshot copies), `SPU_TASK_POOL=0` (a thread per
+`RSX_TEX_HEAPS=0` (a committed resource per texture), `RSX_VB_PAGES=0` (a
+buffer per cached mesh), `DOD3_RENDER_TICK_HZ=40` (the title's idle tick:
+movies on a 25 ms grid), `DOD3_LOAD_IDLE=0` (the loader only in its own
+5 ms of a frame; `DOD3_LOAD_IDLE_LOG=1` says what it did in the limiter's
+sleep), `RSX_SNAP_INCR=0` (full snapshot copies),
+`SPU_TASK_POOL=0` (a thread per
 task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `RSX_ASYNC_SHADERS=0` (build shaders on the walker), `RSX_QUERY_NOSYNC=1`,
 `DOD3_PACE=vblank`, `DOD3_VBLANK_MULT=<n>` / `DOD3_VBLANK_HZ=<hz>`,
