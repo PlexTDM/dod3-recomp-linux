@@ -80,6 +80,12 @@ executable when it has no console; the previous run is `dod3.prev.log`.
 - `PPU_WAITPROF=1`: time in syscalls by thread and guest call site, every
   5 s, with the fence poll's statistics; `=2` adds the most frequent calls
   (who sends or signals how often: which thread answers a wait).
+- `PPU_THREAD_SLOTS=<n>`: the thread table's first n slots only (it has 64).
+  The game makes threads all through a session, two for the physics of
+  every level and one for each save, load and movie, and a slot that does
+  not come back stops it at the next level; a run that completes on 24
+  shows that they all do. Every `sys_ppu_thread_create` line carries its
+  `tid`, and a full table says so.
 - `DOD3_HOT_LOG=1`: calls per second and cycles per call of the hooked hot
   functions (the collision test).
 - `DOD3_GC_LOG=1` times every garbage collection over 1 ms (`=2` adds the
