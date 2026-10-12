@@ -44,6 +44,16 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   internal resolution. `tools/ppm2png.py` converts a frame.
 - `RSX_FRAMETIME=0` turns off the `[frametime]` line every 5 s (fps, mean and
   worst frame, frames over 34 ms).
+- `RSX_PRESENT_PACE_LOG=1`: with a frame-rate cap the renderer holds each
+  finished frame for a moment so that the presents are evenly spaced
+  (`rsx_present_pace.h`), and this says every 2 s how even: the spread of
+  the frames' arrivals and of their presents, the share of each more than
+  15% off the one before, the wait, and the frames that came too late for
+  it. `=2` a line per frame. `RSX_PRESENT_PACE=0` turns the pacing off.
+- `DOD3_FPS_ADAPT_LOG=1`: the cap `DOD3_FPS=adaptive` has chosen, every 2 s,
+  and the frame time it chose it from. `DOD3_FPS_ADAPT=<quantile>,<margin>,
+  <seconds>` (0.95,1.04,1.5) tunes it: the share of the frames that must be
+  made in time, the spare time asked of them, and the stretch looked at.
 - `RSX_HITCH_LOG=<ms>` lists frames over that, with the walker's GPU-blocked
   time and what it uploaded in the frame (textures: creating, decoding and
   staging them; vertex buffers; pipelines); with `DOD3_PROF` also the

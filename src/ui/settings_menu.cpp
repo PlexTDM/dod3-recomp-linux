@@ -213,7 +213,11 @@ void init_rows()
     s_rows.push_back({ "DOD3_FPS",
                        "Frame Rate",
                        "The frame rate limit. 60 is recommended.",
-                       { { NULL, "30 (Original)" }, { "60", "60" }, { "120", "120" }, { "uncapped", "Unlimited" } },
+                       { { NULL, "30 (Original)" },
+                         { "60", "60" },
+                         { "120", "120" },
+                         { "adaptive", "Adaptive" },
+                         { "uncapped", "Unlimited" } },
                        0,
                        true });
     s_rows.push_back({ "RSX_VSYNC",

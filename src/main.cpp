@@ -401,10 +401,20 @@ static void hitch_to_profiler(double ms)
  * runs at DOD3_VBLANK_MULT * n Hz (default 8: 480 Hz at 60; 2000 Hz when
  * uncapped) and a late frame waits at most a fraction of a ms for it. The
  * title's physics hold up to 120 fps; above that jumps get lower and dragon
- * lock-on fails. */
+ * lock-on fails.
+ *
+ * DOD3_FPS=adaptive is a cap that follows the scene (fps_adaptive_rate
+ * below): as fast as the frames can be made evenly, and never over 120.
+ *
+ * With any cap the renderer shows the frames at even intervals too
+ * (rsx_present_pace.h: the cap evens out when frames start, not when they
+ * are finished). With none there is no slack to do it in. */
+extern "C" void rsx_present_pace_enable(int on);
+extern "C" void rsx_present_pace_period(double seconds);
 static unsigned s_fps_target;        /* for the vblank rate; 0 = the title's own */
 static unsigned s_vblank_mult = 2;
 static int s_fps_lock = -1;     /* -1 the title's own cap, 0 none, n locked */
+static int s_fps_adaptive;      /* with s_fps_lock 0: the cap follows the scene */
 /* Bumped by every change of the above, so the frame clock re-derives its
  * vblank period: the Graphics Settings page changes DOD3_FPS while running. */
 static std::atomic<unsigned> s_fps_gen{ 0 };
@@ -417,9 +427,12 @@ static void apply_fps_unlock(void)
         s_fps_target = 0;
         s_vblank_mult = 2;
         s_fps_gen++;
+        rsx_present_pace_enable(1);
+        rsx_present_pace_period(0.0);
         return;
     }
-    const int fps = (!strcmp(e, "uncapped") || !strcmp(e, "0")) ? 0 : atoi(e);
+    const bool adaptive = !strcmp(e, "adaptive");
+    const int fps = (adaptive || !strcmp(e, "uncapped") || !strcmp(e, "0")) ? 0 : atoi(e);
     if (fps < 0 || (fps > 0 && fps < 10)) {
         fprintf(stderr, "[fps] DOD3_FPS=%s ignored\n", e);
         return;
@@ -432,6 +445,9 @@ static void apply_fps_unlock(void)
         return;
     }
     s_fps_lock = fps;
+    s_fps_adaptive = adaptive;
+    rsx_present_pace_enable(fps != 0 || adaptive);
+    rsx_present_pace_period(fps ? 1.0 / fps : 0.0);
     s_fps_target = fps ? (unsigned)fps : 250u;
     s_vblank_mult = 8;
     if (const char* m = getenv("DOD3_VBLANK_MULT"))
@@ -441,7 +457,8 @@ static void apply_fps_unlock(void)
         fprintf(stderr, "[fps] frame rate locked at %d (smoothing off, vblank %u Hz)\n", fps,
                 s_vblank_mult * s_fps_target);
     else
-        fprintf(stderr, "[fps] frame rate uncapped (smoothing off, vblank %u Hz)\n", s_vblank_mult * s_fps_target);
+        fprintf(stderr, "[fps] frame rate %s (smoothing off, vblank %u Hz)\n", adaptive ? "adaptive" : "uncapped",
+                s_vblank_mult * s_fps_target);
 }
 
 /* The rendering thread's idle tick. With no render commands to run -- a
@@ -664,12 +681,128 @@ static void apply_sha_overrides(void)
     }
 }
 
+/* DOD3_FPS=adaptive: the cap for this frame, from the time the last frames
+ * took to make.
+ *
+ * With no cap a frame is shown as soon as it is made, and the frames of one
+ * scene take from 5 to 20 ms: half of them differ from the one before by
+ * more than 15%. The title moves everything by the time the last frame took,
+ * and that frame is on screen for the time the next one takes, so a turn of
+ * the camera at a steady stick comes out at 60 to 210 degrees a second from
+ * one frame to the next (115 on average): the picture judders although the
+ * frame rate is high. A cap makes it even -- every frame that is made in
+ * time lasts exactly as long as the one before -- and this one is the
+ * highest of a ladder of rates that the scene holds: the rate at which 95 in
+ * 100 of the frames of the last second and a half were made in time, with
+ * 4% to spare. It steps down as soon as that is no longer so, and up to the
+ * rate within reach (with 10% to spare) when one has been for two seconds
+ * on end, so it stays put for long stretches, which is what lets the
+ * renderer space the presents evenly as well (rsx_present_pace.h: it is
+ * told the cap). 120 is the top: the title's physics
+ * hold to it. (The cutscenes run at 30 by the title's own doing, so the cap
+ * is 30 as one ends, and is back up a second or two into play.)
+ *
+ * The limiter hands GetMaxTickRate the time since it last returned: the time
+ * the frame took to make, without the wait.
+ *   DOD3_FPS_ADAPT=<quantile>,<margin>,<seconds>   0.95,1.04,1.5
+ *   DOD3_FPS_ADAPT_LOG=1   the cap, every 2 s */
+static double fps_adaptive_rate(double work)
+{
+    enum { MAXN = 480 };
+    static const double kRates[] = { 120, 110, 100, 90, 80, 72, 66, 60, 55, 50, 45, 40, 36, 33, 30 };
+    const int nrates = (int)(sizeof kRates / sizeof kRates[0]);
+    static double ring[MAXN];   /* the last frames' times, newest at `at` - 1 */
+    static int n, at, cur = 0, up_run;
+    static double q = -1.0, margin = 1.04, span = 1.5;
+    static int log = 0;
+    if (q < 0.0) {
+        q = 0.95;
+        if (const char* e = getenv("DOD3_FPS_ADAPT")) {
+            double a = 0, b = 0, c = 0;
+            const int got = sscanf(e, "%lf,%lf,%lf", &a, &b, &c);
+            if (got >= 1 && a >= 0.3 && a <= 1.0) q = a;
+            if (got >= 2 && b >= 1.0 && b <= 1.5) margin = b;
+            if (got >= 3 && c >= 0.25 && c <= 4.0) span = c;
+        }
+        log = getenv("DOD3_FPS_ADAPT_LOG") != nullptr;
+    }
+    static bool named = false;
+    if (!named) {
+        named = true;
+        rsx_present_pace_period(1.0 / kRates[cur]);
+    }
+    /* A load, a pause, the first frame: not a frame of play. */
+    if (!(work > 0.0) || work > 0.1) return kRates[cur];
+    ring[at] = work;
+    at = (at + 1) % MAXN;
+    if (n < MAXN) n++;
+    /* The frames of the last `span` seconds at the present rate. */
+    int win = (int)(span * kRates[cur] + 0.5);
+    if (win < 16) win = 16;
+    if (win > n) win = n;
+    if (win < 16) return kRates[cur];
+    double tmp[MAXN];
+    for (int i = 0; i < win; i++) tmp[i] = ring[(at - 1 - i + MAXN) % MAXN];
+    const int k = (int)(q * (double)(win - 1) + 0.5);
+    std::nth_element(tmp, tmp + k, tmp + win);
+    const double need = tmp[k] * margin;
+    /* The highest rate whose frame is long enough. */
+    int fit = nrates - 1;
+    for (int i = 0; i < nrates; i++)
+        if (1.0 / kRates[i] >= need) {
+            fit = i;
+            break;
+        }
+    const int was = cur;
+    if (fit > cur) {   /* too fast for the scene: down at once */
+        cur = fit;
+        up_run = 0;
+    } else if (fit < cur) {
+        /* A faster rate is within reach: with more to spare than it takes
+         * to stay, and for two seconds without a break (from 30, where the
+         * cutscenes leave it, in half a second). */
+        int reach = cur;
+        for (int i = 0; i < cur; i++)
+            if (1.0 / kRates[i] >= need * 1.06) {
+                reach = i;
+                break;
+            }
+        if (reach < cur) {
+            if (++up_run >= (int)(kRates[cur] * (cur == nrates - 1 ? 0.5 : 2.0))) {
+                cur = reach;
+                up_run = 0;
+            }
+        } else
+            up_run = 0;
+    } else
+        up_run = 0;
+    if (cur != was) rsx_present_pace_period(1.0 / kRates[cur]);
+    if (log) {
+        static uint64_t next;
+        static unsigned frames, late;
+        frames++;
+        if (work > 1.0 / kRates[cur]) late++;
+        const uint64_t t = dod3_now_us();
+        if (t >= next) {
+            fprintf(stderr, "[fps] adaptive: cap %.0f (frames made in %.2f ms at the quantile; %u of %u late)\n",
+                    kRates[cur], tmp[k] * 1000.0, late, frames);
+            next = t + 2000000;
+            frames = late = 0;
+        }
+    }
+    return kRates[cur];
+}
+
 /* The replacement GetMaxTickRate: f1 = the lock, 0 for none; the title's
  * own (0x00424460, a leaf) when there is no lock. */
 static void fps_get_max_tick_rate(ppu_context* ctx)
 {
     if (s_fps_lock < 0) {
         DOD3_FN_GET_MAX_TICK_RATE(ctx);
+        return;
+    }
+    if (s_fps_lock == 0 && s_fps_adaptive) {
+        ctx->fpr[1] = (double)(float)fps_adaptive_rate(ctx->fpr[1]);
         return;
     }
     ctx->fpr[1] = (double)(float)(s_fps_lock > 0 ? s_fps_lock : 0);

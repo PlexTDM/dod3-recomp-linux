@@ -112,7 +112,7 @@ folder above). It explains each setting:
 | RSX_DISPLAY | windowed, borderless (recommended for full screen) or fullscreen |
 | RSX_WINDOW | Window size in windowed mode, e.g. 1920x1080 |
 | RSX_VSYNC | 1 to sync to the display; 0 lets the frame rate exceed its refresh |
-| DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; unset keeps the original 30 |
+| DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30 |
 | DOD3_FOV | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original |
 | RSX_ANISO | Texture filtering: 1 (original) to 16 (16x anisotropic, the default) |
 | RSX_AA | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off |
