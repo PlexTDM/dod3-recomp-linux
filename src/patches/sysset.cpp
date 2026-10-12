@@ -24,12 +24,22 @@
  *   DOD3_MOTION_BLUR=0       off (read by the renderer every frame: live)
  *   DOD3_POSTFX=0            the post pass off: depth of field, bloom and the
  *       colour grade together (DepthOfField gates all three; live)
+ *   DOD3_DRAW_DISTANCE=<x>   MaxDrawDistanceScale: the scene renderer
+ *       multiplies every primitive's own cull distance by it, each frame
+ *       (func_0061D538 squares it against MaxDrawDistanceSquared; live).
+ *       Only scenery that has such a distance moves: the props, bushes and
+ *       small trees of the open areas (4,000 to 30,000 units on the first
+ *       chapter's coast), which otherwise appear as the player comes within
+ *       it. The prologue's city has none, and looks the same at any value.
+ *       The SpeedTrees have distances of their own: DOD3_TREE_LOD.
+ *   DOD3_TREE_LOD=<x>        the distances at which a tree gives way to a
+ *       flat picture of itself and then to nothing, times x (the tree detail
+ *       section below; from the next level loaded)
  * Tried and left out: Bloom, AmbientOcclusion, LensFlares, light shafts,
- * FogVolumes, Distortion, decals, DetailMode, MaxDrawDistanceScale, the LOD
- * biases (no visible change in play; the detail settings are already at
- * their highest), bAllowSeparateTranslucency (black screen) and the world
- * texture groups' LODBias 0 (the texture pool overflows: geometry renders
- * black).
+ * FogVolumes, Distortion, decals, DetailMode, the LOD biases (no visible
+ * change in play; the detail settings are already at their highest),
+ * bAllowSeparateTranslucency (black screen) and the world texture groups'
+ * LODBias 0 (the texture pool overflows: geometry renders black).
  *
  * For finding out what each switch does:
  *   DOD3_SYSSET=Name=value[,Name=value...]   applied once the INI is loaded,
@@ -37,16 +47,18 @@
  *       made). Names as in the INI; TEXTUREGROUP_<group>.LODBias (or
  *       .MinLODMipCount, .MaxLODMipCount, .NumStreamedMips) for a texture group.
  *   DOD3_SYSSET_FILE=<path>   while running: each time the file changes, its
- *       lines (Name=value) are applied.
+ *       lines (Name=value) are applied. TreeLOD=<x> is DOD3_TREE_LOD.
  *   DOD3_SYSSET_DUMP=1        log every value once the INI is loaded.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <atomic>
 #include <string>
 #include <sys/stat.h>
 #include "ppu_recomp.h"
 #include "cpu/eboot.h"   /* the EBOOT version's addresses */
+#include "cpu/ppu.h"
 #include "patches/sysset.h"
 #ifdef _WIN32
 #define strcasecmp _stricmp   /* the CRT's spelling */
@@ -210,6 +222,8 @@ std::string show(const Field& f)
     return b;
 }
 
+void set_tree_lod(const char* v);
+
 /* "Name=value": true if applied. */
 bool apply_one(const std::string& item)
 {
@@ -219,6 +233,10 @@ bool apply_one(const std::string& item)
     while (!name.empty() && name.back() == ' ') name.pop_back();
     while (!val.empty() && val.front() == ' ') val.erase(0, 1);
     while (!val.empty() && (val.back() == ' ' || val.back() == '\r' || val.back() == '\n')) val.pop_back();
+    if (!strcasecmp(name.c_str(), "TreeLOD")) {
+        set_tree_lod(val.c_str());
+        return true;
+    }
     if (!strncmp(name.c_str(), "TEXTUREGROUP_", 13)) {
         const size_t dot = name.find('.');
         if (dot == std::string::npos) return false;
@@ -299,6 +317,79 @@ void set_postfx(const char* v)
     if (s_loaded) apply_one(std::string("DepthOfField=") + (off(v) ? "0" : "1"));
 }
 
+void set_draw_distance(const char* v)
+{
+    const double x = v ? atof(v) : 1.0;
+    char b[48];
+    snprintf(b, sizeof b, "MaxDrawDistanceScale=%g", x >= 1.0 && x <= 100.0 ? x : 1.0);
+    if (s_loaded) apply_one(b);
+}
+
+/* ---- tree detail -----------------------------------------------------------
+ * DOD3_TREE_LOD=<x>. A SpeedTree is drawn as its model up to a distance,
+ * crosses over to a flat picture of itself (its billboard) across a stretch,
+ * is the billboard from there on, and past the last distance is not drawn
+ * at all: the trees of the open areas appear, and then change, as the player
+ * walks up to them. The distances are each component's own
+ * (USpeedTreeComponent +0x1E0: Lod3DStart, Lod3DEnd, LodBillboardStart,
+ * LodBillboardEnd -- 500, 6,000, 8,000 and 12,000 to 16,000 units for most
+ * trees of the first chapter's coast), copied into its scene proxy when that
+ * is made (FSpeedTreeSceneProxy's constructor: proxy +0x160). The proxy's are
+ * what the renderer reads, once: when the tree is added to the scene, its
+ * meshes go into the draw lists with the distances between which each is
+ * drawn (FSpeedTreeSceneProxy::DrawStaticElements). The scene's own
+ * MaxDrawDistanceScale (DOD3_DRAW_DISTANCE) does not reach them.
+ *
+ * So the proxy's four are multiplied by x as it is made:
+ * USpeedTreeComponent::CreateSceneProxy is a virtual and the constructor's
+ * only caller, and is replaced in the function registry the call resolves
+ * through. The components keep the title's values. A tree that is in the
+ * scene already keeps the distances it was added with -- writing its proxy
+ * afterwards changes nothing on screen -- so a new x is seen from the next
+ * level, or part of a level, that is loaded.
+ *
+ * The first chapter's coast from its landing stage, the same view in three
+ * runs: at 0.2 the woods on either side are gone; at 1 they stand, the pines
+ * on the cliff as their soft billboards; at 3 those are their models, branch
+ * by branch, and a tree past the far bank that was not drawn is. */
+#ifdef DOD3_FN_TREE_CREATE_PROXY
+std::atomic<float> s_tree_lod{ 1.0f };   /* DOD3_TREE_LOD */
+
+void hook_tree_create_proxy(ppu_context* ctx)
+{
+    const uint32_t comp = (uint32_t)ctx->gpr[3];
+    DOD3_FN_TREE_CREATE_PROXY(ctx);
+    dod3_drain(ctx);
+    const uint32_t proxy = (uint32_t)ctx->gpr[3];
+    const float k = s_tree_lod.load(std::memory_order_relaxed);
+    if (k == 1.0f || !proxy || vm_read32(proxy) != DOD3_A_TREE_PROXY_VTABLE || vm_read32(proxy + 0x98u) != comp) return;
+    float d[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        const uint32_t w = vm_read32(proxy + 0x160u + 4u * i);
+        memcpy(&d[i], &w, 4);
+        if (!(d[i] >= 1.0f && d[i] <= 1.0e6f)) return;
+    }
+    for (uint32_t i = 0; i < 4; i++) {
+        const float x = d[i] * k;
+        uint32_t w;
+        memcpy(&w, &x, 4);
+        vm_write32(proxy + 0x160u + 4u * i, w);
+    }
+}
+#endif
+
+void set_tree_lod(const char* v)
+{
+#ifdef DOD3_FN_TREE_CREATE_PROXY
+    const double x = v ? atof(v) : 1.0;
+    const float k = x >= 0.1 && x <= 20.0 ? (float)x : 1.0f;
+    if (k != s_tree_lod.exchange(k, std::memory_order_relaxed))
+        fprintf(stderr, "[sysset] tree detail distance x%g, for the trees loaded from here on\n", k);
+#else
+    (void)v;
+#endif
+}
+
 void apply_player_settings()
 {
     if (const char* v = getenv("DOD3_SHADOWS"))
@@ -306,6 +397,8 @@ void apply_player_settings()
             if (!strcmp(v, p[0])) apply_list(p[1], ',');
     if (const char* v = getenv("DOD3_MOTION_BLUR")) set_motion_blur(v);
     if (const char* v = getenv("DOD3_POSTFX")) set_postfx(v);
+    if (const char* v = getenv("DOD3_DRAW_DISTANCE")) set_draw_distance(v);
+    if (const char* v = getenv("DOD3_TREE_LOD")) set_tree_lod(v);
 }
 
 }  // namespace
@@ -333,6 +426,31 @@ void dod3_sysset_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      true,
                      set_postfx });
+    rows.push_back({ "DOD3_DRAW_DISTANCE",
+                     "Draw Distance",
+                     "How far away props, plants and other scenery are drawn.",
+                     { { nullptr, "Original" }, { "2", "2x" }, { "3", "3x" }, { "5", "5x" }, { "10", "10x" } },
+                     0,
+                     true,
+                     set_draw_distance });
+#ifdef DOD3_FN_TREE_CREATE_PROXY
+    rows.push_back({ "DOD3_TREE_LOD",
+                     "Tree Detail",
+                     "How far trees show and stay detailed. From the next area.",
+                     { { nullptr, "Original" }, { "2", "2x" }, { "3", "3x" }, { "5", "5x" }, { "10", "10x" } },
+                     0,
+                     true,
+                     set_tree_lod });
+#endif
+}
+
+extern "C" void ppu_register_function(uint64_t addr, void (*fn)(ppu_context*));
+
+void dod3_sysset_install()
+{
+#ifdef DOD3_FN_TREE_CREATE_PROXY
+    ppu_register_function(DOD3_A_TREE_CREATE_PROXY, hook_tree_create_proxy);
+#endif
 }
 
 /* From the vblank loop (main.cpp), often. */

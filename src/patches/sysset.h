@@ -1,5 +1,6 @@
 /* The engine's graphics switches (src/patches/sysset.cpp): the rows of the
- * Advanced Graphics page, and the poll that applies them at start-up. */
+ * Advanced Graphics page, the poll that applies them at start-up, and the
+ * hook behind the tree detail row. */
 #pragma once
 #include <utility>
 #include <vector>
@@ -21,3 +22,6 @@ void dod3_sysset_rows(std::vector<Dod3RowSpec>& rows);
  * the engine object makes its render targets from it), the dod3.ini keys
  * of the rows are written over it; also the DOD3_SYSSET* testing hooks. */
 void dod3_sysset_poll();
+
+/* Once at boot, after the lifted function table is registered. */
+void dod3_sysset_install();

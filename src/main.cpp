@@ -2023,6 +2023,7 @@ int main(int argc, char** argv)
 
     ppu_recomp_register();   /* lifted function table -> address map */
     dod3_settings_menu_install();   /* the Graphics Settings page's two natives */
+    dod3_sysset_install();          /* the tree detail row's hook */
     dod3_kbm_install();
     dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */

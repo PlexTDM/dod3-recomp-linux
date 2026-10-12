@@ -94,11 +94,12 @@ view. Settings > System Settings sets whether the logos and opening movie
 are skipped, what the game does while its window is in the background
 (keep running, mute, or pause), which controller's buttons the game shows,
 the mouse's sensitivity, and the renderer. Settings > Advanced
-Graphics sets the engine's own shadow quality, motion blur and
-post-processing. Confirm with X to save them; everything but the renderer,
-Skip Intro and Shadow Quality changes at once (a second of black while the
-resolution or display mode switches), those three the next time the game
-starts.
+Graphics sets the engine's own shadow quality, motion blur,
+post-processing, draw distance and tree detail. Confirm with X to save
+them; everything but the renderer, Skip Intro and Shadow Quality changes
+at once (a second of black while the resolution or display mode switches;
+Tree Detail in the next area the game loads), those three the next time
+the game starts.
 
 The first start adds the pages to the game's menu, which takes a second or
 two. The game's own files are not changed.
@@ -119,6 +120,8 @@ folder above). It explains each setting:
 | DOD3_SHADOWS | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start |
 | DOD3_MOTION_BLUR | 0 turns motion blur off |
 | DOD3_POSTFX | 0 turns off depth of field, bloom and the colour grading |
+| DOD3_DRAW_DISTANCE | 2, 3, 5 or 10: props, bushes and small trees are drawn from that many times as far away; unset is the original |
+| DOD3_TREE_LOD | 2, 3, 5 or 10: the large trees are drawn, and stay their full models, that many times as far away; unset is the original. From the next area loaded |
 | DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
 | DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
 | DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
