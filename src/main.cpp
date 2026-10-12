@@ -1945,6 +1945,18 @@ int main(int argc, char** argv)
      * 0.3 + 1.05 * mask^2: the village interior's smoky doorway and windows
      * blew out to white. Clamped to [0, 1] the room matches the original. */
     dod3_setenv("RSX_FP_SAT_ALPHA", "1a9b74dc1afc2a84", 0);
+    /* The targets that follow the internal resolution (RSX_SCALE): the
+     * renderer's own rule is every one of 64 pixels or more each way. Here
+     * the title draws into 1280x720, 640x360 and 322x182 (and a 512x512
+     * and the 256x16 colour table), and the 322x182 ones are the blur chains
+     * of its light shafts and its bloom: a few taps a pass, spaced for a
+     * picture that soft. Made three times as fine they showed every tap --
+     * the shaft through the roof of the village's hut a ladder of slanted
+     * copies of the hole, the glow of embers a grid. Left at their own size
+     * (the 182 is under 200) both look as they do at the original
+     * resolution, at any scale. With 640x360 left alone as well (400) a seam
+     * runs down the foliage of the open levels, so that one still scales. */
+    dod3_setenv("RSX_SCALE_MIN", "200", 0);
     /* Translated shaders survive between runs (see rsx_metal_backend.m). */
     dod3_setenv("PS3RECOMP_MSL_CACHE", "cache/msl", 0);
     /* ...and compiled DXBC on Windows (rsx_d3d12_engine.c). */

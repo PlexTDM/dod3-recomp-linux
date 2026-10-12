@@ -54,6 +54,9 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   and the frame time it chose it from. `DOD3_FPS_ADAPT=<quantile>,<margin>,
   <seconds>` (0.95,1.04,1.5) tunes it: the share of the frames that must be
   made in time, the spare time asked of them, and the stretch looked at.
+- `RSX_SCALE_MIN=<pixels>`: render targets under that size either way keep
+  the game's own size at any `RSX_SCALE` (200 here: the 322x182 blur chains
+  of the light shafts and the bloom, which show their taps when scaled).
 - `RSX_HITCH_LOG=<ms>` lists frames over that, with the walker's GPU-blocked
   time and what it uploaded in the frame (textures: creating, decoding and
   staging them; vertex buffers; pipelines); with `DOD3_PROF` also the
