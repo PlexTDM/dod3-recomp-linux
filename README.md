@@ -60,8 +60,9 @@ macOS:
    `~/Library/Application Support/Drakengard 3 Recompiled`.
 
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
-view, skipping the intro) are in the game's own Settings menu, under
-Graphics Settings and System Settings, or in `dod3.ini`.
+view, draw distance, skipping the intro) are in the game's own Settings
+menu, under Graphics Settings, System Settings and Advanced Graphics, or in
+`dod3.ini`.
 [docs/PLAYING.md](docs/PLAYING.md) has the controls, the saves, the Japanese
 voices, and what to do if something goes wrong.
 
@@ -157,10 +158,12 @@ and the conventions.
 
 What the port adds over the original: any internal resolution (supersampling
 included), windowed, borderless or full-screen display, a frame-rate cap of
-your choice (60 and 120 tested), FXAA or MSAA, anisotropic filtering, a wider
-field of view, skipping the intro logos and movie, and pausing or muting when
-the window is in the background -- all from a Graphics Settings and a System
-Settings page added to the game's own Settings menu.
+your choice (60 and 120 tested) or one that follows the scene, with the
+frames shown at even intervals, FXAA or MSAA, anisotropic filtering, a wider
+field of view, sharper shadows, a longer draw distance for scenery and for
+trees, skipping the intro logos and movie, and pausing or muting when the
+window is in the background -- all from a Graphics Settings, a System
+Settings and an Advanced Graphics page added to the game's own Settings menu.
 
 Known issues: the game has been tested on few machines.
 
