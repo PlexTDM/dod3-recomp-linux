@@ -80,6 +80,9 @@ executable when it has no console; the previous run is `dod3.prev.log`.
 - `PPU_WAITPROF=1`: time in syscalls by thread and guest call site, every
   5 s, with the fence poll's statistics; `=2` adds the most frequent calls
   (who sends or signals how often: which thread answers a wait).
+- `PS3_TIME_LOG=1`: the date and the time zone the game was told, once
+  each (the first `sys_time_get_current_time` and `sys_time_get_timezone`);
+  the game stamps its saves with them.
 - `PPU_THREAD_SLOTS=<n>`: the thread table's first n slots only (it has 64).
   The game makes threads all through a session, two for the physics of
   every level and one for each save, load and movie, and a slot that does
