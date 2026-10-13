@@ -67,15 +67,16 @@ Any other decrypted copy of the update's EBOOT.BIN with that hash works too
 
 - `--code-end` is the end of the last executable section, so `.rodata` in the
   R-X segment is never promoted to functions.
-- `--nonvolatile-locals` keeps the guest registers in C locals between calls;
-  the port is tuned for it.
+- `--nonvolatile-locals` keeps the guest registers in C locals, written back
+  to the register file only where they changed and something reads them
+  (`ps3recomp/docs/PPU_RECOMP.md`); the port is tuned for it.
 - The three `--hook`s are required: those functions are supplied natively
   (the garbage collector and its reachability pass, `src/patches/gc.cpp` and
   `src/patches/gc_native.cpp`; the collision test's timing wrapper,
   `src/cpu/hot.cpp`) and the lifted bodies are emitted as
   `func_<addr>_lifted`. A lift without them fails to link.
 
-The lift takes a few minutes and writes about 550 MB of C++ (14 translation
+The lift takes a few minutes and writes about 600 MB of C++ (14 translation
 units). `recompiled_101/` is not in git.
 
 ## Lifting the SPU programs
@@ -181,4 +182,4 @@ Both refuse to package anything of the game's.
 | `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
 | `src/res/app.ico` | `python tools/make_icon.py src/res/app.ico` |
 | `src/res/prompts/*.png` | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`) |
-| `src/patches/collision_native.cpp` | `python tools/lift_native.py recompiled_101/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp` after a re-lift (the lifted body it translates may have moved to another unit: `grep -l func_00272E58_lifted recompiled_101/*.cpp`) |
+| `src/patches/collision_native.cpp` | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |

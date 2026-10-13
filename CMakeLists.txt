@@ -535,8 +535,17 @@ endif()
 #     arm64, and -fno-math-errno lets sqrt be the instruction. main.cpp checks
 #     the CPU at start (DOD3_X86_V3). Set DOD3_X86_LEVEL to an empty string
 #     for a build that runs on anything.
+#   - no on-demand guards on thread-local reads (clang-cl). The lifted code
+#     reads one thread-local, the tail-call trampoline, after every call that
+#     may leave it set; as a C++ extern thread-local each read first tests
+#     whether the module's dynamic TLS initialisers have run on this thread,
+#     which an executable's always have. The check and its call were 20 of
+#     the 43 instructions of a call-and-drain.
 if(MSVC)
     set(_recomp_opts "/w;/bigobj")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND _recomp_opts "/Zc:tlsGuards-")
+    endif()
     # DOD3_RECOMP_OPT: extra options for the lifted TUs alone (a compile
     # experiment: -DDOD3_RECOMP_OPT=/clang:-O3 in a build folder of its own).
     set(DOD3_RECOMP_OPT "" CACHE STRING "Extra compile options for the lifted PPU code")

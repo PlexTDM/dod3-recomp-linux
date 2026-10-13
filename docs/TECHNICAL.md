@@ -68,6 +68,33 @@ are write-watched: the 4 KiB pages under them are made read-only, a write
 faults and marks them, and a texture is re-hashed only when a page under it
 was written (RPCS3's method). The vertex cache is validated the same way.
 
+## The lifted code
+
+As the lifter first writes it, every guest register is a slot of the
+register file in memory and every call goes through that memory, which
+leaves a compiler little to do. What is done about it is in the lifter
+(`ps3recomp/docs/PPU_RECOMP.md` has the detail and the switches):
+
+- a function's registers are C locals, written back to the register file
+  before a call only where they changed and something reads them: 10.1
+  million stores at the game's 450,000 calls and returns became 3.7
+  million. The CR fields and the carry are locals of their own, so a
+  compare and the branch after it are a compare and a branch;
+- the saves of a prologue, and any run of loads and stores off one
+  register, share one test of the page table (687,000 accesses in 88,000
+  runs);
+- the AltiVec operations a compiler made scalar loops of are one SSE helper
+  each. The unaligned load, `lvlx`, was 190 instructions and a dozen
+  branches as a loop over its bytes and is a table-driven shuffle; the
+  collision tree walk (`func_012B32C8`), which is made of them, went from
+  10,000 instructions to 3,700;
+- on Windows the lifted units are built without thread-local guards
+  (`/Zc:tlsGuards-`): the tail-call trampoline is a thread-local read after
+  a call.
+
+A lift can be made to check all of this while the game runs
+(`PPU_NV_VERIFY=1`, see [DEBUGGING.md](DEBUGGING.md)).
+
 ## Native fast paths
 
 Where the lifted code was the bottleneck, the function runs natively, with a
@@ -262,6 +289,15 @@ Windows run at 49 fps to the game's own 120 fps ceiling at 720p:
 - `sys_lwcond` signals that wake their waiters (loads ~10 s faster), MFC
   slots released per job, snapshots kept by copy draws at 4K (GPU busy 500
   → 220 ms/s).
+
+The lifted code itself, later (i9-13900K, uncapped at 720p, each scene
+run in turn with the build before): the hub 187 → 205 fps, its main thread
+2.05 → 1.40 ms of CPU a frame and the render thread 2.67 → 2.04; the
+chapter 1 battle 179 → 208 fps, main thread 4.6 → 2.9 ms, render thread
+3.6 → 2.3; from the start to the title 9.3 → 8.2 s; the executable 430 →
+293 MB. What did it: registers written back only where changed and read,
+the CR fields as locals, no thread-local guards, one page test for a run of
+accesses, SSE forms of the AltiVec loops.
 
 Measured as no gain, so nobody repeats them: pinning to the P-cores, EcoQoS
 opt-out, skipping the occlusion-query sync (`RSX_QUERY_NOSYNC`, also

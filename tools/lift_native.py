@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """lift_native.py -- a lifted PPU function as native C++, frame in host locals.
 
-    python tools/lift_native.py recompiled_101/ppu_recomp_010.cpp func_00272E58 \
+    python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 \
         --name dod3_collision_native -o src/patches/collision_native.cpp
 
 The lifted body (func_<addr>_lifted, as ps3recomp's lifter writes it with
---nonvolatile-locals) is rewritten in two steps:
+--nonvolatile-locals and PPU_NV_DIRTY=0 in its environment: every register
+a local, all of them written back at every call -- not the form the game is
+built from, so lift it into a folder of its own) is rewritten in two steps:
 
   1. ps3recomp/tools/ppu_frame_locals.py promotes the frame's own slots --
      callee-saved register saves and restores, the LR word, the compiler's
@@ -48,6 +50,8 @@ src = open(a.lifted, encoding="utf-8", errors="replace").read().split("\n")   # 
 start = next(i for i, l in enumerate(src) if l.startswith(f"void {a.func}_lifted(ppu_context* ctx)"))
 end = next(i for i in range(start + 1, len(src)) if src[i].startswith("}"))
 body = [l.strip() for l in src[start + 1:end]]
+# the lifted function's own copy of the base of guest memory: the accessors below use the global
+body = [l for l in body if l != "uint8_t* const vm_base = ppu_vm_base_now();"]
 
 # --- 1. the frame -------------------------------------------------------------
 stats = ppu_frame_locals.Stats()
@@ -109,8 +113,10 @@ w.append('#pragma clang diagnostic ignored "-Wunused-function"   /* the helper s
 w.append("#endif")
 w.append("#if defined(__GNUC__) || defined(__clang__)")
 w.append("#define PPU_UNLIKELY(x) __builtin_expect(!!(x), 0)")
+w.append("#define PPU_COLD_FN __attribute__((noinline, cold))")
 w.append("#else")
 w.append("#define PPU_UNLIKELY(x) (x)")
+w.append("#define PPU_COLD_FN __declspec(noinline)")
 w.append("#endif")
 w += helpers
 w.append("")

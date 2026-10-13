@@ -14,8 +14,10 @@ namespace {
 #endif
 #if defined(__GNUC__) || defined(__clang__)
 #define PPU_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define PPU_COLD_FN __attribute__((noinline, cold))
 #else
 #define PPU_UNLIKELY(x) (x)
+#define PPU_COLD_FN __declspec(noinline)
 #endif
 /* PPC FP NaN semantics (Book I 4.6.5.2): a propagated input NaN keeps its
  * sign and payload and is QUIETED, selected in operand order; an invalid
@@ -42,8 +44,10 @@ static inline double ppu_fp_default_qnan(void)
 /* One test on the hot path: a NaN input always gives a NaN result on x86 as
  * well, so only a NaN result needs the PPC priority rules (FRA's NaN, then
  * FRB's, else the default QNaN rather than x86's negative one). Bit-identical
- * to testing the inputs first; the hot float code ran three compares per op. */
-static double ppu_fp_bin_nan(double a, double b)
+ * to testing the inputs first; the hot float code ran three compares per op.
+ * The rules are a function of their own, and stay one (PPU_COLD_FN): inlined
+ * at every operation they were a quarter of a float-heavy function's code. */
+PPU_COLD_FN static double ppu_fp_bin_nan(double a, double b)
 {
     if (a != a) return ppu_fp_quiet(a);
     if (b != b) return ppu_fp_quiet(b);
@@ -60,7 +64,7 @@ static inline double ppu_fmul(double a, double b) { return ppu_fp_bin(a, b, a * 
 static inline double ppu_fdiv(double a, double b) { return ppu_fp_bin(a, b, a / b); }
 /* FRT = (neg_res ? - : +)([FRA*FRC] + (neg_b ? -FRB : FRB)), fused.
  * NaN priority: FRA, FRB, FRC (negations never apply to propagated NaNs). */
-static double ppu_fmadd_nan(double a, double c, double b)
+PPU_COLD_FN static double ppu_fmadd_nan(double a, double c, double b)
 {
     if (a != a) return ppu_fp_quiet(a);
     if (b != b) return ppu_fp_quiet(b);

@@ -18,6 +18,11 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   deterministic benchmark of the main thread, for comparing two builds of
   the lifted code. The hooked collision test's cycles per call
   (`DOD3_HOT_LOG=1`) is the other low-noise signal for such changes.
+- `PAD_NO_HOST=1` (`tools/live_bench.sh` sets it): no controller and no key
+  of the host's reaches the game. Controllers are read whether or not the
+  game's window is in front, so one lying on the desk, or in use for
+  something else, steers a run that was meant to be hands-off: a menu
+  cursor a step off its place is a different run.
 - `DOD3_AB=<switch>[,<seconds>]`: an A/B test inside one run. It flips one
   run-time switch every few seconds, counts the frames in each window and
   reports the paired difference with its standard error, and (Windows) each
@@ -152,6 +157,27 @@ task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 
 `PS3_VERBOSE=1` turns the runtime's per-event log back on (it is off here:
 two lines per SPURS job at 2,700 jobs a second).
+
+## The lift's switches
+
+The lifter reads a handful of switches from its environment, each turning
+one part of the registers-in-locals form off (`ps3recomp/docs/PPU_RECOMP.md`
+lists them: `PPU_NV_DIRTY`, `PPU_NV_LIVE`, `PPU_NV_FLAGS`, `PPU_NV_VRALL`,
+`PPU_FRAME_ENTRY`, `PPU_VM_RUNS`, `PPU_DRAIN_ELIDE`, `PPU_VM_BASE_LOCAL`).
+To find the part a fault is in, lift with one of them into a folder of its
+own and configure a build folder for it (`-DRECOMP_DIR=<folder>`).
+
+`PPU_NV_VERIFY=1` lifts the self-checking form: a register a write-back
+leaves out is compared with the register file or, where nothing should read
+it, replaced there by a marker (`BAD0...`), and every load and store of a
+run checks the address it was handed. The checks cost the game's own
+threads about a third more CPU (the hub at 193 frames a second instead of
+205). A clean log has no `nv-verify` line; marker values in the scratch
+registers of a register dump are expected.
+
+`SPU_COH_PAGES=1` (when the game runs) names each 64 KiB page in which an
+SPU reserves a line for the first time: stores to such a page take the
+runtime's function from then on.
 
 ## The installer and the menu patch
 
