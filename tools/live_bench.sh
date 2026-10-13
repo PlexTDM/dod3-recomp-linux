@@ -48,6 +48,9 @@ rm -rf "$save"; mkdir -p "$save"
 export PAD_STICK_FILE=$PWD/$pad.stick
 export PS3_TITLE="Drakengard 3" PS3_VFS_ROOT=game/disc DOD3_FPS=60
 export PAD_FILE=$pad PS3RECOMP_FRAME_GRAB=$grab PS3RECOMP_METAL_FRAME_GRAB=$grab PS3_SAVEDATA_ROOT=$save
+# No controller or key of the host's: one on the desk is read whether or not
+# the game's window is in front, and steers the run.
+export PAD_NO_HOST=1
 for kv in "$@"; do export "$kv"; done
 
 upto=$secs
@@ -65,7 +68,8 @@ auto=$!
 t0=$(date +%s)
 while kill -0 $game 2>/dev/null && [ $(( $(date +%s) - t0 )) -lt "$secs" ]; do sleep 5; done
 kill $auto 2>/dev/null
-if [ -n "$win" ]; then taskkill //IM "$(basename "$bin")" //F >/dev/null 2>&1; else kill $game 2>/dev/null; fi
+# By its process id, never by name: a game the player started meanwhile is not ours to stop.
+if [ -n "$win" ]; then taskkill //PID "$(cat /proc/$game/winpid 2>/dev/null)" //F >/dev/null 2>&1; else kill $game 2>/dev/null; fi
 # A game that does not leave on SIGTERM (a 22-minute "180 s" run once) is
 # killed outright after a grace period, or the wait below never returns.
 for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 $game 2>/dev/null || break; sleep 1; done

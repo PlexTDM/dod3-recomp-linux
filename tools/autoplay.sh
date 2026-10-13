@@ -34,6 +34,10 @@
 #                           checking the HUD (each check grabs a frame, a GPU
 #                           readback that costs the game a hitch), so the
 #                           frame times after it are the game's own
+#   AUTOPLAY_POLLS=<n>      at the title, hold each press for n pad polls
+#                           instead of 40: uncapped, the title runs at 300
+#                           frames a second, two polls each, and its menus
+#                           miss a press that short (200 does it)
 #   AUTOPLAY_CUTSCENE=1     press nothing after New Game: the chapter's
 #                           opening cutscenes play, the same every run -- a
 #                           deterministic benchmark (see below)
@@ -43,7 +47,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 python=${PYTHON:-python3}
 "$python" -c "import sys" >/dev/null 2>&1 || python=python   # a python3 that is only the Microsoft Store alias
 START=0x0008; CROSS=0x4000; CIRCLE=0x2000; SQUARE=0x8000; TRIANGLE=0x1000
-press() { echo "$1" > "$pad"; echo "$(date +%H:%M:%S) [autoplay] press $1 ($2)"; }
+press() { echo "$1 $polls" > "$pad"; echo "$(date +%H:%M:%S) [autoplay] press $1 ($2)"; }
 tap() { echo "$1 6" > "$pad"; }
 stick() { [ -n "$PAD_STICK_FILE" ] && echo "$1" > "$PAD_STICK_FILE"; }
 wait_for() {   # wait_for <pattern> <timeout_s>
@@ -66,6 +70,7 @@ combat_cycle() {
   stick "128 0 20 128"; sleep 0.7
 }
 
+polls=$AUTOPLAY_POLLS
 : > "$pad"
 # The opening movie, unless the title skips it (DOD3_SKIP_INTRO, on by
 # default): then the title screen comes first.
@@ -83,6 +88,7 @@ for i in $(seq 1 20); do
 done
 wait_for "BG00_CHC_10_MAP.XXX" 30 || { echo "[autoplay] new game NOT reached"; exit 1; }
 echo "$(date +%H:%M:%S) [autoplay] chapter 1 loading"
+polls=
 
 # AUTOPLAY_CUTSCENE=1: the chapter's opening movie is skipped (a pre-rendered
 # film at 30 fps, 150 s of it), the tutorial prompt dismissed, and nothing
