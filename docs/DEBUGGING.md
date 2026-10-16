@@ -155,6 +155,16 @@ task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `DOD3_FIFO_SLEEP_MS=<n>`, `DOD3_FAST_POLL_LR=<hex>` (0 for none),
 `PS3RECOMP_RSX_ENGINE=vtable` (the toolkit's old RSX path).
 
+The Direct3D 12 renderer's first line about the device says whether it
+relaxes the alignment of buffer-to-texture copies (`relaxed copy alignment:
+yes|no`): Windows 11's runtime with a current driver does, Windows 10's does
+not, and on such a system a copy off 512 bytes makes Direct3D reject the
+whole command list, after which the renderer draws nothing more (the picture
+freezes, the game runs on). `RSX_D3D12_STRICT_COPY=1` holds a relaxing system
+to the strict rule, to see on one machine what the other kind does; with
+`RSX_D3D12_STAGE_ALIGN=256` the stage is aligned as it was before 0.2.5,
+which reproduces the freeze on the first loading screen.
+
 `PS3_VERBOSE=1` turns the runtime's per-event log back on (it is off here:
 two lines per SPURS job at 2,700 jobs a second).
 
