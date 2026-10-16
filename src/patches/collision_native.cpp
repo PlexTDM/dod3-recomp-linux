@@ -77,28 +77,37 @@ static inline double ppu_fmadd_core(double a, double c, double b, int neg_b, int
     if (PPU_UNLIKELY(r != r)) return ppu_fmadd_nan(a, c, b);   /* any NaN input lands here */
     return neg_res ? -r : r;
 }
+/* Round to single: the result must be representable in single format, NaNs
+ * included -- their payload is truncated to the single fraction (as RPCS3). */
+static inline double ppu_fp_single(double r)
+{
+    return (double)(float)r;
+}
 /* The single-precision arithmetic forms, fused: one NaN test and the round
  * to single, where ppu_fp_single(ppu_fadd(..)) tested twice. Identical
- * results: a NaN result takes the same priority rules and keeps its double
- * payload (ppu_fp_single leaves NaNs alone); anything else is rounded. */
-static inline double ppu_fadds(double a, double b) { const double r = a + b; if (PPU_UNLIKELY(r != r)) return ppu_fp_bin_nan(a, b); return (double)(float)r; }
-static inline double ppu_fsubs(double a, double b) { const double r = a - b; if (PPU_UNLIKELY(r != r)) return ppu_fp_bin_nan(a, b); return (double)(float)r; }
-static inline double ppu_fmuls(double a, double b) { const double r = a * b; if (PPU_UNLIKELY(r != r)) return ppu_fp_bin_nan(a, b); return (double)(float)r; }
-static inline double ppu_fdivs(double a, double b) { const double r = a / b; if (PPU_UNLIKELY(r != r)) return ppu_fp_bin_nan(a, b); return (double)(float)r; }
+ * results: a NaN result takes the same priority rules and is then rounded
+ * like any other (its payload truncated to the single fraction). */
+static inline double ppu_fadds(double a, double b) { const double r = a + b; if (PPU_UNLIKELY(r != r)) return ppu_fp_single(ppu_fp_bin_nan(a, b)); return (double)(float)r; }
+static inline double ppu_fsubs(double a, double b) { const double r = a - b; if (PPU_UNLIKELY(r != r)) return ppu_fp_single(ppu_fp_bin_nan(a, b)); return (double)(float)r; }
+static inline double ppu_fmuls(double a, double b) { const double r = a * b; if (PPU_UNLIKELY(r != r)) return ppu_fp_single(ppu_fp_bin_nan(a, b)); return (double)(float)r; }
+static inline double ppu_fdivs(double a, double b) { const double r = a / b; if (PPU_UNLIKELY(r != r)) return ppu_fp_single(ppu_fp_bin_nan(a, b)); return (double)(float)r; }
 static inline double ppu_fmadds_core(double a, double c, double b, int neg_b, int neg_res)
 {
     const double r = fma(a, c, neg_b ? -b : b);
-    if (PPU_UNLIKELY(r != r)) return ppu_fmadd_nan(a, c, b);
+    if (PPU_UNLIKELY(r != r)) return ppu_fp_single(ppu_fmadd_nan(a, c, b));
     return (double)(float)(neg_res ? -r : r);
 }
-/* Round-to-single of a NaN keeps the full double payload (quieted). */
-static inline double ppu_fp_single(double r)
-{
-    return (r != r) ? r : (double)(float)r;
-}
+/* frsp of a NaN (Book I 4.6.6): FRB[0:34] quieted, then 29 zero bits -- the
+ * payload truncated to the single fraction. Explicit, not host conversion. */
 static inline double ppu_frsp(double b)
 {
-    if (b != b) return ppu_fp_quiet(b);
+    if (b != b) {
+        double q = ppu_fp_quiet(b);
+        uint64_t u; memcpy(&u, &q, 8);
+        u &= ~((1ull << 29) - 1);
+        memcpy(&q, &u, 8);
+        return q;
+    }
     return (double)(float)b;
 }
 
@@ -185,7 +194,7 @@ void dod3_collision_native(ppu_context* ctx)
     f1 = ppu_fmadds_core(f9, f9, f1, 0, 0);
     f1 = ppu_fmadds_core(f11, f11, f1, 0, 0);
     { double a = f1; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_00273020;
+    if (((cr >> 29) & 1)) goto loc_00273020;
     f2 = 1.0 / sqrt(f1);
     r6 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r6 = r6 + (int64_t)(0x2E30);
@@ -224,7 +233,7 @@ loc_00273020:
     f1 = ppu_fmadds_core(f12, f12, f1, 0, 0);
     f1 = ppu_fmadds_core(f2, f2, f1, 0, 0);
     { double a = f1; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_002730B8;
+    if (((cr >> 29) & 1)) goto loc_002730B8;
     f6 = 1.0 / sqrt(f1);
     r6 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r6 = r6 + (int64_t)(0x2E30);
@@ -270,7 +279,7 @@ loc_002730B8:
     f8 = ppu_fmadds_core(f13, f13, f1, 0, 0);
     f8 = ppu_fmadds_core(f30, f30, f8, 0, 0);
     { double a = f8; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_00273178;
+    if (((cr >> 29) & 1)) goto loc_00273178;
     f1 = 1.0 / sqrt(f8);
     r6 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r6 = r6 + (int64_t)(0x2E30);
@@ -328,7 +337,7 @@ loc_00273178:
     f15 = f17;
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00273498;
+    if (((cr >> 31) & 1)) goto loc_00273498;
     f1 = ppu_fmuls(f6, f19);
     { float ftmp = (float)f26; uint32_t tmp; memcpy(&tmp, &ftmp, 4); fl4_E0 = (uint32_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -372,7 +381,7 @@ loc_00273178:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r3 = r3 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r9; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r9; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -401,13 +410,13 @@ loc_00273178:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_0027339C;
-    if ((!((cr >> 24) & 2))) goto loc_00273374;
-    if ((!((cr >> 4) & 8))) goto loc_00273340;
+    if (((cr >> 29) & 1)) goto loc_0027339C;
+    if ((!((cr >> 25) & 1))) goto loc_00273374;
+    if ((!((cr >> 7) & 1))) goto loc_00273340;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273340;
+    if (((cr >> 25) & 1)) goto loc_00273340;
     f1 = ppu_fmadds_core(f19, f20, f28, 1, 1);
     f2 = ppu_fmadds_core(f21, f23, f30, 1, 1);
     r9 = (int64_t)(int32_t)(1);
@@ -418,12 +427,12 @@ loc_00273178:
     stf(r1 + 0x7C, f3);
 loc_00273340:
     r5 = r9 | 0x0;
-    if ((!((cr >> 0) & 4))) goto loc_00273374;
+    if ((!((cr >> 2) & 1))) goto loc_00273374;
     f1 = ppu_fadds(f12, f10);
     r5 = r9 | 0x0;
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273374;
+    if (((cr >> 25) & 1)) goto loc_00273374;
     r5 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -435,10 +444,10 @@ loc_00273374:
     r4 = r5 | 0x0;
     { double a = f27; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_0027339C;
+    if (((cr >> 25) & 1)) goto loc_0027339C;
     r3 = (int64_t)(int32_t)(0);
-    if (((cr >> 4) & 8)) goto loc_00273468;
-    if (((cr >> 0) & 4)) goto loc_00273468;
+    if (((cr >> 7) & 1)) goto loc_00273468;
+    if (((cr >> 2) & 1)) goto loc_00273468;
     r3 = (int64_t)(int32_t)(1);
     goto loc_00273468;
 loc_0027339C:
@@ -481,8 +490,8 @@ loc_0027339C:
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f6 = (f1 >= 0.0) ? f26 : f31;
-    if (((cr >> 28) & 8)) goto loc_00273490;
-    if (((cr >> 24) & 8)) goto loc_00273490;
+    if (((cr >> 31) & 1)) goto loc_00273490;
+    if (((cr >> 27) & 1)) goto loc_00273490;
     f15 = f12;
     f17 = f11;
     r3 = r4 | 0x0;
@@ -498,12 +507,12 @@ loc_00273468:
     f25 = f26;
     r4 = r3 | 0x0;
     r3 = r5 | 0x0;
-    { int64_t a = (int32_t)r4; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
+    { int64_t a = (int32_t)r4; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     r4 = r3 | 0x0;
     f17 = f15;
     f14 = f25;
     f16 = f17;
-    if ((!((cr >> 28) & 2))) goto loc_00273498;
+    if ((!((cr >> 29) & 1))) goto loc_00273498;
 loc_00273490:
     r3 = (int64_t)(int32_t)(0);
     goto loc_00275A58;
@@ -527,7 +536,7 @@ loc_00273498:
     f2 = ppu_fmadds_core(f6, f6, f2, 0, 0);
     f2 = ppu_fmadds_core(f5, f5, f2, 0, 0);
     { double a = f2; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_002737C0;
+    if (((cr >> 31) & 1)) goto loc_002737C0;
     f1 = ppu_fmuls(f4, f19);
     { float ftmp = (float)f22; uint32_t tmp; memcpy(&tmp, &ftmp, 4); fl4_E8 = (uint32_t)(tmp); }
     { uint32_t tmp = fl4_CC; float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
@@ -603,18 +612,18 @@ loc_00273498:
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
     { double a = f8; double b = f30; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f8; double b = f31; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
-    if (((cr >> 28) & 2)) goto loc_002736E4;
+    if (((cr >> 29) & 1)) goto loc_002736E4;
     r12 = r3 | 0x0;
     r25 = r12 | 0x0;
-    { int64_t a = (int32_t)r25; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_002736B8;
+    { int64_t a = (int32_t)r25; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
+    if ((!((cr >> 29) & 1))) goto loc_002736B8;
     r25 = r3 | 0x0;
-    if ((!((cr >> 24) & 8))) goto loc_00273674;
+    if ((!((cr >> 27) & 1))) goto loc_00273674;
     f1 = ppu_fsubs(f30, f9);
     r25 = r3 | 0x0;
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_00273674;
+    if (((cr >> 29) & 1)) goto loc_00273674;
     f1 = ppu_fmadds_core(f11, f21, f26, 1, 1);
     f2 = ppu_fmadds_core(f10, f24, f27, 1, 1);
     r25 = (int64_t)(int32_t)(1);
@@ -629,12 +638,12 @@ loc_00273498:
     stf(r1 + 0x7C, f3);
 loc_00273674:
     r12 = r25 | 0x0;
-    if ((!((cr >> 4) & 4))) goto loc_002736B8;
+    if ((!((cr >> 6) & 1))) goto loc_002736B8;
     f1 = ppu_fadds(f31, f9);
     r12 = r25 | 0x0;
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_002736B8;
+    if (((cr >> 29) & 1)) goto loc_002736B8;
     r12 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f6);
     stf(r1 + 0x78, f4);
@@ -650,10 +659,10 @@ loc_002736B8:
     r11 = r12 | 0x0;
     { double a = f25; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_002736E4;
+    if (((cr >> 29) & 1)) goto loc_002736E4;
     { uint32_t tmp = fl4_80; float ftmp; memcpy(&ftmp, &tmp, 4); f25 = ftmp; }
-    if (((cr >> 24) & 8)) goto loc_002737B8;
-    if (((cr >> 4) & 4)) goto loc_002737B8;
+    if (((cr >> 27) & 1)) goto loc_002737B8;
+    if (((cr >> 6) & 1)) goto loc_002737B8;
     r10 = r12 | 0x0;
     r11 = r10 | 0x0;
     goto loc_002737C0;
@@ -699,8 +708,8 @@ loc_002736E4:
     { double a = f5; double b = f6; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f8 = (f1 >= 0.0) ? f14 : f27;
     f7 = (f2 >= 0.0) ? f7 : f4;
-    if (((cr >> 28) & 8)) goto loc_002737B8;
-    if (((cr >> 24) & 8)) goto loc_002737B8;
+    if (((cr >> 31) & 1)) goto loc_002737B8;
+    if (((cr >> 27) & 1)) goto loc_002737B8;
     f16 = f12;
     r10 = r11 | 0x0;
     f17 = f11;
@@ -730,7 +739,7 @@ loc_002737C0:
     f1 = ppu_fmadds_core(f6, f6, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00273AB0;
+    if (((cr >> 31) & 1)) goto loc_00273AB0;
     f1 = ppu_fmuls(f4, f19);
     { uint32_t tmp = fl4_CC; float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
     f2 = ppu_fmuls(f4, f22);
@@ -780,7 +789,7 @@ loc_002737C0:
     f1 = ppu_fmuls(f25, f1);
     f25 = ppu_fsubs(f24, f23);
     { uint32_t tmp = fl4_BC; float ftmp; memcpy(&ftmp, &tmp, 4); f30 = ftmp; }
-    { int64_t a = (int32_t)r10; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r10; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmadds_core(f31, f2, f1, 0, 0);
     f2 = ppu_fmadds_core(f5, f30, f7, 0, 0);
     f31 = ldf(r26 + 0x8);
@@ -802,13 +811,13 @@ loc_002737C0:
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
     { double a = f8; double b = f30; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f8; double b = f31; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_002739D8;
-    if ((!((cr >> 24) & 2))) goto loc_002739B8;
-    if ((!((cr >> 4) & 8))) goto loc_00273974;
+    if (((cr >> 29) & 1)) goto loc_002739D8;
+    if ((!((cr >> 25) & 1))) goto loc_002739B8;
+    if ((!((cr >> 7) & 1))) goto loc_00273974;
     f1 = ppu_fsubs(f30, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273974;
+    if (((cr >> 25) & 1)) goto loc_00273974;
     r10 = (int64_t)(int32_t)(1);
     f1 = ppu_fmadds_core(f22, f11, f26, 1, 1);
     f2 = ppu_fmadds_core(f20, f12, f27, 1, 1);
@@ -825,11 +834,11 @@ loc_002737C0:
     r11 = r12 | 0x0;
     stf(r1 + 0x7C, f3);
 loc_00273974:
-    if ((!((cr >> 0) & 4))) goto loc_002739B8;
+    if ((!((cr >> 2) & 1))) goto loc_002739B8;
     f1 = ppu_fadds(f31, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002739B8;
+    if (((cr >> 25) & 1)) goto loc_002739B8;
     r10 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f6);
     r9 = r10 | 0x0;
@@ -846,10 +855,10 @@ loc_002739B8:
     { uint64_t tmp = fl8_90; memcpy(&f2, &tmp, 8); }
     { double a = f25; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002739D8;
+    if (((cr >> 25) & 1)) goto loc_002739D8;
     { uint32_t tmp = fl4_80; float ftmp; memcpy(&ftmp, &tmp, 4); f25 = ftmp; }
-    if (((cr >> 4) & 8)) goto loc_00273AA8;
-    if ((!((cr >> 0) & 4))) goto loc_00273AB0;
+    if (((cr >> 7) & 1)) goto loc_00273AA8;
+    if ((!((cr >> 2) & 1))) goto loc_00273AB0;
     goto loc_00273AA8;
 loc_002739D8:
     f1 = ppu_fdivs(f18, f7);
@@ -893,8 +902,8 @@ loc_002739D8:
     { double a = f5; double b = f6; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f8 = (f1 >= 0.0) ? f14 : f27;
     f7 = (f3 >= 0.0) ? f7 : f30;
-    if (((cr >> 28) & 8)) goto loc_00273AA8;
-    if (((cr >> 24) & 8)) goto loc_00273AA8;
+    if (((cr >> 31) & 1)) goto loc_00273AA8;
+    if (((cr >> 27) & 1)) goto loc_00273AA8;
     f15 = f12;
     { uint64_t tmp; memcpy(&tmp, &f7, 8); fl8_88 = (uint64_t)(tmp); }
     f17 = f11;
@@ -925,7 +934,7 @@ loc_00273AB0:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00273DD0;
+    if (((cr >> 31) & 1)) goto loc_00273DD0;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -969,7 +978,7 @@ loc_00273AB0:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r6 = r6 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r10; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r10; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -998,13 +1007,13 @@ loc_00273AB0:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_00273CDC;
-    if ((!((cr >> 24) & 2))) goto loc_00273CC4;
-    if ((!((cr >> 4) & 8))) goto loc_00273C84;
+    if (((cr >> 29) & 1)) goto loc_00273CDC;
+    if ((!((cr >> 25) & 1))) goto loc_00273CC4;
+    if ((!((cr >> 7) & 1))) goto loc_00273C84;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273C84;
+    if (((cr >> 25) & 1)) goto loc_00273C84;
     { uint32_t tmp = fl4_A4; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_AC; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r11 = (int64_t)(int32_t)(1);
@@ -1026,11 +1035,11 @@ loc_00273AB0:
     stf(r1 + 0x74, f2);
     stf(r1 + 0x7C, f1);
 loc_00273C84:
-    if ((!((cr >> 0) & 4))) goto loc_00273CC4;
+    if ((!((cr >> 2) & 1))) goto loc_00273CC4;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273CC4;
+    if (((cr >> 25) & 1)) goto loc_00273CC4;
     r11 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -1045,9 +1054,9 @@ loc_00273C84:
 loc_00273CC4:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273CDC;
-    if (((cr >> 4) & 8)) goto loc_00273DC8;
-    if ((!((cr >> 0) & 4))) goto loc_00273DD0;
+    if (((cr >> 25) & 1)) goto loc_00273CDC;
+    if (((cr >> 7) & 1)) goto loc_00273DC8;
+    if ((!((cr >> 2) & 1))) goto loc_00273DD0;
     goto loc_00273DC8;
 loc_00273CDC:
     f1 = ppu_fdivs(f18, f8);
@@ -1098,8 +1107,8 @@ loc_00273CDC:
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f6 = (f1 >= 0.0) ? f25 : f6;
-    if (((cr >> 28) & 8)) goto loc_00273DC8;
-    if (((cr >> 24) & 8)) goto loc_00273DC8;
+    if (((cr >> 31) & 1)) goto loc_00273DC8;
+    if (((cr >> 27) & 1)) goto loc_00273DC8;
     f16 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f9, 8); fl8_88 = (uint64_t)(tmp); }
@@ -1127,7 +1136,7 @@ loc_00273DD0:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_002740BC;
+    if (((cr >> 31) & 1)) goto loc_002740BC;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -1171,7 +1180,7 @@ loc_00273DD0:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r6 = r6 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r11; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r11; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -1200,13 +1209,13 @@ loc_00273DD0:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_00273FDC;
-    if ((!((cr >> 24) & 2))) goto loc_00273FC4;
-    if ((!((cr >> 4) & 8))) goto loc_00273F88;
+    if (((cr >> 29) & 1)) goto loc_00273FDC;
+    if ((!((cr >> 25) & 1))) goto loc_00273FC4;
+    if ((!((cr >> 7) & 1))) goto loc_00273F88;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273F88;
+    if (((cr >> 25) & 1)) goto loc_00273F88;
     { uint32_t tmp = fl4_A0; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_9C; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r12 = (int64_t)(int32_t)(1);
@@ -1224,11 +1233,11 @@ loc_00273DD0:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00273F88:
-    if ((!((cr >> 0) & 4))) goto loc_00273FC4;
+    if ((!((cr >> 2) & 1))) goto loc_00273FC4;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273FC4;
+    if (((cr >> 25) & 1)) goto loc_00273FC4;
     r12 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -1242,9 +1251,9 @@ loc_00273F88:
 loc_00273FC4:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00273FDC;
-    if (((cr >> 4) & 8)) goto loc_002740B4;
-    if ((!((cr >> 0) & 4))) goto loc_002740BC;
+    if (((cr >> 25) & 1)) goto loc_00273FDC;
+    if (((cr >> 7) & 1)) goto loc_002740B4;
+    if ((!((cr >> 2) & 1))) goto loc_002740BC;
     goto loc_002740B4;
 loc_00273FDC:
     f1 = ppu_fdivs(f18, f8);
@@ -1290,8 +1299,8 @@ loc_00273FDC:
     f8 = (f0 >= 0.0) ? f14 : f8;
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f6 = (f1 >= 0.0) ? f2 : f6;
-    if (((cr >> 28) & 8)) goto loc_002740B4;
-    if (((cr >> 24) & 8)) goto loc_002740B4;
+    if (((cr >> 31) & 1)) goto loc_002740B4;
+    if (((cr >> 27) & 1)) goto loc_002740B4;
     f15 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f6, 8); fl8_88 = (uint64_t)(tmp); }
@@ -1319,7 +1328,7 @@ loc_002740BC:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_002743A0;
+    if (((cr >> 31) & 1)) goto loc_002743A0;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -1363,7 +1372,7 @@ loc_002740BC:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r6 = r6 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r12; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r12; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -1392,13 +1401,13 @@ loc_002740BC:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_002742C0;
-    if ((!((cr >> 24) & 2))) goto loc_002742A8;
-    if ((!((cr >> 4) & 8))) goto loc_00274270;
+    if (((cr >> 29) & 1)) goto loc_002742C0;
+    if ((!((cr >> 25) & 1))) goto loc_002742A8;
+    if ((!((cr >> 7) & 1))) goto loc_00274270;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274270;
+    if (((cr >> 25) & 1)) goto loc_00274270;
     { uint32_t tmp = fl4_AC; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_A8; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r25 = (int64_t)(int32_t)(1);
@@ -1415,11 +1424,11 @@ loc_002740BC:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00274270:
-    if ((!((cr >> 0) & 4))) goto loc_002742A8;
+    if ((!((cr >> 2) & 1))) goto loc_002742A8;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002742A8;
+    if (((cr >> 25) & 1)) goto loc_002742A8;
     r25 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     r9 = r25 | 0x0;
@@ -1432,9 +1441,9 @@ loc_00274270:
 loc_002742A8:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002742C0;
-    if (((cr >> 4) & 8)) goto loc_00274398;
-    if ((!((cr >> 0) & 4))) goto loc_002743A0;
+    if (((cr >> 25) & 1)) goto loc_002742C0;
+    if (((cr >> 7) & 1)) goto loc_00274398;
+    if ((!((cr >> 2) & 1))) goto loc_002743A0;
     goto loc_00274398;
 loc_002742C0:
     f1 = ppu_fdivs(f18, f8);
@@ -1480,8 +1489,8 @@ loc_002742C0:
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f6 = (f1 >= 0.0) ? f25 : f6;
-    if (((cr >> 28) & 8)) goto loc_00274398;
-    if (((cr >> 24) & 8)) goto loc_00274398;
+    if (((cr >> 31) & 1)) goto loc_00274398;
+    if (((cr >> 27) & 1)) goto loc_00274398;
     f16 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f9, 8); fl8_88 = (uint64_t)(tmp); }
@@ -1509,7 +1518,7 @@ loc_002743A0:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_0027467C;
+    if (((cr >> 31) & 1)) goto loc_0027467C;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -1553,7 +1562,7 @@ loc_002743A0:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r6 = r6 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r25; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r25; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -1582,13 +1591,13 @@ loc_002743A0:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_0027459C;
-    if ((!((cr >> 24) & 2))) goto loc_00274584;
-    if ((!((cr >> 4) & 8))) goto loc_00274550;
+    if (((cr >> 29) & 1)) goto loc_0027459C;
+    if ((!((cr >> 25) & 1))) goto loc_00274584;
+    if ((!((cr >> 7) & 1))) goto loc_00274550;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274550;
+    if (((cr >> 25) & 1)) goto loc_00274550;
     { uint32_t tmp = fl4_DC; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_D8; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r3 = (int64_t)(int32_t)(1);
@@ -1604,11 +1613,11 @@ loc_002743A0:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00274550:
-    if ((!((cr >> 0) & 4))) goto loc_00274584;
+    if ((!((cr >> 2) & 1))) goto loc_00274584;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274584;
+    if (((cr >> 25) & 1)) goto loc_00274584;
     r3 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -1620,9 +1629,9 @@ loc_00274550:
 loc_00274584:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_0027459C;
-    if (((cr >> 4) & 8)) goto loc_00274674;
-    if ((!((cr >> 0) & 4))) goto loc_0027467C;
+    if (((cr >> 25) & 1)) goto loc_0027459C;
+    if (((cr >> 7) & 1)) goto loc_00274674;
+    if ((!((cr >> 2) & 1))) goto loc_0027467C;
     goto loc_00274674;
 loc_0027459C:
     f1 = ppu_fdivs(f18, f8);
@@ -1668,8 +1677,8 @@ loc_0027459C:
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f8 = (f1 >= 0.0) ? f14 : f30;
     f6 = (f2 >= 0.0) ? f6 : f31;
-    if (((cr >> 28) & 8)) goto loc_00274674;
-    if (((cr >> 24) & 8)) goto loc_00274674;
+    if (((cr >> 31) & 1)) goto loc_00274674;
+    if (((cr >> 27) & 1)) goto loc_00274674;
     f15 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f6, 8); fl8_88 = (uint64_t)(tmp); }
@@ -1697,7 +1706,7 @@ loc_0027467C:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00274950;
+    if (((cr >> 31) & 1)) goto loc_00274950;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -1741,7 +1750,7 @@ loc_0027467C:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r6 = r6 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -1770,13 +1779,13 @@ loc_0027467C:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_00274870;
-    if ((!((cr >> 24) & 2))) goto loc_00274858;
-    if ((!((cr >> 4) & 8))) goto loc_00274828;
+    if (((cr >> 29) & 1)) goto loc_00274870;
+    if ((!((cr >> 25) & 1))) goto loc_00274858;
+    if ((!((cr >> 7) & 1))) goto loc_00274828;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274828;
+    if (((cr >> 25) & 1)) goto loc_00274828;
     { uint32_t tmp = fl4_A0; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_9C; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r4 = (int64_t)(int32_t)(1);
@@ -1791,11 +1800,11 @@ loc_0027467C:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00274828:
-    if ((!((cr >> 0) & 4))) goto loc_00274858;
+    if ((!((cr >> 2) & 1))) goto loc_00274858;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274858;
+    if (((cr >> 25) & 1)) goto loc_00274858;
     r4 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     r9 = r4 | 0x0;
@@ -1806,9 +1815,9 @@ loc_00274828:
 loc_00274858:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274870;
-    if (((cr >> 4) & 8)) goto loc_00274948;
-    if ((!((cr >> 0) & 4))) goto loc_00274950;
+    if (((cr >> 25) & 1)) goto loc_00274870;
+    if (((cr >> 7) & 1)) goto loc_00274948;
+    if ((!((cr >> 2) & 1))) goto loc_00274950;
     goto loc_00274948;
 loc_00274870:
     f1 = ppu_fdivs(f18, f8);
@@ -1854,8 +1863,8 @@ loc_00274870:
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f6 = (f1 >= 0.0) ? f25 : f6;
-    if (((cr >> 28) & 8)) goto loc_00274948;
-    if (((cr >> 24) & 8)) goto loc_00274948;
+    if (((cr >> 31) & 1)) goto loc_00274948;
+    if (((cr >> 27) & 1)) goto loc_00274948;
     f16 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f9, 8); fl8_88 = (uint64_t)(tmp); }
@@ -1883,7 +1892,7 @@ loc_00274950:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00274C1C;
+    if (((cr >> 31) & 1)) goto loc_00274C1C;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -1927,7 +1936,7 @@ loc_00274950:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r3 = r3 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r4; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r4; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -1956,13 +1965,13 @@ loc_00274950:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_00274B3C;
-    if ((!((cr >> 24) & 2))) goto loc_00274B24;
-    if ((!((cr >> 4) & 8))) goto loc_00274AF8;
+    if (((cr >> 29) & 1)) goto loc_00274B3C;
+    if ((!((cr >> 25) & 1))) goto loc_00274B24;
+    if ((!((cr >> 7) & 1))) goto loc_00274AF8;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274AF8;
+    if (((cr >> 25) & 1)) goto loc_00274AF8;
     { uint32_t tmp = fl4_AC; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_A8; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r5 = (int64_t)(int32_t)(1);
@@ -1976,11 +1985,11 @@ loc_00274950:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00274AF8:
-    if ((!((cr >> 0) & 4))) goto loc_00274B24;
+    if ((!((cr >> 2) & 1))) goto loc_00274B24;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274B24;
+    if (((cr >> 25) & 1)) goto loc_00274B24;
     r5 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -1990,9 +1999,9 @@ loc_00274AF8:
 loc_00274B24:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274B3C;
-    if (((cr >> 4) & 8)) goto loc_00274C14;
-    if ((!((cr >> 0) & 4))) goto loc_00274C1C;
+    if (((cr >> 25) & 1)) goto loc_00274B3C;
+    if (((cr >> 7) & 1)) goto loc_00274C14;
+    if ((!((cr >> 2) & 1))) goto loc_00274C1C;
     goto loc_00274C14;
 loc_00274B3C:
     f1 = ppu_fdivs(f18, f8);
@@ -2038,8 +2047,8 @@ loc_00274B3C:
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f8 = (f1 >= 0.0) ? f14 : f30;
     f6 = (f2 >= 0.0) ? f6 : f31;
-    if (((cr >> 28) & 8)) goto loc_00274C14;
-    if (((cr >> 24) & 8)) goto loc_00274C14;
+    if (((cr >> 31) & 1)) goto loc_00274C14;
+    if (((cr >> 27) & 1)) goto loc_00274C14;
     f15 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f6, 8); fl8_88 = (uint64_t)(tmp); }
@@ -2067,7 +2076,7 @@ loc_00274C1C:
     f1 = ppu_fmadds_core(f7, f7, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00274EE0;
+    if (((cr >> 31) & 1)) goto loc_00274EE0;
     f1 = ppu_fmuls(f6, f19);
     { uint64_t tmp; memcpy(&tmp, &f26, 8); fl8_F0 = (uint64_t)(tmp); }
     f2 = ppu_fmuls(f6, f22);
@@ -2111,7 +2120,7 @@ loc_00274C1C:
     f2 = fabs(f2);
     f10 = ppu_fmadds_core(f7, f26, f10, 0, 0);
     r3 = r3 + (int64_t)(0x2E30);
-    { int64_t a = (int32_t)r5; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r5; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f27, f1);
     f27 = ldf(r28 + 0x8);
     f9 = ppu_fmadds_core(f5, f27, f9, 0, 0);
@@ -2140,13 +2149,13 @@ loc_00274C1C:
     f12 = ppu_fadds(f1, f12);
     { double a = f9; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f9; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_00274E00;
-    if ((!((cr >> 24) & 2))) goto loc_00274DE8;
-    if ((!((cr >> 4) & 8))) goto loc_00274DC0;
+    if (((cr >> 29) & 1)) goto loc_00274E00;
+    if ((!((cr >> 25) & 1))) goto loc_00274DE8;
+    if ((!((cr >> 7) & 1))) goto loc_00274DC0;
     f1 = ppu_fsubs(f11, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274DC0;
+    if (((cr >> 25) & 1)) goto loc_00274DC0;
     { uint32_t tmp = fl4_DC; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_D8; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r9 = (int64_t)(int32_t)(1);
@@ -2159,11 +2168,11 @@ loc_00274C1C:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00274DC0:
-    if ((!((cr >> 0) & 4))) goto loc_00274DE8;
+    if ((!((cr >> 2) & 1))) goto loc_00274DE8;
     f1 = ppu_fadds(f12, f10);
     { double a = f9; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274DE8;
+    if (((cr >> 25) & 1)) goto loc_00274DE8;
     r9 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f7);
     stf(r1 + 0x78, f6);
@@ -2172,9 +2181,9 @@ loc_00274DC0:
 loc_00274DE8:
     { double a = f27; double b = f26; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00274E00;
-    if (((cr >> 4) & 8)) goto loc_00274ED8;
-    if ((!((cr >> 0) & 4))) goto loc_00274EE0;
+    if (((cr >> 25) & 1)) goto loc_00274E00;
+    if (((cr >> 7) & 1)) goto loc_00274ED8;
+    if ((!((cr >> 2) & 1))) goto loc_00274EE0;
     goto loc_00274ED8;
 loc_00274E00:
     f1 = ppu_fdivs(f18, f8);
@@ -2220,8 +2229,8 @@ loc_00274E00:
     { double a = f5; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { double a = f5; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f6 = (f1 >= 0.0) ? f25 : f6;
-    if (((cr >> 28) & 8)) goto loc_00274ED8;
-    if (((cr >> 24) & 8)) goto loc_00274ED8;
+    if (((cr >> 31) & 1)) goto loc_00274ED8;
+    if (((cr >> 27) & 1)) goto loc_00274ED8;
     f16 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f9, 8); fl8_88 = (uint64_t)(tmp); }
@@ -2253,7 +2262,7 @@ loc_00274EE0:
     f1 = ppu_fmadds_core(f6, f6, f1, 0, 0);
     f1 = ppu_fmadds_core(f5, f5, f1, 0, 0);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_002751C4;
+    if (((cr >> 31) & 1)) goto loc_002751C4;
     f1 = ppu_fmuls(f4, f19);
     { float ftmp = (float)f22; uint32_t tmp; memcpy(&tmp, &ftmp, 4); fl4_E0 = (uint32_t)(tmp); }
     { uint32_t tmp = fl4_CC; float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
@@ -2297,7 +2306,7 @@ loc_00274EE0:
     f3 = fabs(f3);
     r3 = r3 + (int64_t)(0x2E30);
     f22 = ppu_fsubs(f24, f23);
-    { int64_t a = (int32_t)r9; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
+    { int64_t a = (int32_t)r9; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     f1 = ppu_fmuls(f25, f1);
     f25 = ldf(r26 + 0x0);
     f8 = ldf(r28 + 0x8);
@@ -2327,13 +2336,13 @@ loc_00274EE0:
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
     { double a = f8; double b = f30; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
     { double a = f8; double b = f31; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 0)) | (cr_val << 0); }
-    if (((cr >> 28) & 2)) goto loc_002750E0;
-    if ((!((cr >> 24) & 2))) goto loc_002750C0;
-    if ((!((cr >> 4) & 8))) goto loc_00275098;
+    if (((cr >> 29) & 1)) goto loc_002750E0;
+    if ((!((cr >> 25) & 1))) goto loc_002750C0;
+    if ((!((cr >> 7) & 1))) goto loc_00275098;
     f1 = ppu_fsubs(f30, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00275098;
+    if (((cr >> 25) & 1)) goto loc_00275098;
     { uint32_t tmp = fl4_A0; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     r3 = (int64_t)(int32_t)(1);
     { uint32_t tmp = fl4_9C; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
@@ -2346,11 +2355,11 @@ loc_00274EE0:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00275098:
-    if ((!((cr >> 0) & 4))) goto loc_002750C0;
+    if ((!((cr >> 2) & 1))) goto loc_002750C0;
     f1 = ppu_fadds(f31, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002750C0;
+    if (((cr >> 25) & 1)) goto loc_002750C0;
     r3 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f6);
     stf(r1 + 0x78, f4);
@@ -2360,10 +2369,10 @@ loc_002750C0:
     { uint64_t tmp = fl8_90; memcpy(&f2, &tmp, 8); }
     { double a = f25; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002750E0;
+    if (((cr >> 25) & 1)) goto loc_002750E0;
     { uint32_t tmp = fl4_80; float ftmp; memcpy(&ftmp, &tmp, 4); f25 = ftmp; }
-    if (((cr >> 4) & 8)) goto loc_002751BC;
-    if ((!((cr >> 0) & 4))) goto loc_002751C4;
+    if (((cr >> 7) & 1)) goto loc_002751BC;
+    if ((!((cr >> 2) & 1))) goto loc_002751C4;
     goto loc_002751BC;
 loc_002750E0:
     f1 = ppu_fdivs(f18, f7);
@@ -2410,8 +2419,8 @@ loc_002750E0:
     { double a = f5; double b = f6; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f8 = (f1 >= 0.0) ? f14 : f3;
     f7 = (f4 >= 0.0) ? f7 : f2;
-    if (((cr >> 28) & 8)) goto loc_002751BC;
-    if (((cr >> 24) & 8)) goto loc_002751BC;
+    if (((cr >> 31) & 1)) goto loc_002751BC;
+    if (((cr >> 27) & 1)) goto loc_002751BC;
     f15 = f12;
     f17 = f11;
     { uint64_t tmp; memcpy(&tmp, &f7, 8); fl8_88 = (uint64_t)(tmp); }
@@ -2443,7 +2452,7 @@ loc_002751C4:
     f1 = ppu_fmadds_core(f6, f6, f1, 0, 0);
     f1 = ppu_fmadds_core(f4, f4, f1, 0, 0);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_002754AC;
+    if (((cr >> 31) & 1)) goto loc_002754AC;
     f1 = ppu_fmuls(f5, f19);
     { float ftmp = (float)f22; uint32_t tmp; memcpy(&tmp, &ftmp, 4); fl4_E4 = (uint32_t)(tmp); }
     { uint32_t tmp = fl4_CC; float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
@@ -2516,15 +2525,15 @@ loc_002751C4:
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
     { double a = f8; double b = f30; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f8; double b = f31; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
-    if (((cr >> 28) & 2)) goto loc_002753C8;
+    if (((cr >> 29) & 1)) goto loc_002753C8;
     r3 = ld32(r1 + 0x70);
-    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_002753A8;
-    if ((!((cr >> 24) & 8))) goto loc_00275380;
+    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
+    if ((!((cr >> 29) & 1))) goto loc_002753A8;
+    if ((!((cr >> 27) & 1))) goto loc_00275380;
     f1 = ppu_fsubs(f30, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_00275380;
+    if (((cr >> 29) & 1)) goto loc_00275380;
     { uint32_t tmp = fl4_AC; float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
     { uint32_t tmp = fl4_A8; float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
     r3 = (int64_t)(int32_t)(1);
@@ -2537,11 +2546,11 @@ loc_002751C4:
     stf(r1 + 0x7C, f2);
     stf(r1 + 0x78, f3);
 loc_00275380:
-    if ((!((cr >> 4) & 4))) goto loc_002753A8;
+    if ((!((cr >> 6) & 1))) goto loc_002753A8;
     f1 = ppu_fadds(f31, f9);
     { double a = f8; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_002753A8;
+    if (((cr >> 29) & 1)) goto loc_002753A8;
     r3 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f6);
     stf(r1 + 0x78, f5);
@@ -2551,10 +2560,10 @@ loc_002753A8:
     { uint64_t tmp = fl8_90; memcpy(&f2, &tmp, 8); }
     { double a = f25; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_002753C8;
+    if (((cr >> 29) & 1)) goto loc_002753C8;
     { uint32_t tmp = fl4_80; float ftmp; memcpy(&ftmp, &tmp, 4); f25 = ftmp; }
-    if (((cr >> 24) & 8)) goto loc_002754A4;
-    if ((!((cr >> 4) & 4))) goto loc_002754AC;
+    if (((cr >> 27) & 1)) goto loc_002754A4;
+    if ((!((cr >> 6) & 1))) goto loc_002754AC;
     goto loc_002754A4;
 loc_002753C8:
     f1 = ppu_fdivs(f18, f7);
@@ -2601,8 +2610,8 @@ loc_002753C8:
     { double a = f2; double b = f6; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f4 = (f1 >= 0.0) ? f14 : f27;
     f3 = (f10 >= 0.0) ? f11 : f28;
-    if (((cr >> 28) & 8)) goto loc_002754A4;
-    if (((cr >> 24) & 8)) goto loc_002754A4;
+    if (((cr >> 31) & 1)) goto loc_002754A4;
+    if (((cr >> 27) & 1)) goto loc_002754A4;
     f16 = f9;
     { uint64_t tmp; memcpy(&tmp, &f5, 8); fl8_88 = (uint64_t)(tmp); }
     f17 = f8;
@@ -2633,7 +2642,7 @@ loc_002754AC:
     f1 = ppu_fmadds_core(f6, f6, f1, 0, 0);
     f1 = ppu_fmadds_core(f4, f4, f1, 0, 0);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 8)) goto loc_00275768;
+    if (((cr >> 31) & 1)) goto loc_00275768;
     f1 = ppu_fmuls(f5, f19);
     { uint32_t tmp = fl4_CC; float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
     f2 = ppu_fmuls(f5, f22);
@@ -2700,15 +2709,15 @@ loc_002754AC:
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
     { double a = f3; double b = f12; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f3; double b = f11; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 4)) | (cr_val << 4); }
-    if (((cr >> 28) & 2)) goto loc_0027568C;
+    if (((cr >> 29) & 1)) goto loc_0027568C;
     r3 = ld32(r1 + 0x70);
-    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_00275670;
-    if ((!((cr >> 24) & 8))) goto loc_00275648;
+    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
+    if ((!((cr >> 29) & 1))) goto loc_00275670;
+    if ((!((cr >> 27) & 1))) goto loc_00275648;
     f1 = ppu_fsubs(f12, f7);
     { double a = f3; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_00275648;
+    if (((cr >> 29) & 1)) goto loc_00275648;
     { uint32_t tmp = fl4_DC; float ftmp; memcpy(&ftmp, &tmp, 4); f24 = ftmp; }
     f1 = ppu_fmadds_core(f8, f26, f30, 1, 1);
     { uint32_t tmp = fl4_D8; float ftmp; memcpy(&ftmp, &tmp, 4); f23 = ftmp; }
@@ -2720,11 +2729,11 @@ loc_002754AC:
     stf(r1 + 0x74, f24);
     stf(r1 + 0x7C, f23);
 loc_00275648:
-    if ((!((cr >> 4) & 4))) goto loc_00275670;
+    if ((!((cr >> 6) & 1))) goto loc_00275670;
     f1 = ppu_fadds(f11, f7);
     { double a = f3; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_00275670;
+    if (((cr >> 29) & 1)) goto loc_00275670;
     r3 = (int64_t)(int32_t)(1);
     stf(r1 + 0x74, f6);
     stf(r1 + 0x78, f5);
@@ -2734,9 +2743,9 @@ loc_00275670:
     { uint64_t tmp = fl8_90; memcpy(&f7, &tmp, 8); }
     { double a = f27; double b = f7; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_0027568C;
-    if (((cr >> 24) & 8)) goto loc_00275760;
-    if ((!((cr >> 4) & 4))) goto loc_00275768;
+    if (((cr >> 29) & 1)) goto loc_0027568C;
+    if (((cr >> 27) & 1)) goto loc_00275760;
+    if ((!((cr >> 6) & 1))) goto loc_00275768;
     goto loc_00275760;
 loc_0027568C:
     f1 = ppu_fdivs(f18, f2);
@@ -2781,8 +2790,8 @@ loc_0027568C:
     { double a = f2; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f2; double b = f6; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     f3 = (f3 >= 0.0) ? f30 : f10;
-    if (((cr >> 28) & 8)) goto loc_00275760;
-    if (((cr >> 24) & 8)) goto loc_00275760;
+    if (((cr >> 31) & 1)) goto loc_00275760;
+    if (((cr >> 27) & 1)) goto loc_00275760;
     f15 = f9;
     { uint64_t tmp; memcpy(&tmp, &f3, 8); fl8_88 = (uint64_t)(tmp); }
     f17 = f8;
@@ -2797,34 +2806,34 @@ loc_00275760:
     goto loc_00275A58;
 loc_00275768:
     r3 = ld32(r1 + 0x70);
-    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_00275934;
+    { int64_t a = (int32_t)r3; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2); cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
+    if (((cr >> 29) & 1)) goto loc_00275934;
     f1 = ldf(r30 + 0x0);
     { double a = f0; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_002757D8;
+    if (((cr >> 25) & 1)) goto loc_002757D8;
     f1 = ldf(r1 + 0x74);
     { double a = f1; double b = f16; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_002757A8;
+    if ((!((cr >> 29) & 1))) goto loc_002757A8;
     f2 = ldf(r1 + 0x78);
     { double a = f2; double b = f17; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_002757A8;
+    if ((!((cr >> 29) & 1))) goto loc_002757A8;
     f2 = ldf(r1 + 0x7C);
     { double a = f2; double b = f15; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_002757D8;
+    if (((cr >> 29) & 1)) goto loc_002757D8;
 loc_002757A8:
     f3 = f1;
     f4 = -f16;
     f1 = -f17;
     f2 = -f15;
     { double a = f3; double b = f4; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_00275934;
+    if ((!((cr >> 29) & 1))) goto loc_00275934;
     f3 = ldf(r1 + 0x78);
     { double a = f3; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_00275934;
+    if ((!((cr >> 29) & 1))) goto loc_00275934;
     f1 = ldf(r1 + 0x7C);
     { double a = f1; double b = f2; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if ((!((cr >> 28) & 2))) goto loc_00275934;
+    if ((!((cr >> 29) & 1))) goto loc_00275934;
 loc_002757D8:
     r3 = (int64_t)(int32_t)(0);
     st32(r30 + 0x0, r3);
@@ -2844,7 +2853,7 @@ loc_002757D8:
     f7 = ppu_fmadds_core(f3, f3, f7, 0, 0);
     f7 = ppu_fmadds_core(f1, f1, f7, 0, 0);
     { double a = f7; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_0027588C;
+    if (((cr >> 29) & 1)) goto loc_0027588C;
     f8 = 1.0 / sqrt(f7);
     r3 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r3 = r3 + (int64_t)(0x2E30);
@@ -2882,7 +2891,7 @@ loc_0027588C:
     f1 = ppu_fmadds_core(f4, f4, f1, 0, 0);
     f1 = ppu_fmadds_core(f2, f2, f1, 0, 0);
     { double a = f1; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_00275920;
+    if (((cr >> 29) & 1)) goto loc_00275920;
     f5 = 1.0 / sqrt(f1);
     r3 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r3 = r3 + (int64_t)(0x2E30);
@@ -2920,11 +2929,11 @@ loc_00275934:
     { double a = f0; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 24)) | (cr_val << 24); }
     { double a = f0; double b = f1; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 2))) | ((a | b) << (31 - 2)); }
-    if (((cr >> 28) & 2)) goto loc_00275950;
+    if (((cr >> 29) & 1)) goto loc_00275950;
     r3 = (int64_t)(int32_t)(0);
     goto loc_00275A58;
 loc_00275950:
-    if (((cr >> 24) & 8)) goto loc_0027595C;
+    if (((cr >> 27) & 1)) goto loc_0027595C;
     f13 = f0;
     goto loc_00275A44;
 loc_0027595C:
@@ -2941,7 +2950,7 @@ loc_0027595C:
     f4 = ppu_fmadds_core(f3, f3, f4, 0, 0);
     f4 = ppu_fmadds_core(f1, f1, f4, 0, 0);
     { double a = f4; double b = f18; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
-    if (((cr >> 28) & 2)) goto loc_002759FC;
+    if (((cr >> 29) & 1)) goto loc_002759FC;
     f5 = 1.0 / sqrt(f4);
     r3 = (int64_t)(int32_t)((uint32_t)0x27 << 16);
     r3 = r3 + (int64_t)(0x2E30);
@@ -2972,14 +2981,14 @@ loc_002759FC:
     f4 = -f0;
     { double a = f29; double b = f4; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 1)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00275A38;
+    if (((cr >> 25) & 1)) goto loc_00275A38;
     f4 = ppu_fmuls(f2, f14);
     { uint64_t tmp = fl8_88; memcpy(&f5, &tmp, 8); }
     f4 = ppu_fmadds_core(f3, f5, f4, 0, 0);
     f4 = ppu_fmadds_core(f1, f25, f4, 0, 0);
     { double a = f4; double b = f13; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; cr = (cr & ~(0xFu << 28)) | (cr_val << 28); }
     { uint32_t a = (cr >> (31 - 0)) & 1; uint32_t b = (cr >> (31 - 2)) & 1; cr = (cr & ~(1u << (31 - 6))) | ((a | b) << (31 - 6)); }
-    if (((cr >> 24) & 2)) goto loc_00275A38;
+    if (((cr >> 25) & 1)) goto loc_00275A38;
     r4 = (int64_t)(int32_t)((uint32_t)0x3F80 << 16);
     r3 = (int64_t)(int32_t)(0);
     st32(r30 + 0x0, r4);
