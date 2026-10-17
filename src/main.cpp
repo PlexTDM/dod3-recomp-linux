@@ -232,9 +232,21 @@ static std::mutex s_kick_mu;
 static std::condition_variable s_kick_cv;
 static std::atomic<bool> s_kicked{ false };
 extern "C" int (*g_lv2_usleep_hook)(uint32_t lr, uint64_t usec);
+#ifdef _WIN32
+/* Windows: the walker's wait between drains is an event and a
+ * high-resolution timer. std::condition_variable::wait_for rounds a timeout
+ * up to whole milliseconds there (SleepConditionVariableSRW), so the 0.5 ms
+ * to the next vblank tick of an uncapped run took 1-2 ms. g_dod3_kick_hr = 0
+ * (DOD3_AB=kickhr) waits on the condition variable as before. */
+static HANDLE s_kick_event, s_kick_timer;
+static int g_dod3_kick_hr = 1;
+#endif
 static void fifo_kick(void)
 {
     if (!s_kicked.exchange(true, std::memory_order_acq_rel)) {
+#ifdef _WIN32
+        if (s_kick_event) SetEvent(s_kick_event);
+#endif
         std::lock_guard<std::mutex> lk(s_kick_mu);
         s_kick_cv.notify_one();
     }
@@ -960,6 +972,19 @@ static void* cpu_watch(void*)
  *   mstwin   MSAA: snapshots read the multisampled twin and passes without
  *            a depth target draw into it / the twin resolved first and those
  *            passes single-sampled (RSX_MS_TWIN)
+ *   fifofast the RSX walker's fast paths (constant and program uploads in
+ *            runs, the old method processor only where it is still read) /
+ *            every word through both, as before
+ *   engslow  the draw engine's per-draw paths as before its caches and
+ *            indexes / as now (RSX_ENGINE_SLOW; note the inverted sense)
+ *   icallflat  indirect calls into the title's code through a flat table /
+ *            through the 4096-entry cache
+ *   usleepspin  (Windows) guest sleeps of 0.5-1 ms on a timer with a short
+ *            spin at the end / spun for their whole length
+ *   pumpsleep  GCM callbacks delivered at guest sleeps too / at HLE calls
+ *            only
+ *   kickhr   (Windows) the walker's wait between drains on an event and a
+ *            high-resolution timer / on the condition variable
  *   none     nothing: the control, which has to report no difference
  * On Windows each report also gives the CPU time per frame of the busiest
  * threads in either state (thread cycle counters, so exact): a switch that
@@ -1006,6 +1031,21 @@ static void ab_aniso(int on) { g_eng_aniso_on = on; }
 extern "C" uint32_t g_rsx_engine_hitches;   /* rsx_draw_engine.c: presents over 25 ms apart */
 extern "C" int g_dod3_collision_native;     /* src/cpu/hot.cpp: the collision test native (1) or lifted (0) */
 static void ab_collnative(int on) { g_dod3_collision_native = on; }
+extern "C" int g_gcm_fifo_fast;             /* cellGcmSys.c */
+static void ab_fifofast(int on) { g_gcm_fifo_fast = on; }
+extern "C" int g_rsx_eng_slow;              /* rsx_draw_engine.c */
+static void ab_engslow(int on) { g_rsx_eng_slow = on; }
+extern "C" int g_ppu_icall_flat;            /* ppu_loader.cpp */
+static void ab_icallflat(int on) { g_ppu_icall_flat = on; }
+extern "C" int g_ppu_pump_at_sleep;         /* ppu_loader.cpp */
+static void ab_pumpsleep(int on) { g_ppu_pump_at_sleep = on; }
+#ifdef _WIN32
+static void ab_kickhr(int on) { g_dod3_kick_hr = on; }
+#endif
+#ifdef _WIN32
+extern "C" int g_usleep_spin_below;         /* sys_timer.c */
+static void ab_usleepspin(int on) { g_usleep_spin_below = on ? 500 : 1000; }
+#endif
 static void ab_none(int) {}
 static const struct {
     const char* name;
@@ -1018,9 +1058,11 @@ static const struct {
 #endif
     { "kickbusy", ab_kickbusy },   { "msdsp", ab_msdsp },     { "texwatch", ab_texwatch },
     { "patchhook", ab_patchhook }, { "lzfmemo", ab_lzfmemo }, { "vcwatch", ab_vcwatch },
-    { "collnative", ab_collnative },
+    { "collnative", ab_collnative }, { "fifofast", ab_fifofast }, { "engslow", ab_engslow },
+    { "icallflat", ab_icallflat }, { "pumpsleep", ab_pumpsleep },
 #ifdef _WIN32
-    { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin },
+    { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin }, { "usleepspin", ab_usleepspin },
+    { "kickhr", ab_kickhr },
 #endif
 #if defined(_WIN32) || defined(__APPLE__)
     { "aniso", ab_aniso },
@@ -1296,6 +1338,11 @@ static DWORD WINAPI frame_clock(LPVOID)
     g_lv2_usleep_hook = guest_usleep_hook;
     g_gcm_label_write_hook = label_written;
     g_gcm_fifo_kick_hook = fifo_kick;
+#ifdef _WIN32
+    s_kick_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    s_kick_timer = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */,
+                                          TIMER_ALL_ACCESS);
+#endif
     /* RSX_HITCH_LOG with DOD3_PROF: each logged hitch also prints the
      * profiler's samples of the frame it ends ([slow-frame]). */
     if (getenv("DOD3_TRACE_HITCH")) {
@@ -1321,10 +1368,25 @@ static DWORD WINAPI frame_clock(LPVOID)
             uint64_t wait_us = (uint64_t)fifo_sleep_ms * 1000ull;
             if ((long long)(next_tick - t) < (long long)wait_us)
                 wait_us = (long long)(next_tick - t) > 0 ? next_tick - t : 0;
+#ifdef _WIN32
+            if (g_dod3_kick_hr && s_kick_event && s_kick_timer) {
+                if (!s_kicked.load(std::memory_order_acquire) && wait_us) {
+                    LARGE_INTEGER due;
+                    due.QuadPart = -(LONGLONG)(wait_us * 10u);
+                    SetWaitableTimer(s_kick_timer, &due, 0, NULL, NULL, FALSE);
+                    const HANDLE hs[2] = { s_kick_event, s_kick_timer };
+                    WaitForMultipleObjects(2, hs, FALSE, INFINITE);
+                }
+                ResetEvent(s_kick_event);
+                s_kicked.store(false, std::memory_order_release);
+            } else
+#endif
+            {
             std::unique_lock<std::mutex> lk(s_kick_mu);
             s_kick_cv.wait_for(lk, std::chrono::microseconds(wait_us),
                                [] { return s_kicked.load(std::memory_order_acquire); });
             s_kicked.store(false, std::memory_order_release);
+            }
         }
         uint64_t now = dod3_now_us();
         fps_install_override();

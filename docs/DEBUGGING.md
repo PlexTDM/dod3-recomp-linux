@@ -29,8 +29,11 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   thread's CPU time per frame in either state. Switches: `stores`, `icall`,
   `labelwake`, `querysync`, `jcpar`, `bufpool`, `kickbusy`, `msdsp`,
   `texwatch`, `patchhook`, `lzfmemo`, `vcwatch`, `snapincr`, `aniso`,
-  `collnative`, `none` (the control, which must report no difference). `DOD3_AB_FROM=<s>`
-  skips the boot and menus (default 70).
+  `collnative`, `fifofast` (the walker's bulk constant/program uploads),
+  `engslow` (the draw engine's old per-draw paths; on means slow),
+  `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `none` (the control,
+  which must report no difference). `DOD3_AB_FROM=<s>` skips the boot and
+  menus (default 70).
 - `tools/replay_regress.sh`: the rendering regression. Replays RSX captures
   through the engine headlessly and compares the frames with a reference set
   (`tools/compare_frames.py`). The captures and references are made from the
@@ -39,6 +42,16 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   problem the player reaches), and keep a known-good replay as the
   reference. Each renderer wants its own reference: Metal and Direct3D 12
   frames differ by a few levels of rounding.
+- `rsx_replay <capture> --bench <n>`: the walker's benchmark. The capture
+  is decompressed into memory and played n times in one process, the first
+  pass warming the caches; each pass prints the engine's CPU per present
+  (wall time, thread CPU, and the replay's own page copies taken out). The
+  same every run, so two builds compare without a game (alternate them a
+  few times; the machine's load still moves it a few percent). In the bench
+  the replay stands in for the game's write-watch, from the capture's page
+  records; `RSX_REPLAY_WATCH=0/1` overrides. `RSX_REPLAY_PROF=1` (Windows)
+  samples the replay thread and prints its hottest functions, self and
+  inclusive; `RSX_REPLAY_PROF_CALLERS=<function>` who calls one.
 
 ## Frames
 
@@ -153,7 +166,11 @@ task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `RSX_ASYNC_SHADERS=0` (build shaders on the walker), `RSX_QUERY_NOSYNC=1`,
 `DOD3_PACE=vblank`, `DOD3_VBLANK_MULT=<n>` / `DOD3_VBLANK_HZ=<hz>`,
 `DOD3_FIFO_SLEEP_MS=<n>`, `DOD3_FAST_POLL_LR=<hex>` (0 for none),
-`PS3RECOMP_RSX_ENGINE=vtable` (the toolkit's old RSX path).
+`PS3RECOMP_RSX_ENGINE=vtable` (the toolkit's old RSX path),
+`RSX_ENGINE_SLOW=1` (the draw engine's per-draw paths before its cache
+indexes and single fragment-program pass), `RSX_VCACHE_PROMOTE=0` (no
+buffer of its own for a reused vertex-cache entry under 64 KB),
+`RSX_D3D12_REBIND=1` (every draw sets all its state).
 
 The Direct3D 12 renderer's first line about the device says whether it
 relaxes the alignment of buffer-to-texture copies (`relaxed copy alignment:
