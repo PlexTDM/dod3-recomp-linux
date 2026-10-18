@@ -31,7 +31,8 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   `texwatch`, `patchhook`, `lzfmemo`, `vcwatch`, `snapincr`, `aniso`,
   `collnative`, `fifofast` (the walker's bulk constant/program uploads),
   `engslow` (the draw engine's old per-draw paths; on means slow),
-  `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `none` (the control,
+  `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `hleindex`, `texreads`
+  (only the texture units a fragment program samples bound), `none` (the control,
   which must report no difference). `DOD3_AB_FROM=<s>` skips the boot and
   menus (default 70).
 - `tools/replay_regress.sh`: the rendering regression. Replays RSX captures
@@ -170,7 +171,8 @@ task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `RSX_ENGINE_SLOW=1` (the draw engine's per-draw paths before its cache
 indexes and single fragment-program pass), `RSX_VCACHE_PROMOTE=0` (no
 buffer of its own for a reused vertex-cache entry under 64 KB),
-`RSX_D3D12_REBIND=1` (every draw sets all its state).
+`RSX_D3D12_REBIND=1` (every draw sets all its state), `RSX_BIND_UNREAD=1`
+(every texture unit that is on bound, sampled or not).
 
 The Direct3D 12 renderer's first line about the device says whether it
 relaxes the alignment of buffer-to-texture copies (`relaxed copy alignment:

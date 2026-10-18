@@ -983,6 +983,9 @@ static void* cpu_watch(void*)
  *            spin at the end / spun for their whole length
  *   pumpsleep  GCM callbacks delivered at guest sleeps too / at HLE calls
  *            only
+ *   hleindex HLE calls find their handler through an index / by scanning
+ *   texreads only the texture units the fragment program samples are bound
+ *            / every unit that is switched on (RSX_BIND_UNREAD)
  *   kickhr   (Windows) the walker's wait between drains on an event and a
  *            high-resolution timer / on the condition variable
  *   none     nothing: the control, which has to report no difference
@@ -1039,6 +1042,10 @@ extern "C" int g_ppu_icall_flat;            /* ppu_loader.cpp */
 static void ab_icallflat(int on) { g_ppu_icall_flat = on; }
 extern "C" int g_ppu_pump_at_sleep;         /* ppu_loader.cpp */
 static void ab_pumpsleep(int on) { g_ppu_pump_at_sleep = on; }
+extern "C" int g_ppu_hle_index;             /* ppu_hle.cpp */
+static void ab_hleindex(int on) { g_ppu_hle_index = on; }
+extern "C" int g_rsx_bind_unread;           /* rsx_draw_engine.c */
+static void ab_texreads(int on) { g_rsx_bind_unread = on ? 0 : 1; }
 #ifdef _WIN32
 static void ab_kickhr(int on) { g_dod3_kick_hr = on; }
 #endif
@@ -1059,7 +1066,8 @@ static const struct {
     { "kickbusy", ab_kickbusy },   { "msdsp", ab_msdsp },     { "texwatch", ab_texwatch },
     { "patchhook", ab_patchhook }, { "lzfmemo", ab_lzfmemo }, { "vcwatch", ab_vcwatch },
     { "collnative", ab_collnative }, { "fifofast", ab_fifofast }, { "engslow", ab_engslow },
-    { "icallflat", ab_icallflat }, { "pumpsleep", ab_pumpsleep },
+    { "icallflat", ab_icallflat }, { "pumpsleep", ab_pumpsleep }, { "hleindex", ab_hleindex },
+    { "texreads", ab_texreads },
 #ifdef _WIN32
     { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin }, { "usleepspin", ab_usleepspin },
     { "kickhr", ab_kickhr },
