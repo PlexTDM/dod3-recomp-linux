@@ -22,10 +22,20 @@
  * keeps the transform it was made with, matched by the entry's CRC, so each
  * change gives the entry a CRC of its own; the end puts the entry back.
  *
+ * The radar is drawn another way: its map and icons are materials that mask
+ * themselves to a circle at a fixed place on the screen (they read their own
+ * screen position), the place the 16:9 HUD has the radar. It is drawn with
+ * the 16:9 HUD's own transform, with a mark in the transform's depth term,
+ * and the renderer moves the marked draws to the fitted HUD
+ * (rsx_canvas_remap_set): the materials still find themselves where they
+ * were made to be.
+ *
  * The begin also tells the present the view's shape (the canvas's), so that
  * the frame the HUD is drawn into is shown as a view of that shape: a frame
  * without a scene in it -- the title's last screen once a game has begun, a
  * loading screen -- is one too, its HUD fitted into the view like any other.
+ * (A movie is drawn over the whole frame: the present finds its picture
+ * among the frame's draws and shows that frame whole.)
  */
 #include <math.h>
 #include <stdio.h>
@@ -37,6 +47,7 @@
 #include "patches/hud_aspect.h"
 
 extern "C" void rsx_present_set_content_aspect(float aspect);   /* rsx_draw_engine.h */
+extern "C" void rsx_canvas_remap_set(uint32_t mark, float k, float x, float y);
 
 namespace {
 
@@ -63,6 +74,7 @@ namespace {
 /* FCanvas::FTransformEntry: an FMatrix (16-byte aligned) and its CRC */
 constexpr uint32_t kEntrySize = 80, kEntryCrc = 64;
 constexpr float kOffScreen = -10000.0f;   /* CalcTransformPosition's "not on the screen" */
+constexpr uint32_t kRemapMark = 0x3A7EDA11u;   /* the radar's transform's depth (about 0.00097): its draws' mark */
 
 float rdf(uint32_t a)
 {
@@ -82,6 +94,7 @@ void wrf(uint32_t a, float f)
 struct Fit {
     bool on;                     /* between the HUD's begin and end, the top entry ours */
     bool full;                   /* a full-screen rectangle's transform */
+    bool radar;                  /* the radar's: the 16:9 HUD's, marked */
     uint32_t canvas;             /* the HUD's UCanvas */
     uint32_t stack;              /* its FCanvas's TransformStack: a TArray (data, num, max) */
     int num;                     /* the stack's depth at the begin */
@@ -190,11 +203,24 @@ void set_top(float sx, float sy, float tx, float ty, uint32_t crc, bool clip_y)
 /* The fit; a view narrower than 16:9 leaves room above and below the HUD,
  * which is clipped. */
 void set_fit() { set_top(s.k, s.k, s.ox, s.oy, s.orig[kEntryCrc / 4] ^ 0x48554431u, s.oy > s.by + 0.5f); }
+
+/* The 16:9 HUD's own transform (the base: the canvas is the target), with the
+ * mark for its depth in place of the canvas's z, which the HUD does not use. */
+void set_radar()
+{
+    const uint32_t e = top();
+    if (!e) return;
+    for (uint32_t i = 0; i < 16; i++) wrf(e + 4 * i, s.base[i]);
+    wrf(e + 40, 0.0f);
+    vm_write32(e + 56, kRemapMark);
+    vm_write32(e + kEntryCrc, s.orig[kEntryCrc / 4] ^ 0x52414452u);
+    rsx_canvas_remap_set(kRemapMark, s.k, s.ox, s.oy);
+}
 void set_fill() { set_top(s.bw / 1280.0f, s.bh / 720.0f, s.bx, s.by, s.orig[kEntryCrc / 4] ^ 0x46554C4Cu, false); }
 
 void begin(uint32_t canvas)
 {
-    s.on = s.full = false;
+    s.on = s.full = s.radar = false;
     const uint32_t fc = canvas ? vm_read32(canvas + kCanvasFCanvas) : 0;
     int w, h;
     const float ar = canvas_aspect(canvas, &w, &h), hd = 16.0f / 9.0f;
@@ -243,7 +269,7 @@ void begin(uint32_t canvas)
 void end()
 {
     if (!s.on) return;
-    s.on = s.full = false;
+    s.on = s.full = s.radar = false;
     if (const uint32_t e = top())
         for (uint32_t i = 0; i < kEntrySize / 4; i++) vm_write32(e + 4 * i, s.orig[i]);
     for (uint32_t i = 0; i < 2; i++) {
@@ -270,7 +296,7 @@ void hook_canvas_project(ppu_context* ctx)
     const uint32_t self = (uint32_t)ctx->gpr[3], result = (uint32_t)ctx->gpr[5];
     DOD3_FN_CANVAS_PROJECT(ctx);
     dod3_drain(ctx);
-    if (s.on && !s.full && self == s.canvas && result) map_back(result);
+    if (s.on && !s.full && !s.radar && self == s.canvas && result) map_back(result);
 }
 
 /* ASqex03GameHUD::CalcTransformPosition: the screen positions of the points
@@ -280,7 +306,7 @@ void hook_hud_calc_transform(ppu_context* ctx)
     const uint32_t hud = (uint32_t)ctx->gpr[3];
     DOD3_FN_HUD_CALC_TRANSFORM(ctx);
     dod3_drain(ctx);
-    if (!s.on || s.full || vm_read32(hud + DOD3_O_HUD_CANVAS) != s.canvas) return;
+    if (!s.on || s.full || s.radar || vm_read32(hud + DOD3_O_HUD_CANVAS) != s.canvas) return;
     const uint32_t d = vm_read32(hud + DOD3_O_HUD_SCREEN_POS);
     const int n = (int)vm_read32(hud + DOD3_O_HUD_SCREEN_POS + 4);
     for (int i = 0; d && i < n && i < 1024; i++) {
@@ -299,6 +325,10 @@ void dod3_hud_aspect(int phase, uint32_t canvas, bool on)
         int w, h;
         const float ar = on ? canvas_aspect(canvas, &w, &h) : 0.0f;
         rsx_present_set_content_aspect(ar);
+        static float told = -1.0f;
+        static const bool log = getenv("DOD3_ASPECT_LOG") != nullptr;
+        if (log && ar != told) fprintf(stderr, "[hud] the view: %.4f (%dx%d canvas)\n", ar, w, h);
+        told = ar;
         begin(ar != 0.0f ? canvas : 0);
         break;
     }
@@ -313,6 +343,18 @@ void dod3_hud_aspect(int phase, uint32_t canvas, bool on)
         if (s.on && s.full) {
             set_fit();
             s.full = false;
+        }
+        break;
+    case 4:
+        if (s.on && !s.full && !s.radar) {
+            set_radar();
+            s.radar = true;
+        }
+        break;
+    case 5:
+        if (s.on && s.radar) {
+            set_fit();
+            s.radar = false;
         }
         break;
     }

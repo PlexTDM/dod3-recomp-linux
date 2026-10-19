@@ -34,7 +34,7 @@ stick's value (axis, the title's own) -> the one to use, 14 the view's
 rotation, 15 the camera's aspect ratio (and: is the view constrained to
 it?) -> the one to use, 16 the view's FOV -> the one to use, 17 the HUD's
 drawing (1 begin, with its canvas; 0 end; 2 and 3 around a full-screen
-rectangle).
+rectangle; 4 and 5 around the radar).
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
@@ -346,6 +346,16 @@ def main():
             new[f] = st
             nfull += len(hits)
     assert nfull >= 30, nfull
+    # The radar's map and icons mask themselves to a circle at a fixed place
+    # on the screen: it is drawn as the 16:9 HUD has it, and moved by the
+    # renderer (17, 4 before it, 17, 5 after).
+    f = pk.func('Sqex03GameHUDMap', 'Draw'); st = pk.parse(f)
+    i = pk.find(st, 'return nothing')
+    s_end = gi_bridge(CMD_HUD, pk.int_(5))
+    s_end.mem = st[i].mem
+    st.insert(i, s_end)
+    st.insert(0, gi_bridge(CMD_HUD, pk.int_(4)))
+    new[f] = st
 
     # ---- the camera's stick: through the port ----
     # Sqex03GamePlayerController.SendOrder hands the pawn's native code the
