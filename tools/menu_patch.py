@@ -34,7 +34,7 @@ stick's value (axis, the title's own) -> the one to use, 14 the view's
 rotation, 15 the camera's aspect ratio (and: is the view constrained to
 it?) -> the one to use, 16 the view's FOV -> the one to use, 17 the HUD's
 drawing (1 begin, with its canvas; 0 end; 2 and 3 around a full-screen
-rectangle; 4 and 5 around the radar).
+rectangle; 4 and 5 around the radar; 7 and 8 around the pause screen).
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
@@ -325,6 +325,13 @@ def main():
     s_end.mem = st[i].mem              # the jumps to the return land on this
     st.insert(i, s_end)
     st.insert(0, gi_bridge(CMD_HUD, pk.int_(1), clone(canvas)))
+    # The pause screen parks a ring and an arrow just outside the HUD's 16:9
+    # on its pages (off the screen at 16:9): clipped to the HUD's sides there
+    # (17, 7 before DrawPause, 17, 8 after), the view having no markers then.
+    i = pk.find(st, 'DrawPause()')
+    on = gi_bridge(CMD_HUD, pk.int_(7))
+    on.mem = st[i].mem
+    st[i:i + 1] = [on, st[i], gi_bridge(CMD_HUD, pk.int_(8))]
     new[f] = st
     FULL = ('.Canvas.DrawRect(1280f, 720f, <empty>)',
             '.Canvas.DrawTile(none, 1280f, 1280f, 0f, 0f, 1280f, 1280f, <empty>, <empty>, <empty>)',

@@ -4,7 +4,8 @@
 
 /* Bridge 17, from Sqex03GameHUD.DrawHUD (tools/menu_patch.py): phase 1 the
  * HUD begins (canvas: its UCanvas), 0 it is done, 2 a full-screen layer
- * follows, 3 it is drawn, 4 the radar follows, 5 it is drawn. on: the Aspect Ratio setting has the view boxed to
+ * follows, 3 it is drawn, 4 the radar follows, 5 it is drawn, 7 the pause
+ * screen follows, 8 it is drawn. on: the Aspect Ratio setting has the view boxed to
  * a shape of its own; off, the HUD is left as the title draws it. The begin
  * also tells the present the view's shape, every frame the HUD is drawn
  * (rsx_present_set_content_aspect). */

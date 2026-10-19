@@ -95,6 +95,7 @@ struct Fit {
     bool on;                     /* between the HUD's begin and end, the top entry ours */
     bool full;                   /* a full-screen rectangle's transform */
     bool radar;                  /* the radar's: the 16:9 HUD's, marked */
+    bool pause;                  /* the pause screen's: clipped at the HUD's sides */
     uint32_t canvas;             /* the HUD's UCanvas */
     uint32_t stack;              /* its FCanvas's TransformStack: a TArray (data, num, max) */
     int num;                     /* the stack's depth at the begin */
@@ -170,10 +171,12 @@ uint32_t top()
  * clip_y: the depth made y's place in the HUD's 720 lines (the 2D canvas is
  * drawn without a depth test), so that the hardware clips what is above or
  * below them -- what the HUD keeps parked out of sight there, such as a black
- * bar above the battle HUD. DOD3_HUD_ZCLIP: 1 (the default) for a depth of
- * 0..1, 2 for -1..1, 0 not to clip. A wider view is not clipped at the sides:
- * the markers on the view reach past the HUD's 1280 there. */
-void set_top(float sx, float sy, float tx, float ty, uint32_t crc, bool clip_y)
+ * bar above the battle HUD. clip_x the same across: a wider view is clipped
+ * at the HUD's sides only on the pause screen, which has no markers on the
+ * view (in play they reach past the HUD's 1280), and parks a ring and an
+ * arrow just outside it on its pages. DOD3_HUD_ZCLIP: 1 (the default) for a
+ * depth of 0..1, 2 for -1..1, 0 not to clip. */
+void set_top(float sx, float sy, float tx, float ty, uint32_t crc, bool clip_y, bool clip_x = false)
 {
     const uint32_t e = top();
     if (!e) return;
@@ -195,14 +198,27 @@ void set_top(float sx, float sy, float tx, float ty, uint32_t crc, bool clip_y)
         m[6] = 2.0f / 720.0f;
         m[10] = 0.0f;
         m[14] = -1.0f;
+    } else if (clip_x && zc == 1) {
+        m[2] = 1.0f / 1280.0f;
+        m[10] = 0.0f;
+        m[14] = 0.0f;
+    } else if (clip_x && zc == 2) {
+        m[2] = 2.0f / 1280.0f;
+        m[10] = 0.0f;
+        m[14] = -1.0f;
     }
     for (uint32_t i = 0; i < 16; i++) wrf(e + 4 * i, m[i]);
     vm_write32(e + kEntryCrc, crc);
 }
 
 /* The fit; a view narrower than 16:9 leaves room above and below the HUD,
- * which is clipped. */
-void set_fit() { set_top(s.k, s.k, s.ox, s.oy, s.orig[kEntryCrc / 4] ^ 0x48554431u, s.oy > s.by + 0.5f); }
+ * which is clipped, a wider one room at the sides, clipped on the pause
+ * screen (s.pause). A transform of its own, a CRC of its own. */
+void set_fit()
+{
+    const bool cx = s.pause && s.ox > s.bx + 0.5f;
+    set_top(s.k, s.k, s.ox, s.oy, s.orig[kEntryCrc / 4] ^ (cx ? 0x48554432u : 0x48554431u), s.oy > s.by + 0.5f, cx);
+}
 
 /* The 16:9 HUD's own transform (the base: the canvas is the target), with the
  * mark for its depth in place of the canvas's z, which the HUD does not use. */
@@ -220,7 +236,7 @@ void set_fill() { set_top(s.bw / 1280.0f, s.bh / 720.0f, s.bx, s.by, s.orig[kEnt
 
 void begin(uint32_t canvas)
 {
-    s.on = s.full = s.radar = false;
+    s.on = s.full = s.radar = s.pause = false;
     const uint32_t fc = canvas ? vm_read32(canvas + kCanvasFCanvas) : 0;
     int w, h;
     const float ar = canvas_aspect(canvas, &w, &h), hd = 16.0f / 9.0f;
@@ -269,7 +285,7 @@ void begin(uint32_t canvas)
 void end()
 {
     if (!s.on) return;
-    s.on = s.full = s.radar = false;
+    s.on = s.full = s.radar = s.pause = false;
     if (const uint32_t e = top())
         for (uint32_t i = 0; i < kEntrySize / 4; i++) vm_write32(e + 4 * i, s.orig[i]);
     for (uint32_t i = 0; i < 2; i++) {
@@ -356,6 +372,11 @@ void dod3_hud_aspect(int phase, uint32_t canvas, bool on)
             set_fit();
             s.radar = false;
         }
+        break;
+    case 7:
+    case 8:
+        s.pause = phase == 7;
+        if (s.on && !s.full && !s.radar) set_fit();
         break;
     }
 }
