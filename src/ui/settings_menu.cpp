@@ -68,8 +68,9 @@
 
 extern "C" void ppu_register_function(uint64_t addr, void (*fn)(ppu_context*));
 const char* dod3_settings_path();   /* main.cpp: the dod3.ini read at boot, or the one to create */
-extern "C" void rsx_present_set_content_aspect(float aspect);   /* rsx_draw_engine.h */
+extern "C" void rsx_present_set_screen_aspect(float aspect);    /* rsx_draw_engine.h */
 extern "C" float rsx_present_window_aspect(void);
+void dod3_hud_aspect(int phase, uint32_t canvas, bool on);       /* src/patches/hud_aspect.cpp */
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
@@ -136,7 +137,7 @@ std::vector<int> s_page_rows[NPAGES];   /* each page's, in order */
 int s_page;                         /* the page open; -1: every page (Restore Defaults) */
 bool s_init;
 float s_fov_k = 1.0f;               /* DOD3_FOV as a zoom factor on tan(FOV/2) */
-float s_aspect;                     /* DOD3_ASPECT: the view's width over its height; 0: the title's 16:9 */
+float s_aspect;                     /* DOD3_ASPECT: the screen's width over its height; 0: the title's 16:9 */
 bool s_aspect_auto;                 /* DOD3_ASPECT=auto: the window's */
 float s_aspect_from;                /* the ratio the view had (bridge 15); 0: not constrained, left alone */
 float s_aspect_now;                 /* the one it has (0: as it was) */
@@ -147,19 +148,30 @@ void set_fov(const char* v)
     s_fov_k = (float)(tan((65.0 + add) * rad / 2) / tan(65.0 * rad / 2));
 }
 
+/* A screen shape the view can take: 5:4 to 8:1, and not 16:9 (the title's). */
+float aspect_ok(float a)
+{
+    a = a < 1.25f ? 1.25f : a > 8.0f ? 8.0f : a;
+    return fabsf(a / (16.0f / 9.0f) - 1.0f) < 0.01f ? 0.0f : a;
+}
+
 /* DOD3_ASPECT: W:H or a ratio, or auto (the window's); 21:9 is the 2560x1080
- * and 5120x2160 screens' 64:27. 16:9 and narrower: the title's own. */
+ * and 5120x2160 screens' 64:27. Unset: the title's 16:9. The present is told
+ * the screen's shape: the frame is shown in that shape, in the middle of the
+ * window, and what is 16:9 in it (the title, movies) in the middle of that. */
 void set_aspect(const char* v)
 {
     float w = 0.0f, h = 0.0f;
     s_aspect = 0.0f;
     s_aspect_auto = v && !strcmp(v, "auto");
-    if (!v || !*v || s_aspect_auto) return;
-    if (sscanf(v, "%f:%f", &w, &h) == 2 && h > 0.0f)
-        s_aspect = (w == 21.0f && h == 9.0f) ? 64.0f / 27.0f : w / h;
-    else
-        s_aspect = (float)atof(v);
-    if (!(s_aspect > 16.0f / 9.0f + 0.01f && s_aspect <= 8.0f)) s_aspect = 0.0f;
+    if (v && *v && !s_aspect_auto) {
+        if (sscanf(v, "%f:%f", &w, &h) == 2 && h > 0.0f)
+            s_aspect = (w == 21.0f && h == 9.0f) ? 64.0f / 27.0f : w / h;
+        else
+            s_aspect = (float)atof(v);
+        s_aspect = s_aspect > 0.0f ? aspect_ok(s_aspect) : 0.0f;
+    }
+    rsx_present_set_screen_aspect(s_aspect_auto ? 0.0f : s_aspect > 0.0f ? s_aspect : 16.0f / 9.0f);
 }
 
 /* The rows a command covers: the open page's, or every page's. */
@@ -286,8 +298,8 @@ void init_rows()
      * (below). The Graphics page has the layout's seven rows. */
     s_rows.push_back({ "DOD3_ASPECT",
                        "Aspect Ratio",
-                       "Wider shows more at the sides. Auto follows the window.",
-                       { { NULL, "16:9" }, { "auto", "Auto" }, { "21:9", "21:9" }, { "32:9", "32:9" } },
+                       "Your screen's shape. Auto follows the window.",
+                       { { NULL, "16:9" }, { "16:10", "16:10" }, { "21:9", "21:9" }, { "32:9", "32:9" }, { "auto", "Auto" } },
                        0,
                        true });
     s_rows.back().page = 2;
@@ -571,11 +583,11 @@ int bridge(int cmd, int a, int b)
     }
     /* the view's aspect ratio: Sqex03GameCamera.DoUpdateCamera, before it
      * fills the camera cache. A constrained view -- in play; the title's is
-     * not -- is letterboxed by the engine to its ratio, with the projection
-     * made for it: it gets DOD3_ASPECT, and its FOV (horizontal) is widened
-     * by the ratio's change so that the view keeps its height. The present
-     * is told (rsx_present_set_content_aspect): a window wider than 16:9 is
-     * shown the view without the bars. */
+     * not -- is letterboxed (or pillarboxed) by the engine to its ratio, with
+     * the projection made for it: it gets DOD3_ASPECT. A wider view's FOV
+     * (horizontal) is widened by the ratio's change so that the view keeps
+     * its height; a narrower one keeps its FOV and is taller. The HUD is
+     * fitted into the view, and the present told its shape, by bridge 17. */
     case 15: { /* the camera's ConstrainedAspectRatio (float bits); b: is the view constrained to it */
         float ar;
         memcpy(&ar, &a, 4);
@@ -590,10 +602,9 @@ int bridge(int cmd, int a, int b)
         float want = s_aspect;
         if (s_aspect_auto) {
             const float wa = rsx_present_window_aspect();
-            want = wa > 16.0f / 9.0f + 0.01f ? (wa < 8.0f ? wa : 8.0f) : 0.0f;
+            want = wa > 0.0f ? aspect_ok(wa) : 0.0f;
         }
         s_aspect_now = s_aspect_from > 0.0f ? want : 0.0f;
-        rsx_present_set_content_aspect(s_aspect_now);
         if (s_aspect_now <= 0.0f) return a;
         int r;
         memcpy(&r, &s_aspect_now, 4);
@@ -602,7 +613,7 @@ int bridge(int cmd, int a, int b)
     case 16: { /* the view's FOV (float bits) */
         float fov;
         memcpy(&fov, &a, 4);
-        if (s_aspect_now <= 0.0f || !(fov > 0.0f && fov < 170.0f)) return a;
+        if (s_aspect_now <= s_aspect_from || !(fov > 0.0f && fov < 170.0f)) return a;
         const double rad = 3.14159265358979 / 180.0;
         fov = (float)(2.0 * atan(tan(fov * rad / 2) * s_aspect_now / s_aspect_from) / rad);
         if (fov > 170.0f) fov = 170.0f;
@@ -610,6 +621,9 @@ int bridge(int cmd, int a, int b)
         memcpy(&r, &fov, 4);
         return r;
     }
+    case 17: /* the HUD's drawing: a phase, and for the begin its UCanvas */
+        dod3_hud_aspect(a, (uint32_t)b, s_aspect_now > 0.0f);
+        return 0;
     case 9: { /* the camera's field of view (float bits); b: the gameplay camera's */
         float fov;
         memcpy(&fov, &a, 4);
@@ -706,4 +720,5 @@ void dod3_settings_menu_install()
 {
     ppu_register_function(THUNK_GETSTRING, hook_getstring);
     ppu_register_function(THUNK_BRIDGE, hook_bridge);
+    set_aspect(getenv("DOD3_ASPECT"));   /* the present's screen shape, before the first movie */
 }

@@ -84,6 +84,7 @@ int dod3_mac_option_held(void);
 #endif
 
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
+void dod3_hud_aspect_install();     /* src/patches/hud_aspect.cpp */
 void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's file lists */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
 
@@ -2094,6 +2095,7 @@ int main(int argc, char** argv)
     ppu_recomp_register();   /* lifted function table -> address map */
     dod3_settings_menu_install();   /* the Graphics Settings page's two natives */
     dod3_sysset_install();          /* the tree detail row's hook */
+    dod3_hud_aspect_install();      /* the HUD's markers in a view of another shape */
     dod3_kbm_install();
     dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */

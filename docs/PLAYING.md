@@ -115,7 +115,7 @@ folder above). It explains each setting:
 | RSX_VSYNC | 1 to sync to the display; 0 lets the frame rate exceed its refresh |
 | DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30 |
 | DOD3_FOV | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original |
-| DOD3_ASPECT | Aspect ratio: auto (the window's), 21:9, 32:9 or a ratio such as 2.39. Wider shows more at the sides in play and cutscenes; a 16:9 screen shows it with bars above and below. The view is 1280 game pixels wide, so raise RSX_SCALE to keep a wider one sharp. The HUD keeps its 16:9 layout for now. Unset is 16:9 |
+| DOD3_ASPECT | Aspect ratio, your screen's shape: 16:10, 21:9, 32:9, a ratio such as 2.39, or auto (the window's). Wider shows more at the sides in play and cutscenes, 16:10 more above and below; the HUD keeps its 16:9 layout in the middle, and the title, menus and movies are 16:9 in the middle of the screen. A screen of another shape shows it with bars (a 16:9 screen set to 21:9 shows what a 21:9 one would). A wider view is 1280 game pixels wide, so raise RSX_SCALE to keep it sharp. Unset is 16:9 |
 | RSX_ANISO | Texture filtering: 1 (original) to 16 (16x anisotropic, the default) |
 | RSX_AA | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off |
 | DOD3_SHADOWS | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start |

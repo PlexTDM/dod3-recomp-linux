@@ -47,6 +47,8 @@
 #define DOD3_FN_GC_REACH_B             func_00EE75F8
 #define DOD3_FN_APP_ERRORF             func_00012538
 #define DOD3_FN_TREE_CREATE_PROXY      func_00817FD4 /* USpeedTreeComponent::CreateSceneProxy (patches/sysset.cpp) */
+#define DOD3_FN_CANVAS_PROJECT         func_00643480 /* UCanvas::execProject (patches/hud_aspect.cpp) */
+#define DOD3_FN_HUD_CALC_TRANSFORM     func_009DEAB8 /* ASqex03GameHUD::CalcTransformPosition (patches/hud_aspect.cpp) */
 /* code addresses */
 #define DOD3_A_EXEC_GETSTRING    0x0145E274u
 #define DOD3_A_EXEC_BRIDGE       0x013F43A0u
@@ -74,6 +76,10 @@
 #define DOD3_A_GC_ERROR_FMT         0x01639D0Cu
 #define DOD3_A_SYSTEM_SETTINGS_DATA 0x01A12D8Cu /* GSystemSettings + 4 (src/patches/sysset.cpp) */
 #define DOD3_A_TREE_CREATE_PROXY    0x00817FD4u
+#define DOD3_A_CANVAS_PROJECT       0x00643480u
+#define DOD3_A_HUD_CALC_TRANSFORM   0x009DEAB8u
+#define DOD3_O_HUD_CANVAS           0x414u /* ASqex03GameHUD: AHUD::Canvas */
+#define DOD3_O_HUD_SCREEN_POS       0x748u /* ASqex03GameHUD: CalcTransformPosition's results, a TArray of (x, y) */
 #define DOD3_A_TREE_PROXY_VTABLE    0x016E8C34u /* FSpeedTreeSceneProxy */
 #else
 #define DOD3_EBOOT_NAME                "1.00"

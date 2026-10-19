@@ -32,7 +32,9 @@ left out while it is, so what a setting changes can be seen behind it),
 turning the camera?, 13 the camera
 stick's value (axis, the title's own) -> the one to use, 14 the view's
 rotation, 15 the camera's aspect ratio (and: is the view constrained to
-it?) -> the one to use, 16 the view's FOV -> the one to use.
+it?) -> the one to use, 16 the view's FOV -> the one to use, 17 the HUD's
+drawing (1 begin, with its canvas; 0 end; 2 and 3 around a full-screen
+rectangle).
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
@@ -43,7 +45,10 @@ ratio, whether the view is constrained to it, and the view's FOV before it
 fills the camera cache, and takes back the ones to use (bridge 15, 16) --
 the Aspect Ratio setting: the engine letterboxes a constrained view to its
 ratio and makes the projection for it, and the FOV is widened to keep the
-view's height.
+view's height. Sqex03GameHUD.DrawHUD tells the port when the HUD is drawn
+(bridge 17), which fits the HUD's 16:9 layout into such a view; every
+full-screen rectangle of the HUD's (DrawRect(1280, 720), DrawTile(none,
+1280, 1280, ...)) is marked, and the port has it cover the whole view.
 
 Also: Sqex03GamePlayerController's camera stick -- GetCameraMoveX,
 GetCameraMoveY, CheckCameraMoveKey -- goes through the port on its way to
@@ -66,7 +71,7 @@ MAX_ROWS = 7     # the layout's
 PAGES = 3        # our root entries: Graphics, System, Advanced Graphics
 CMD_BEGIN, CMD_CHANGE, CMD_ISDEF, CMD_RESET, CMD_APPLY, CMD_CHANGED, CMD_SKIPINTRO, CMD_OPEN, CMD_ROWS, CMD_FOV, \
     CMD_GRAPHICS_SHOWN, CMD_CAM_DT, CMD_CAM_ACTIVE, CMD_CAM_AXIS, CMD_CAM_VIEW, \
-    CMD_ASPECT, CMD_ASPECT_FOV = range(17)
+    CMD_ASPECT, CMD_ASPECT_FOV, CMD_HUD = range(18)
 
 GAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'game', 'disc')
 ROOT = os.path.join(GAME, 'PS3_GAME', 'USRDIR', 'SQEX03GAME')
@@ -294,6 +299,53 @@ def main():
     s_ar.mem = st[i].mem               # the jumps to FillCameraCache land on these, before it
     st[i:i] = [s_ar, s_fov]
     new[f] = st
+
+    # ---- the HUD in a view of another shape: through the port ----
+    # The HUD's canvas is the view's: moved to the view's corner, as big as
+    # the view. The HUD lays itself out on 1280x720 whatever the canvas, so
+    # in a letterboxed view it ran off the bottom; its markers (enemy
+    # gauges, lock-on, talk icons) are placed on the view itself, through
+    # Canvas.Project and the native CalcTransformPosition. DrawHUD hands the
+    # port its canvas first (bridge 17, 1) and says when it is done (17, 0):
+    # in between, src/patches/hud_aspect.cpp has the canvas draw the 1280x720
+    # layout as big as fits in the view, centred, and maps the markers back
+    # onto the view. A full-screen layer -- a fade, a dimming, a filter:
+    # DrawRect(1280, 720), DrawTile(none, 1280, 1280, ...); the dying
+    # overlay; the four parts of the screen-split effect -- is drawn over the
+    # whole view instead (17, 2 before it, 17, 3 after). The GameInfo, for
+    # the bridge, through WorldInfo: any class can reach it so.
+    def gi_bridge(cmd, a=None, b=None):
+        c = bridge(cmd, a, b)
+        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
+        return c
+    f = pk.func('Sqex03GameHUD', 'DrawHUD'); st = pk.parse(f)
+    canvas = findnode(st[pk.find(st, 'self.m_xOverlayImg.Draw(self.Canvas)')], 'self.Canvas')
+    i = pk.find(st, 'return nothing')
+    s_end = gi_bridge(CMD_HUD, pk.int_(0))
+    s_end.mem = st[i].mem              # the jumps to the return land on this
+    st.insert(i, s_end)
+    st.insert(0, gi_bridge(CMD_HUD, pk.int_(1), clone(canvas)))
+    new[f] = st
+    FULL = ('.Canvas.DrawRect(1280f, 720f, <empty>)',
+            '.Canvas.DrawTile(none, 1280f, 1280f, 0f, 0f, 1280f, 1280f, <empty>, <empty>, <empty>)',
+            '.Canvas.DrawTile(self.m_xTex, Multiply_FloatFloat(1280f, self.m_xHUD.self.m_vWindowRate.X), '
+            'Multiply_FloatFloat(1280f, self.m_xHUD.self.m_vWindowRate.X), 0f, 0f, 1280f, 1280f, <empty>, <empty>, <empty>)')
+    FULL_IN = ("'_pack.M_ScreenSpilit_",)
+    nfull = 0
+    for f in range(1, len(pk.exps) + 1):
+        if pk.cls(f) != 'Function' or b'\x1e\x44\xa0\x00\x00' not in pk.body(f):   # FloatConst 1280f
+            continue
+        st = new[f] if f in new else pk.parse(f)
+        hits = [k for k, s in enumerate(st)
+                if pk.text(s).endswith(FULL) or ('DrawMaterialTile(' in pk.text(s) and any(x in pk.text(s) for x in FULL_IN))]
+        for k in reversed(hits):
+            before = gi_bridge(CMD_HUD, pk.int_(2))
+            before.mem = st[k].mem     # the jumps to the draw land on this
+            st[k:k + 1] = [before, st[k], gi_bridge(CMD_HUD, pk.int_(3))]
+        if hits:
+            new[f] = st
+            nfull += len(hits)
+    assert nfull >= 30, nfull
 
     # ---- the camera's stick: through the port ----
     # Sqex03GamePlayerController.SendOrder hands the pawn's native code the
