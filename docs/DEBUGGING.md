@@ -61,6 +61,9 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   and the installer's test hook use). `PS3RECOMP_FRAME_DUMP=<path>` with
   `_EVERY` and `_SEQ` dumps frames on a schedule; `RSX_DUMP_FULL=1` at the
   internal resolution. `tools/ppm2png.py` converts a frame.
+- `PS3RECOMP_METAL_WINDOW_GRAB=<prefix>` (macOS): the same request file,
+  for what the window shows: the window's size in pixels, the bars, and where
+  the frame sits in it (the Aspect Ratio setting's placement).
 - `RSX_FRAMETIME=0` turns off the `[frametime]` line every 5 s (fps, mean and
   worst frame, frames over 34 ms).
 - `RSX_PRESENT_PACE_LOG=1`: with a frame-rate cap the renderer holds each
