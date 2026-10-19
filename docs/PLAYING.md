@@ -94,8 +94,8 @@ view. Settings > System Settings sets whether the logos and opening movie
 are skipped, what the game does while its window is in the background
 (keep running, mute, or pause), which controller's buttons the game shows,
 the mouse's sensitivity, and the renderer. Settings > Advanced
-Graphics sets the engine's own shadow quality, motion blur,
-post-processing, draw distance and tree detail. Confirm with X to save
+Graphics sets the aspect ratio and the engine's own shadow quality, motion
+blur, post-processing, draw distance and tree detail. Confirm with X to save
 them; everything but the renderer, Skip Intro and Shadow Quality changes
 at once (a second of black while the resolution or display mode switches;
 Tree Detail in the next area the game loads), those three the next time
@@ -115,6 +115,7 @@ folder above). It explains each setting:
 | RSX_VSYNC | 1 to sync to the display; 0 lets the frame rate exceed its refresh |
 | DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30 |
 | DOD3_FOV | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original |
+| DOD3_ASPECT | Aspect ratio: auto (the window's), 21:9, 32:9 or a ratio such as 2.39. Wider shows more at the sides in play and cutscenes; a 16:9 screen shows it with bars above and below. The view is 1280 game pixels wide, so raise RSX_SCALE to keep a wider one sharp. The HUD keeps its 16:9 layout for now. Unset is 16:9 |
 | RSX_ANISO | Texture filtering: 1 (original) to 16 (16x anisotropic, the default) |
 | RSX_AA | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off |
 | DOD3_SHADOWS | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start |

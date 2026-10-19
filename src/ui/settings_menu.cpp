@@ -68,6 +68,8 @@
 
 extern "C" void ppu_register_function(uint64_t addr, void (*fn)(ppu_context*));
 const char* dod3_settings_path();   /* main.cpp: the dod3.ini read at boot, or the one to create */
+extern "C" void rsx_present_set_content_aspect(float aspect);   /* rsx_draw_engine.h */
+extern "C" float rsx_present_window_aspect(void);
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
@@ -134,11 +136,30 @@ std::vector<int> s_page_rows[NPAGES];   /* each page's, in order */
 int s_page;                         /* the page open; -1: every page (Restore Defaults) */
 bool s_init;
 float s_fov_k = 1.0f;               /* DOD3_FOV as a zoom factor on tan(FOV/2) */
+float s_aspect;                     /* DOD3_ASPECT: the view's width over its height; 0: the title's 16:9 */
+bool s_aspect_auto;                 /* DOD3_ASPECT=auto: the window's */
+float s_aspect_from;                /* the ratio the view had (bridge 15); 0: not constrained, left alone */
+float s_aspect_now;                 /* the one it has (0: as it was) */
 
 void set_fov(const char* v)
 {
     const double rad = 3.14159265358979 / 180.0, add = v ? atof(v) : 0.0;
     s_fov_k = (float)(tan((65.0 + add) * rad / 2) / tan(65.0 * rad / 2));
+}
+
+/* DOD3_ASPECT: W:H or a ratio, or auto (the window's); 21:9 is the 2560x1080
+ * and 5120x2160 screens' 64:27. 16:9 and narrower: the title's own. */
+void set_aspect(const char* v)
+{
+    float w = 0.0f, h = 0.0f;
+    s_aspect = 0.0f;
+    s_aspect_auto = v && !strcmp(v, "auto");
+    if (!v || !*v || s_aspect_auto) return;
+    if (sscanf(v, "%f:%f", &w, &h) == 2 && h > 0.0f)
+        s_aspect = (w == 21.0f && h == 9.0f) ? 64.0f / 27.0f : w / h;
+    else
+        s_aspect = (float)atof(v);
+    if (!(s_aspect > 16.0f / 9.0f + 0.01f && s_aspect <= 8.0f)) s_aspect = 0.0f;
 }
 
 /* The rows a command covers: the open page's, or every page's. */
@@ -259,7 +280,18 @@ void init_rows()
                        0,
                        true });
     set_fov(getenv("DOD3_FOV"));
+    set_aspect(getenv("DOD3_ASPECT"));
     /* System Settings */
+    /* Advanced Graphics: the aspect ratio, then the engine's own switches
+     * (below). The Graphics page has the layout's seven rows. */
+    s_rows.push_back({ "DOD3_ASPECT",
+                       "Aspect Ratio",
+                       "Wider shows more at the sides. Auto follows the window.",
+                       { { NULL, "16:9" }, { "auto", "Auto" }, { "21:9", "21:9" }, { "32:9", "32:9" } },
+                       0,
+                       true });
+    s_rows.back().page = 2;
+    s_rows.back().apply_fn = [](const char* v) { set_aspect(v); };
     s_rows.push_back({ "DOD3_SKIP_INTRO",
                        "Skip Intro",
                        "Skip the logos and the opening movie.",
@@ -477,7 +509,7 @@ std::chrono::steady_clock::time_point s_page_drawn;   /* the page's last is-defa
 
 int bridge(int cmd, int a, int b)
 {
-    if (cmd < 11) init_rows();
+    if (cmd < 11 || cmd >= 15) init_rows();
     switch (cmd) {
     case 0: /* begin: edit the saved values */ each([](Row& r) { r.pending = r.saved; }); return 0;
     case 1: { /* change row a by b */
@@ -535,6 +567,47 @@ int bridge(int cmd, int a, int b)
         v = dod3_camera_axis(a, v);
         int r;
         memcpy(&r, &v, 4);
+        return r;
+    }
+    /* the view's aspect ratio: Sqex03GameCamera.DoUpdateCamera, before it
+     * fills the camera cache. A constrained view -- in play; the title's is
+     * not -- is letterboxed by the engine to its ratio, with the projection
+     * made for it: it gets DOD3_ASPECT, and its FOV (horizontal) is widened
+     * by the ratio's change so that the view keeps its height. The present
+     * is told (rsx_present_set_content_aspect): a window wider than 16:9 is
+     * shown the view without the bars. */
+    case 15: { /* the camera's ConstrainedAspectRatio (float bits); b: is the view constrained to it */
+        float ar;
+        memcpy(&ar, &a, 4);
+        s_aspect_from = (b && ar > 0.5f && ar < 8.0f) ? ar : 0.0f;
+        if (getenv("DOD3_ASPECT_LOG")) {
+            static float last_ar = -1.0f;
+            static int last_b = -1;
+            if (ar != last_ar || b != last_b) fprintf(stderr, "[aspect] camera %.4f constrained %d\n", ar, b);
+            last_ar = ar;
+            last_b = b;
+        }
+        float want = s_aspect;
+        if (s_aspect_auto) {
+            const float wa = rsx_present_window_aspect();
+            want = wa > 16.0f / 9.0f + 0.01f ? (wa < 8.0f ? wa : 8.0f) : 0.0f;
+        }
+        s_aspect_now = s_aspect_from > 0.0f ? want : 0.0f;
+        rsx_present_set_content_aspect(s_aspect_now);
+        if (s_aspect_now <= 0.0f) return a;
+        int r;
+        memcpy(&r, &s_aspect_now, 4);
+        return r;
+    }
+    case 16: { /* the view's FOV (float bits) */
+        float fov;
+        memcpy(&fov, &a, 4);
+        if (s_aspect_now <= 0.0f || !(fov > 0.0f && fov < 170.0f)) return a;
+        const double rad = 3.14159265358979 / 180.0;
+        fov = (float)(2.0 * atan(tan(fov * rad / 2) * s_aspect_now / s_aspect_from) / rad);
+        if (fov > 170.0f) fov = 170.0f;
+        int r;
+        memcpy(&r, &fov, 4);
         return r;
     }
     case 9: { /* the camera's field of view (float bits); b: the gameplay camera's */

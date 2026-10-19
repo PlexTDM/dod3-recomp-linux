@@ -31,11 +31,19 @@ left out while it is, so what a setting changes can be seen behind it),
 11 the frame's fDelta (and: is the pawn the dragon?), 12 is the mouse
 turning the camera?, 13 the camera
 stick's value (axis, the title's own) -> the one to use, 14 the view's
-rotation.
+rotation, 15 the camera's aspect ratio (and: is the view constrained to
+it?) -> the one to use, 16 the view's FOV -> the one to use.
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
 use -- the Field of View setting, applied to the gameplay camera only.
+
+Also: Sqex03GameCamera.DoUpdateCamera hands the port the camera's aspect
+ratio, whether the view is constrained to it, and the view's FOV before it
+fills the camera cache, and takes back the ones to use (bridge 15, 16) --
+the Aspect Ratio setting: the engine letterboxes a constrained view to its
+ratio and makes the projection for it, and the FOV is widened to keep the
+view's height.
 
 Also: Sqex03GamePlayerController's camera stick -- GetCameraMoveX,
 GetCameraMoveY, CheckCameraMoveKey -- goes through the port on its way to
@@ -57,7 +65,8 @@ MAGIC = 900000
 MAX_ROWS = 7     # the layout's
 PAGES = 3        # our root entries: Graphics, System, Advanced Graphics
 CMD_BEGIN, CMD_CHANGE, CMD_ISDEF, CMD_RESET, CMD_APPLY, CMD_CHANGED, CMD_SKIPINTRO, CMD_OPEN, CMD_ROWS, CMD_FOV, \
-    CMD_GRAPHICS_SHOWN, CMD_CAM_DT, CMD_CAM_ACTIVE, CMD_CAM_AXIS, CMD_CAM_VIEW = range(15)
+    CMD_GRAPHICS_SHOWN, CMD_CAM_DT, CMD_CAM_ACTIVE, CMD_CAM_AXIS, CMD_CAM_VIEW, \
+    CMD_ASPECT, CMD_ASPECT_FOV = range(17)
 
 GAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'game', 'disc')
 ROOT = os.path.join(GAME, 'PS3_GAME', 'USRDIR', 'SQEX03GAME')
@@ -256,6 +265,34 @@ def main():
     view = bridge(CMD_CAM_VIEW, clone(rot), clone(third))
     subst(view, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
     st.insert(i + 2, view)
+    new[f] = st
+
+    # ---- the aspect ratio: through the port ----
+    # DoUpdateCamera ends with FillCameraCache(NewPOV), the view the engine
+    # renders. With bConstrainAspectRatio -- set in play (the GameInfo's
+    # AppMode is not 0), not at the title -- the engine letterboxes the view
+    # to ConstrainedAspectRatio and makes its projection for that ratio.
+    # Before FillCameraCache the port gets the ratio and whether the view is
+    # constrained (bridge 15) and returns the ratio to use, then NewPOV.FOV
+    # (16), widened so that the view keeps its height at the new ratio. Only
+    # with the GameInfo there (its bridge); otherwise each value stays.
+    fov_node = fov                     # OutVT.POV.FOV: FOV of TPOV
+    f = pk.func('Sqex03GameCamera', 'DoUpdateCamera'); st = pk.parse(f)
+    i = pk.find(st, 'FillCameraCache(NewPOV)')
+    gi_cam = pk.local(f, 'xGameInfo')
+    def cam_bridge(cmd, a=None, b=None):
+        c = bridge(cmd, a, b)
+        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_cam))
+        return c
+    has_gi = lambda: pk.native('NotEqual_ObjectObject', clone(gi_cam), Node(0x2A, []))
+    ar = st[pk.find(st, 'self.ConstrainedAspectRatio = self.ViewTarget.AspectRatio')].parts[0][1]
+    on = st[pk.find(st, 'self.bConstrainAspectRatio = true')].parts[0][1]
+    def pov_fov(lhs):   # NewPOV.FOV; a let's left side is flagged as changing the struct
+        return Node(0x35, fov_node.parts[:2] + [('u8', 0), ('u8', 1 if lhs else 0), ('e', pk.local(f, 'NewPOV'))])
+    s_ar = pk.let(clone(ar), pk.cond(has_gi(), cam_bridge(CMD_ASPECT, clone(ar), clone(on)), clone(ar)))
+    s_fov = pk.let(pov_fov(True), pk.cond(has_gi(), cam_bridge(CMD_ASPECT_FOV, pov_fov(False)), pov_fov(False)))
+    s_ar.mem = st[i].mem               # the jumps to FillCameraCache land on these, before it
+    st[i:i] = [s_ar, s_fov]
     new[f] = st
 
     # ---- the camera's stick: through the port ----
