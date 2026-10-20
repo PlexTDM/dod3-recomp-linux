@@ -39,6 +39,8 @@
 #include <unordered_map>
 #include <algorithm>
 #include <direct.h>
+#include <signal.h>
+#include <exception>
 #include "util.h"
 
 #pragma comment(lib, "dbghelp.lib")
@@ -615,6 +617,66 @@ static DWORD WINAPI stall_thread(LPVOID arg)
 
 } // namespace
 
+/* The stack from a context: the same walk as the sampler, on a copy of the
+ * context rather than a suspended thread. The symbol lock is waited for a
+ * moment at most: a crash inside the sampler would otherwise hang here. */
+static void crash_walk(CONTEXT ctx)
+{
+    int locked = 0;
+    for (int i = 0; i < 50 && !(locked = TryAcquireSRWLockExclusive(&s_dbg)); i++) Sleep(2);
+    if (!locked) {
+        fprintf(stderr, "[crash]   (no stack: the symbol lock is held)\n");
+        return;
+    }
+    for (int n = 0; n < 48 && ctx.Rip; n++) {
+        const Sym& sy = symbolize(ctx.Rip);
+        fprintf(stderr, "[crash]   %2d  %s +0x%llx\n", n, sy.name.c_str(), (unsigned long long)(ctx.Rip - sy.base));
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(ctx.Rip, &base, NULL);
+        if (!rf) {
+            uint64_t ret = 0;
+            if (!safe_read64(ctx.Rsp, &ret)) break;
+            ctx.Rip = ret;
+            ctx.Rsp += 8;
+        } else {
+            PVOID h = NULL;
+            DWORD64 est = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, rf, &ctx, &h, &est, NULL);
+        }
+    }
+    ReleaseSRWLockExclusive(&s_dbg);
+}
+
+/* An end that raises no exception -- abort(), std::terminate, the C
+ * runtime's invalid-argument and pure-call checks, which end in a fast fail
+ * the exception filter never sees: what it was and where, and the log
+ * flushed (a log on disk is buffered, and its last 200 ms went with the
+ * process). */
+static void crash_last_words(const char* what)
+{
+    static volatile LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) != 0) return;
+    fflush(stdout);
+    fprintf(stderr, "\n[crash] %s on thread %lu \"%s\"\n", what, (unsigned long)GetCurrentThreadId(),
+            thread_name(GetCurrentThread(), GetCurrentThreadId()).c_str());
+    CONTEXT ctx;
+    RtlCaptureContext(&ctx);
+    crash_walk(ctx);
+    fflush(stderr);
+    fflush(stdout);
+}
+static void crash_on_abort(int) { crash_last_words("abort()"); }
+static void crash_on_terminate()
+{
+    crash_last_words("std::terminate (an exception nothing caught)");
+    abort();
+}
+static void crash_on_invalid_parameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned, uintptr_t)
+{
+    crash_last_words("an invalid argument to the C runtime");
+}
+static void crash_on_purecall() { crash_last_words("a pure virtual call"); }
+
 static LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep)
 {
     static volatile LONG once = 0;
@@ -633,28 +695,10 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep)
                                                    : "execute",
                 (void*)er->ExceptionInformation[1]);
     fputc('\n', stderr);
-    /* Unwind from the faulting context: the same walk as the sampler, on a
-     * copy of the context rather than a suspended thread. */
-    CONTEXT ctx = *ep->ContextRecord;
-    AcquireSRWLockExclusive(&s_dbg);
-    for (int n = 0; n < 48 && ctx.Rip; n++) {
-        const Sym& sy = symbolize(ctx.Rip);
-        fprintf(stderr, "[crash]   %2d  %s +0x%llx\n", n, sy.name.c_str(), (unsigned long long)(ctx.Rip - sy.base));
-        DWORD64 base = 0;
-        PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(ctx.Rip, &base, NULL);
-        if (!rf) {
-            uint64_t ret = 0;
-            if (!safe_read64(ctx.Rsp, &ret)) break;
-            ctx.Rip = ret;
-            ctx.Rsp += 8;
-        } else {
-            PVOID h = NULL;
-            DWORD64 est = 0;
-            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, rf, &ctx, &h, &est, NULL);
-        }
-    }
-    ReleaseSRWLockExclusive(&s_dbg);
+    fflush(stdout);
+    crash_walk(*ep->ContextRecord);   /* from the faulting context */
     fflush(stderr);
+    fflush(stdout);
     return EXCEPTION_EXECUTE_HANDLER;   /* and die */
 }
 
@@ -727,6 +771,10 @@ extern "C" void win_prof_start(void)
     if (!getenv("DOD3_NO_CRASH_HANDLER")) {
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         SetUnhandledExceptionFilter(crash_filter);
+        signal(SIGABRT, crash_on_abort);
+        std::set_terminate(crash_on_terminate);
+        _set_invalid_parameter_handler(crash_on_invalid_parameter);
+        _set_purecall_handler(crash_on_purecall);
     }
     if (!prof && !stall_dir && !stall_ms) return;
     s_callers_of = getenv("DOD3_PROF_CALLERS");
