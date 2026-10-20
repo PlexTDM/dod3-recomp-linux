@@ -657,8 +657,9 @@ static void pgo_write(void) {}
  * against a SHA-1 table compiled into the EBOOT -- "name\0" + 20 bytes, at
  * 0x019AD200 -- once they are loaded, and a mismatch is an "IO Failure" and
  * then the BROKEN_EXIT_GAMEDATA dialog. A package patched for the settings
- * menu (served through PS3_VFS_OVERLAY) carries its own hash, written over
- * the entry before the title runs. The hash is of the uncompressed package.
+ * menu (served through PS3_VFS_OVERLAY), or a mod's in the player's own
+ * files, carries its own hash, written over the entry before the title runs
+ * (patches/menu_patch.cpp). The hash is of the uncompressed package.
  * DOD3_SHA_OVERRIDE=<name>=<40 hex digits>[,<name>=<hex>...] */
 bool dod3_sha_override(const char* name, const uint8_t sha[20])
 {

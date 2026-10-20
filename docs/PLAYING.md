@@ -197,6 +197,20 @@ Outfits/Music > Voice > Language: Japanese, then start or continue a game.
 Voices, lip-sync and the cutscene movies switch to Japanese.
 
 
+## Mods
+
+Mods that replace some of the game's files in the update's folder
+(game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe), as fan
+translations do, are played as they are. If a mod replaces the game's
+script package (SQEX03GAME.XXX), the port's additions to the Settings menu
+are not there, because they are made to that package: the Graphics
+Settings, System Settings and Advanced Graphics pages, and what works
+through them (the wider field of view, the Aspect Ratio setting's wider
+view, skipping the intro). dod3.ini still sets the resolution, the display
+mode, the frame rate and the anti-aliasing. Running the setup again with
+the update package puts the update's own files back.
+
+
 ## Your saves, and updating
 
 Saves and the game's own data are in the "gamedata" folder next to
