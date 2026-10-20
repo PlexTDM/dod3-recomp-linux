@@ -225,3 +225,7 @@ folder.
 
 - Tested on few machines so far (Windows: i9-13900K with an RTX 4090;
   macOS: M1 Pro). Reports from other hardware are welcome.
+- At an aspect ratio other than 16:9 (21:9, 32:9, 16:10) the HUD keeps its
+  16:9 layout in the middle of the screen, and some of it can still be out
+  of place: the pause screen's frosted background stays 16:9, and not every
+  menu and effect has been checked at those shapes.
