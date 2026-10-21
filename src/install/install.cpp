@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -69,6 +71,19 @@ bool retail(const fs::path& p)
     return (rev & 0x8000) != 0;
 }
 
+/* fs::rename, tried again for a few seconds while it is refused: right after
+ * thousands of files are written, a scanner (Windows Defender, the search
+ * indexer) may still hold one of them open, and the folder cannot move until
+ * it lets go ("Access is denied"). */
+void move_patiently(const fs::path& from, const fs::path& to, std::error_code& ec)
+{
+    for (int i = 0;; i++) {
+        fs::rename(from, to, ec);
+        if (!ec || i == 20) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+}
+
 /* Move everything under `from` into `to`, file by file (same volume: each a
  * rename), replacing what is there; then remove `from`. */
 bool merge_move(const fs::path& from, const fs::path& to, std::string* err)
@@ -82,7 +97,7 @@ bool merge_move(const fs::path& from, const fs::path& to, std::string* err)
             continue;
         }
         if (fs::is_directory(t, ec)) fs::remove_all(t, ec);
-        fs::rename(it->path(), t, ec);
+        move_patiently(it->path(), t, ec);
         if (ec) {
             *err = "could not move " + utf8(it->path().filename()) + " into place: " + ec.message();
             return false;
@@ -197,7 +212,7 @@ bool settle_old(const fs::path& base, std::string* err)
     const fs::path old = staging(base) / "old", final_dir = base / "game/disc";
     if (!fs::exists(old, ec)) return true;
     if (!fs::exists(final_dir, ec)) {
-        fs::rename(old, final_dir, ec);
+        move_patiently(old, final_dir, ec);
         if (ec) {
             *err = "could not put the previous copy back from " + utf8(old) + ": " + ec.message();
             return false;
@@ -212,7 +227,7 @@ bool settle_old(const fs::path& base, std::string* err)
             *err = utf8(n) + " is both in the new copy and in " + utf8(old);
             return false;
         }
-        fs::rename(old / n, final_dir / n, ec);
+        move_patiently(old / n, final_dir / n, ec);
         if (ec) {
             *err = "could not move " + utf8(n) + " back from " + utf8(old) + ": " + ec.message();
             return false;
@@ -623,10 +638,10 @@ bool install(const fs::path& base, const Plan& plan,
          * held besides the disc back (settle_old). Nothing that may hold the
          * game data's links onto the disc is deleted on the way. */
         if (fs::exists(final_dir, ec)) {
-            fs::rename(final_dir, old, ec);
+            move_patiently(final_dir, old, ec);
             if (ec) return fail("could not replace the game's files: " + ec.message());
         }
-        fs::rename(part, final_dir, ec);
+        move_patiently(part, final_dir, ec);
         if (ec)
             return fail("could not move the game into place: " + ec.message()); /* settle_old puts the old copy back */
         if (!settle_old(base, err)) return false;
@@ -642,7 +657,7 @@ bool install(const fs::path& base, const Plan& plan,
         fs::create_directories(stage, ec);
         fs::create_directories(to.parent_path(), ec);
         fs::copy_file(plan.eboot.path, part, fs::copy_options::overwrite_existing, ec);
-        if (!ec) fs::rename(part, to, ec);
+        if (!ec) move_patiently(part, to, ec);
         if (ec) return fail("could not copy EBOOT.ELF: " + ec.message());
         done += plan.eboot.bytes;
     }
@@ -672,7 +687,7 @@ bool install(const fs::path& base, const Plan& plan,
         FILE* f = dod3::open_file(part, "wb");
         const bool wrote = f && fwrite(elf.data(), 1, elf.size(), f) == elf.size();
         if (f) fclose(f);
-        if (wrote) fs::rename(part, to, ec);
+        if (wrote) move_patiently(part, to, ec);
         if (!wrote || ec) return fail("could not write " + utf8(to));
         if (!builtin_keys().complete()) keys_save(keys_file(base), plan.keys); /* the player's, for the next time */
     }
