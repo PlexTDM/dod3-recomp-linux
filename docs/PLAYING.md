@@ -20,22 +20,29 @@ or Sony. Drakengard 3 and its assets belong to their owners.
    install the Japanese voice pack. The install folder should be on a
    drive that takes links between folders (NTFS or APFS, not exFAT).
 
-2. Your copy of Drakengard 3, US release (BLUS31197), as one of:
+2. Your copy of Drakengard 3, US release, as one of:
 
-   - the disc dumped to a folder (the one that contains PS3_GAME), or
-   - a DECRYPTED disc image (.iso).
+   - the disc (BLUS31197) dumped to a folder (the one that contains
+     PS3_GAME),
+   - a DECRYPTED disc image (.iso), or
+   - the PSN release's game package (NPUB31251): the .pkg file a
+     PlayStation 3 downloads for it, UP0082-NPUB31251_00-DOD3MAINGAME0000
+     (15.6 GB). No licence files are needed.
 
    The easiest way is PS3 Disc Dumper (https://github.com/13xforever/ps3-disc-dumper,
    free, for Windows, macOS and Linux) with a compatible Blu-ray drive: it
    reads your disc and writes a decrypted folder, which the setup takes as
    it is. A modded PS3 (multiMAN, webMAN MOD) can also copy the disc to a
    decrypted folder or image. An image ripped with an ordinary disc tool is
-   still encrypted and will be refused, and so are other regions (EU, JP).
+   still encrypted and will be refused, and so are other regions (EU, JP),
+   the European PSN release among them.
 
 3. The game's 1.01 update, as the package file a PlayStation 3 downloads:
    UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg (172 MB). The
    port runs the updated game, so the update is required. The setup checks
-   it is the genuine 1.01 package.
+   it is the genuine 1.01 package. This is the disc release's update, and
+   the PSN release takes it too; the PSN release's own update is not
+   needed.
 
 4. Optionally, the DLC packages you own (the .pkg files your PlayStation 3
    downloads for them, UP0082-NPUB31251_00-...): the Japanese Voice Pack,
@@ -53,8 +60,9 @@ Windows:
 1. Unzip the release anywhere you like (not inside Program Files).
 2. Run dod3.exe. Windows may show a SmartScreen warning the first time,
    because the program is not signed: choose "More info", then "Run anyway".
-3. The setup opens. Add your files -- the disc image or folder, the update
-   package, and any DLC packages -- with Add Files / Add Folder; each one is
+3. The setup opens. Add your files -- the disc image or folder (or the PSN
+   game package), the update package, and any DLC packages -- with Add
+   Files / Add Folder; each one is
    recognised by itself, in any order. Then Install. The game's files are
    copied next to dod3.exe into the "game" folder (a few minutes).
 4. Start Game. The first minutes of the first launch stutter while graphics

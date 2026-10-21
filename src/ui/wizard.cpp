@@ -391,7 +391,9 @@ struct Wizard {
         } else {
             para("This copies Drakengard 3 from your own copy of the game. You will need:");
             ImGui::Indent(u());
-            bullet("the game disc: a decrypted .iso, or the folder holding PS3_GAME");
+            bullet(update_required() ? "the game: the disc (a decrypted .iso, or the folder holding PS3_GAME), or "
+                                       "the US PSN package (.pkg)"
+                                     : "the game disc: a decrypted .iso, or the folder holding PS3_GAME");
             if (update_required()) bullet("the 1.01 update package (.pkg)");
             bullet("any DLC packages (.pkg) you own (optional)");
             if (need_keys())
@@ -401,7 +403,9 @@ struct Wizard {
                                            "on the Keys page)");
             ImGui::Unindent(u());
             ImGui::Spacing();
-            para("Nothing is changed in the files you add. Licences are not needed for the DLC.");
+            para(update_required()
+                     ? "Nothing is changed in the files you add. Licences are not needed for the PSN package or the DLC."
+                     : "Nothing is changed in the files you add. Licences are not needed for the DLC.");
         }
         path_line(have.ready() ? "Installed in " : "Installing to ", base);
     }
@@ -411,11 +415,16 @@ struct Wizard {
         heading("Game files");
         para("Add the files below. Any file can be added on any page; each one is recognised by itself.");
         const Item items[] = {
-            { "Game disc (BLUS31197)",
-              "Add a decrypted .iso with Add Files, or the folder holding PS3_GAME with Add Folder.", &plan.disc,
-              have.disc },
-            { "Update 1.01", "Add the update package, UP0082-BLUS31197_00-DOD3PATCH0000000 (.pkg).", &plan.update,
-              have.update },
+            { update_required() ? "Game: the disc (BLUS31197) or the PSN package (NPUB31251)" : "Game disc (BLUS31197)",
+              update_required()
+                  ? "Add a decrypted .iso or the PSN package (UP0082-NPUB31251_00-DOD3MAINGAME0000) with Add Files, "
+                    "or the folder holding PS3_GAME with Add Folder."
+                  : "Add a decrypted .iso with Add Files, or the folder holding PS3_GAME with Add Folder.",
+              &plan.disc, have.disc },
+            { "Update 1.01",
+              "Add the update package, UP0082-BLUS31197_00-DOD3PATCH0000000 (.pkg): the disc release's, which the "
+              "PSN release takes too.",
+              &plan.update, have.update },
         };
         for (const Item& it : items) {
             if (it.src == &plan.update && !update_required()) continue;
@@ -548,7 +557,7 @@ struct Wizard {
                 ImGui::TableNextColumn();
                 ImGui::TextDisabled("%s", gb(b).c_str());
             };
-            if (plan.disc.set()) row("Game disc", plan.disc.bytes);
+            if (plan.disc.set()) row(plan.disc.psn ? "Game (PSN package)" : "Game disc", plan.disc.bytes);
             if (plan.update.set()) row("Update 1.01", plan.update.bytes);
             if (plan.eboot.set())
                 row("EBOOT.ELF", plan.eboot.bytes);

@@ -44,9 +44,11 @@ std::string pkg_content_id(const std::filesystem::path& p);
 
 /* Extract the whole package under `dest`. Reads it once, start to end,
  * checking its SHA-1 footer. progress(bytes read, total) returns false to
- * cancel. */
+ * cancel. `layout`, if given, names where each entry goes under `dest`
+ * ("" leaves it out). */
 bool pkg_extract(const Pkg& pkg, const std::filesystem::path& dest,
-                 const std::function<bool(uint64_t, uint64_t)>& progress, std::string* err);
+                 const std::function<bool(uint64_t, uint64_t)>& progress, std::string* err,
+                 const std::function<std::string(const std::string&)>& layout = nullptr);
 
 /* One file of the package, decrypted into memory (EBOOT.BIN). Not checked
  * against the footer: what is read from it is checked by its own hash. */

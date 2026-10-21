@@ -25,12 +25,19 @@ What you need:
   AVX2 (Intel Haswell / AMD Zen or newer), or a Mac with Apple silicon on
   macOS 13 or newer. About 16 GB of free disk space, 10 GB more for the
   Japanese voice pack.
-- Your disc, US release (BLUS31197), dumped to a folder or a **decrypted**
-  `.iso` ([PS3 Disc Dumper](https://github.com/13xforever/ps3-disc-dumper)
-  writes one; an image from an ordinary disc tool is still encrypted and is
-  refused, as are other regions).
+- Your copy of the game, US release, as either:
+  - the disc (BLUS31197), dumped to a folder or a **decrypted** `.iso`
+    ([PS3 Disc Dumper](https://github.com/13xforever/ps3-disc-dumper) writes
+    one; an image from an ordinary disc tool is still encrypted and is
+    refused), or
+  - the PSN release (NPUB31251): the game's package as a PlayStation 3
+    downloads it (`UP0082-NPUB31251_00-DOD3MAINGAME0000`, 15.6 GB). No
+    licence files are needed.
+
+  Other regions, the European PSN release among them, are refused.
 - The 1.01 update, as the package a PlayStation 3 downloads:
-  `UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg`.
+  `UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg`. This is the
+  disc release's update; the PSN release takes it too.
 - Optionally, the DLC packages you own (`UP0082-NPUB31251_00-...`). No
   licence files are needed.
 
@@ -41,8 +48,9 @@ Windows:
    anywhere (not inside Program Files).
 2. Run `dod3.exe`. SmartScreen may warn the first time, as the program is not
    signed: "More info", then "Run anyway".
-3. In the setup that opens, add your files (the disc image or folder, the
-   update package, any DLC packages) with Add Files / Add Folder, in any
+3. In the setup that opens, add your files (the disc image or folder, or the
+   PSN game package; the update package; any DLC packages) with Add Files /
+   Add Folder, in any
    order, then Install. The game's files are copied into the `game` folder
    next to `dod3.exe` (a few minutes).
 4. Start Game.

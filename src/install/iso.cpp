@@ -63,8 +63,10 @@ bool param_sfo(const std::vector<uint8_t>& d, std::string* title_id, std::string
 bool disc_installed(const fs::path& base)
 {
     std::error_code ec;
+    /* not EBOOT.BIN: a 1.01 build's comes from the update, and a PSN install
+     * has none there */
     return fs::exists(base / "game/disc/PS3_GAME/PARAM.SFO", ec) &&
-           fs::exists(base / "game/disc/PS3_GAME/USRDIR/EBOOT.BIN", ec);
+           fs::exists(base / "game/disc/PS3_GAME/USRDIR/SQEX03GAME/PS3TOC.TXT", ec);
 }
 
 /* ---- ISO 9660 ------------------------------------------------------------------

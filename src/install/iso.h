@@ -26,7 +26,8 @@ std::string sha256_file(const fs::path& p);    /* "" if unreadable */
 /* PARAM.SFO's TITLE_ID and APP_VER; false if it is not an SFO. */
 bool param_sfo(const std::vector<uint8_t>& sfo, std::string* title_id, std::string* app_ver);
 
-/* Is the disc installed under `base` (game/disc)? */
+/* Is the game installed under `base` (game/disc): the disc, or the PSN
+ * package laid out as it? */
 bool disc_installed(const fs::path& base);
 
 /* A disc to install from: an ISO 9660 image or a folder holding PS3_GAME. */

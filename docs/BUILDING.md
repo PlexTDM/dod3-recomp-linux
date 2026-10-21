@@ -39,13 +39,13 @@ for the code it generates at build time.
 
 The port is built from the game's 1.01 update: its executable, decrypted, as
 `elf/EBOOT_101.ELF` (SHA-256 `ed89e80f2336a948…`, 26,872,424 bytes). The
-installer makes it from your disc and the update package, and lays out
-`game/disc` at the same time. Any built `dod3` can do that into the
+installer makes it from the update package, and lays out `game/disc` from
+your disc or the PSN release's game package at the same time. Any built `dod3` can do that into the
 repository root before the first lift -- a release build, or a build from
 another machine:
 
 ```sh
-DOD3_INSTALL_BASE=. path/to/dod3 --install <disc .iso or folder> <update .pkg> [DLC .pkg ...]
+DOD3_INSTALL_BASE=. path/to/dod3 --install <disc .iso or folder, or PSN game .pkg> <update .pkg> [DLC .pkg ...]
 ```
 
 Any other decrypted copy of the update's EBOOT.BIN with that hash works too

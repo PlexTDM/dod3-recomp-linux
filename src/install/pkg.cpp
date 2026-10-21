@@ -136,18 +136,19 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
 }
 
 bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(uint64_t, uint64_t)>& progress,
-                 std::string* err)
+                 std::string* err, const std::function<std::string(const std::string&)>& layout)
 {
     Aes aes;
     aes.set_key(k_ps3recomp_pkg_key, 128);
     std::error_code ec;
+    auto where = [&](const PkgEntry& e) { return layout ? layout(e.name) : e.name; };
     /* the folders, then the files to write, in data order */
     std::vector<const PkgEntry*> files;
     for (const PkgEntry& e : pkg.entries) {
-        if (e.dir)
-            fs::create_directories(dest / fs::path(e.name), ec);
-        else
+        if (!e.dir)
             files.push_back(&e);
+        else if (!where(e).empty())
+            fs::create_directories(dest / fs::path(where(e)), ec);
     }
     std::sort(files.begin(), files.end(), [](const PkgEntry* a, const PkgEntry* b) { return a->offset < b->offset; });
 
@@ -178,12 +179,16 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
                 if (pkg.data_offset + e->offset >= hi) break;
                 cur = e;
                 next++;
-                const fs::path t = dest / fs::path(e->name);
-                fs::create_directories(t.parent_path(), ec);
-                out.reset(new File(t, "wb"));
-                if (!out->f) {
-                    *err = "cannot write " + utf8(t);
-                    return false;
+                const std::string to = where(*e);
+                out.reset();
+                if (!to.empty()) {   /* else left out: read past it */
+                    const fs::path t = dest / fs::path(to);
+                    fs::create_directories(t.parent_path(), ec);
+                    out.reset(new File(t, "wb"));
+                    if (!out->f) {
+                        *err = "cannot write " + utf8(t);
+                        return false;
+                    }
                 }
                 if (e->size == 0) {
                     out.reset();
@@ -193,7 +198,7 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
             }
             const uint64_t a = std::max(lo, pkg.data_offset + cur->offset);
             const uint64_t b = std::min(hi, pkg.data_offset + cur->offset + cur->size);
-            if (a < b) {
+            if (a < b && out) {
                 work.assign(buf.begin() + (size_t)(a - lo), buf.begin() + (size_t)(b - lo));
                 aes_ctr(aes, pkg.riv, a - pkg.data_offset, work.data(), work.size());
                 if (fwrite(work.data(), 1, work.size(), out->f) != work.size()) {

@@ -5,6 +5,10 @@
  * What the player gives it, each recognised by itself:
  *   the disc        a decrypted .iso, or the folder holding PS3_GAME
  *                   (src/install/iso.h checks it is BLUS31197 v01.00)
+ *   or the game     the US PSN release's package (NPUB31251, 1.00), in a
+ *   from PSN        1.01 build: the disc's files but for its executable and
+ *                   one config file, both under the buyer's licence and both
+ *                   brought by the update (the disc release's, for either)
  *   the update      the 1.01 update package (a 1.01 build needs it)
  *   DLC             any of the 20 PSN packs (UP0082-NPUB31251_00-...), optional
  *   keys            what opens the game's executable (src/install/keys.h): the
@@ -12,7 +16,9 @@
  *                   disc's (1.00), and checks it by its hash
  * (an EBOOT.ELF already made, with the right hash, is taken too) and where
  * it puts them, under `base`:
- *   game/disc/                                   the disc
+ *   game/disc/                                   the disc (or the PSN
+ *                                                package's files, laid out
+ *                                                as the disc's)
  *   game/disc/game/BLES00000/                    the update, as the console
  *                                                installs it (the title boots
  *                                                as its update)
@@ -47,6 +53,7 @@ struct Source {
     std::string id;          /* DLC: "ADDJAPANESEVOICE"; update: its content ID */
     std::string name;        /* for the player: "Japanese Voice Pack" */
     uint64_t bytes = 0;      /* what installing it writes */
+    bool psn = false;        /* the game: the US PSN release's package, not the disc */
     bool set() const { return kind != SourceKind::Unknown; }
 };
 

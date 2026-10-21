@@ -25,6 +25,19 @@ namespace {
 const char kUpdateId[] = "UP0082-BLUS31197_00-DOD3PATCH0000000";
 const char kUpdateSha1[] = "d71bc929d53703bf6899cb18d6041bcc7ecb5419";
 const char kDlcPrefix[] = "UP0082-NPUB31251_00-";
+/* The US PSN release (NPUB31251): its game package (1.00) and its own 1.01
+ * update, by the SHA-1 their last 32 bytes carry. The game's files are the
+ * disc's but for an executable of its own and COALESCED_INT.BIN, both under
+ * the buyer's licence; the disc release's update brings both. Its own update
+ * is the disc release's 1.01 files with another such executable, so it is
+ * not taken. */
+const char kPsnGameId[] = "UP0082-NPUB31251_00-DOD3MAINGAME0000";
+const char kPsnGameSha1[] = "e93a19fae13a5f5d332a311d91d939fcf4987514";
+const char kPsnUpdateSha1[] = "4a0ad3c8fd7abe8937da712aec8e4df519fe6250";
+/* The European PSN release (NPEB01407): a build of its own, not supported. */
+const char kEuPrefix[] = "EP0082-NPEB01407_00-";
+/* SHA-256 of the disc's PS3TOC.TXT, which the PSN package's becomes. */
+const char kDiscTocSha256[] = "7b33d9c816018889ebfb4e1caf6aa6daa51ab5d51df05d358d2ca98938e1d6c5";
 /* SHA-256 of the update's EBOOT.BIN as an ELF (1.01); the disc's (1.00) is
  * install/iso.h's kEbootElfSha256. */
 const char kElf101Sha256[] = "ed89e80f2336a948074c32151d2cadfb6965d174a15d9c067aeeff97c21e7e6c";
@@ -222,6 +235,42 @@ bool licence_only(const Pkg& pkg)
     return true;
 }
 
+/* Where the PSN game package's files go: under PS3_GAME, as on the disc. Its
+ * EBOOT.BIN and its one .EDAT (COALESCED_INT.BIN, under licence) are left
+ * out; the update brings the executable and the plain file. */
+std::string psn_layout(const std::string& name)
+{
+    const size_t n = name.size();
+    if (name == "USRDIR/EBOOT.BIN" || (n > 5 && name.compare(n - 5, 5, ".EDAT") == 0)) return "";
+    return "PS3_GAME/" + name;
+}
+
+/* The PSN package's file list names that file as its .EDAT, where the disc's
+ * names the plain file; with the line as on the disc, the list is the disc's
+ * own (checked). */
+bool psn_fix_toc(const fs::path& disc, std::string* err)
+{
+    const fs::path toc = disc / "PS3_GAME/USRDIR/SQEX03GAME/PS3TOC.TXT";
+    std::error_code ec;
+    const uint64_t n = fs::file_size(toc, ec);
+    std::string s(ec ? 0 : (size_t)n, '\0');
+    FILE* f = ec ? nullptr : dod3::open_file(toc, "rb");
+    const bool read = f && fread(&s[0], 1, s.size(), f) == s.size();
+    if (f) fclose(f);
+    const std::string from = "\\CookedPS3\\COALESCED_INT.BIN.EDAT ", to = "\\CookedPS3\\Coalesced_INT.bin ";
+    const size_t at = s.find(from);
+    if (read && at != std::string::npos) s.replace(at, from.size(), to);
+    if (!read || sha256_hex(s.data(), s.size()) != kDiscTocSha256) {
+        *err = "the PSN package's file list (PS3TOC.TXT) is not the one expected";
+        return false;
+    }
+    f = dod3::open_file(toc, "wb");
+    const bool wrote = f && fwrite(s.data(), 1, s.size(), f) == s.size();
+    if (f) fclose(f);
+    if (!wrote) *err = "could not write " + utf8(toc);
+    return wrote;
+}
+
 }  // namespace
 
 const std::vector<DlcInfo>& known_dlc()
@@ -362,6 +411,37 @@ bool identify(const fs::path& p, Source* s, std::string* err)
                        : "a debug package, not one from PSN";
             return false;
         }
+        if (cid == kPsnGameId) {
+            const std::string sha = pkg_footer_sha1(p);
+            if (sha == kPsnUpdateSha1) {
+                *err = "this is the PSN release's own update, which is not needed: both releases take the disc "
+                       "release's 1.01 update, UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg";
+                return false;
+            }
+            if (sha != kPsnGameSha1) {
+                *err = "this is not the US PSN release's game package (version 1.00), or it is damaged";
+                return false;
+            }
+            if (!update_required()) {
+                *err = "this build plays version 1.00, made from the disc's executable; the PSN package is for the "
+                       "1.01 build";
+                return false;
+            }
+            Pkg pkg;
+            if (!pkg_open(p, &pkg, err)) return false;
+            s->kind = SourceKind::Disc;
+            s->psn = true;
+            s->id = cid;
+            s->name = "Drakengard 3 PSN package (NPUB31251)";
+            for (const PkgEntry& e : pkg.entries)
+                if (!e.dir && !psn_layout(e.name).empty()) s->bytes += e.size;
+            return true;
+        }
+        if (cid.rfind(kEuPrefix, 0) == 0) {
+            *err = "this package is from the European PSN release (NPEB01407), a build of its own; only the US "
+                   "release is supported, as the disc (BLUS31197) or the PSN package (NPUB31251)";
+            return false;
+        }
         if (cid == kUpdateId) {
             if (pkg_footer_sha1(p) != kUpdateSha1) {
                 *err = "this update package is not version 1.01, or it is damaged";
@@ -493,7 +573,7 @@ bool install(const fs::path& base, const Plan& plan,
     std::error_code ec;
     /* the progress total: the bytes read */
     uint64_t total = 0, done = 0;
-    if (plan.disc.set()) total += plan.disc.bytes;
+    if (plan.disc.set()) total += plan.disc.psn ? fs::file_size(plan.disc.path, ec) : plan.disc.bytes;
     if (plan.eboot.set()) total += plan.eboot.bytes;
     if (plan.update.set()) total += fs::file_size(plan.update.path, ec);
     for (const Source& d : plan.dlc) total += fs::file_size(d.path, ec);
@@ -525,14 +605,20 @@ bool install(const fs::path& base, const Plan& plan,
         if (!read_eboot_bin(base, plan, &self, err) || !make_elf(self, plan.keys, &elf, &wrong, err)) return fail(*err);
     }
 
-    if (plan.disc.set() &&
-        !(fs::exists(base / "game/disc", ec) && fs::equivalent(plan.disc.path, base / "game/disc", ec))) {
-        Disc disc;
-        if (!open_disc(plan.disc.path, &disc, err)) return fail(*err);
+    if (plan.disc.set() && (plan.disc.psn || !(fs::exists(base / "game/disc", ec) &&
+                                               fs::equivalent(plan.disc.path, base / "game/disc", ec)))) {
         const fs::path part = stage / "disc", old = stage / "old", final_dir = base / "game/disc";
-        if (!copy_disc(
-                disc, part, [&](uint64_t d, uint64_t) { return progress(done + d, total, "Copying the game"); }, err))
-            return fail(*err);
+        auto step = [&](uint64_t d, uint64_t) { return progress(done + d, total, "Copying the game"); };
+        if (plan.disc.psn) {
+            /* the PSN package, laid out as the disc */
+            Pkg pkg;
+            if (!pkg_open(plan.disc.path, &pkg, err) || !pkg_extract(pkg, part, step, err, psn_layout) ||
+                !psn_fix_toc(part, err))
+                return fail(*err);
+        } else {
+            Disc disc;
+            if (!open_disc(plan.disc.path, &disc, err) || !copy_disc(disc, part, step, err)) return fail(*err);
+        }
         /* The swap: the old copy aside, the new one in, then what the old one
          * held besides the disc back (settle_old). Nothing that may hold the
          * game data's links onto the disc is deleted on the way. */
@@ -546,7 +632,7 @@ bool install(const fs::path& base, const Plan& plan,
         if (!settle_old(base, err)) return false;
     }
     if (plan.disc.set()) {
-        done += plan.disc.bytes;
+        done += plan.disc.psn ? fs::file_size(plan.disc.path, ec) : plan.disc.bytes;
         gamedata_layout(base / "game/disc");
     }
 
@@ -649,7 +735,9 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
     }
     const Status have = installed(base);
     std::string missing;
-    if (!plan.disc.set() && !have.disc) missing += " the game disc (an .iso or its folder),";
+    if (!plan.disc.set() && !have.disc)
+        missing += update_required() ? " the game (the disc as an .iso or its folder, or the US PSN package),"
+                                     : " the game disc (an .iso or its folder),";
     if (update_required() && !plan.update.set() && !have.update) missing += " the 1.01 update package,";
     if (!plan.eboot.set() && !have.eboot && !plan.keys.complete()) {
         missing += " the keys for the game's executable (--keys <file> with";
