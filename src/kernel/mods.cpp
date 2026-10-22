@@ -13,13 +13,15 @@
  *    undub's names are in more than one chapter, or in the main game too:
  *    each chapter's dragon (ANIM_DLC_DR00_SF), One's BS070. Those are listed
  *    as /DLC_JPV/UNDUB/CHAPTER/<name> and resolved here to the copy of the
- *    chapter being played -- the one whose map was read last -- or, outside
- *    the chapters, to the main game's own package. The undub's movies sit in
- *    UNDUB/MOVIES and are served where the title looks for the voice pack's
- *    (DLC_JPV/SQEX03GAME/MOVIES). Where a mod in game/mods has its own copy
- *    of a DLC chapter's package the undub has too -- a translation's text --
- *    the mod's is read in Japanese as well: the undub's is English text
- *    retimed for the Japanese voices.
+ *    chapter being played -- the one whose map was read last since the book
+ *    or the title -- or, outside the chapters, to the main game's own
+ *    package. (The undub changed each chapter's dragon for that chapter's
+ *    voices, where the title itself reads one chapter's in all of them.)
+ *    The undub's movies sit in UNDUB/MOVIES and are served where the title
+ *    looks for the voice pack's (DLC_JPV/SQEX03GAME/MOVIES). Where a mod in
+ *    game/mods has its own copy of a DLC chapter's package the undub has
+ *    too -- a translation's text -- the mod's is read in Japanese as well:
+ *    the undub's is English text retimed for the Japanese voices.
  *
  * Bridge 18 (src/ui/settings_menu.cpp) asks dod3_dlc_jpvoice(): with the
  * undub installed, the DLC chapters keep the Japanese voices instead of the
@@ -89,10 +91,14 @@ void hook(char* path, size_t cap)
     const size_t len = n - rn;
 
     if (s_jpvoice) {
-        /* the chapter being played: the one whose map was read last */
+        /* the chapter being played: the one whose map was read last since the
+         * book or the title. Some chapters stream main-game maps too (Two's,
+         * Three's), which leave it as it is. */
         if (ends_with(rel, len, "_MAP.XXX")) {
             const char* d = strstr(rel, "/USRDIR/DLC/ADDSCENARIO0000");
-            s_playing = d && d[27] >= '0' && d[27] <= '5' ? d[27] - '0' : -1;
+            if (d && d[27] >= '0' && d[27] <= '5') s_playing = d[27] - '0';
+        } else if (ends_with(rel, len, "/COOKEDPS3/BOOK.XXX") || ends_with(rel, len, "/COOKEDPS3/TITLE.XXX")) {
+            s_playing = -1;
         }
         static const char kCooked[] = "/GAME/NPUB31251/USRDIR/DLC_JPV/UNDUB/COOKEDPS3/";
         if (!s_mod_dlc.empty() && !strncmp(rel, kCooked, sizeof kCooked - 1)) {
