@@ -1,6 +1,7 @@
 /*
- * The installer's core, shared by every platform's UI (src/ui/wizard.cpp)
- * and the command line (dod3 --install <file>...).
+ * The installer's core, shared by every platform's UI (the setup,
+ * src/ui/wizard.cpp, and the launcher, src/ui/launcher.cpp) and the command
+ * line (dod3 --install <file>...).
  *
  * What the player gives it, each recognised by itself:
  *   the disc        a decrypted .iso, or the folder holding PS3_GAME
@@ -42,7 +43,9 @@
  *                                                (<id>.txt), and the update's
  *                                                files a mod replaced
  *                                                (<id>/orig/), so a mod can be
- *                                                removed by itself
+ *                                                removed by itself; switched
+ *                                                off, its files set aside
+ *                                                (<id>/off/) and <id>.off
  *   .../PATCH/                                   a mod's files for the
  *                                                update's folder, which the
  *                                                title lists: there, as the
@@ -51,7 +54,8 @@
  *                                                own back)
  *   .../NPUB31251/USRDIR/DLC_JPV/UNDUB/          the DLC chapters' Japanese
  *                                                voices, beside the voice
- *                                                pack's (src/kernel/dlc.cpp)
+ *                                                pack's (src/kernel/dlc.cpp,
+ *                                                src/kernel/mods.cpp)
  * Each part is unpacked into game/setup.partial/ and moved into place once it
  * is whole, so a failure, a cancel or a crash leaves no half-installed part
  * (the parts before it stay installed). A run that adds DLC to an install
@@ -123,15 +127,23 @@ const char* eboot_path();
 struct Plan {
     Source disc, update, eboot;
     std::vector<Source> dlc, mods;
-    /* the installed mods removed first: game/mods and the DLC chapters'
-     * voices go; the files a mod put in the update's folder go with the
-     * update installed again, which the plan then needs (mods_need_update) */
+    /* the installed mods removed first: each listed one by itself (the
+     * update's own files put back), game/mods and the DLC chapters' voices;
+     * an unlisted mod's files in the update's folder go only with the update
+     * installed again, which the plan then needs (mods_need_update) */
     bool remove_mods = false;
     /* these installed mods removed first, each by itself (mod_removable) */
     std::vector<std::string> remove_ids;
     Keys keys;                                           /* when the executable is to be made */
-    uint64_t bytes() const;
+    uint64_t bytes() const;   /* what it writes, but for an executable it makes (made_eboot_bytes) */
 };
+
+/* A recognised file put in the plan: the disc, the update or the executable
+ * in place of any before; a DLC pack or a mod in place of one with its id. */
+void plan_add(Plan& plan, const Source& s);
+
+/* The size of the executable the setup makes from EBOOT.BIN. */
+uint64_t made_eboot_bytes();
 
 /* The DLC Undub is in the plan, and the Japanese Voice Pack it joins neither
  * installed nor in it. */
@@ -146,14 +158,18 @@ bool mods_need_update(const fs::path& base);
  * DLC Undub. */
 bool mod_removable(const fs::path& base, const std::string& id);
 
-/* A mod with such a list (not the DLC Undub, which follows the game's Voice
- * option) switched off and on again, the update package not needed: off,
+/* Can the mod `id` be switched off and on: its files are listed, and it is
+ * not the DLC Undub (the game's Voice option switches that). */
+bool mod_switchable(const fs::path& base, const std::string& id);
+
+/* Is the mod `id` switched on (any mod not switched off is). */
+bool mod_enabled(const fs::path& base, const std::string& id);
+
+/* A switchable mod switched off or on, the update package not needed: off,
  * its files are set aside (game/modfiles/<id>/off) and the update's own files
  * it replaced put back; on, the other way. The game sees it at its next
  * start. False with `err` if a file could not be moved: doing it again
  * finishes the switch. */
-bool mod_switchable(const fs::path& base, const std::string& id);
-bool mod_enabled(const fs::path& base, const std::string& id);
 bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::string* err);
 
 /* The encrypted executable: from the plan's update (1.01) or disc (1.00) if

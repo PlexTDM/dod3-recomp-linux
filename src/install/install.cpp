@@ -10,8 +10,11 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
-#include <map>
 #include <chrono>
+#include <iterator>
+#include <map>
+#include <optional>
+#include <set>
 #include <thread>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -46,34 +49,80 @@ const char kDiscTocSha256[] = "7b33d9c816018889ebfb4e1caf6aa6daa51ab5d51df05d358
  * install/iso.h's kEbootElfSha256. */
 const char kElf101Sha256[] = "ed89e80f2336a948074c32151d2cadfb6965d174a15d9c067aeeff97c21e7e6c";
 
+/* The DLC packs and mods the setup handles by name. */
+const char kVoicePackId[] = "ADDJAPANESEVOICE";
+const char kUndubId[] = "UNDUB";
+const int kChapters = 6;   /* the DLC chapters: ADDSCENARIO00000 (Zero's) to 00005 (Five's) */
+
 using dod3::utf8;
 
 fs::path update_dir(const fs::path& base) { return base / "game/disc/game/BLES00000"; }
 fs::path dlc_dir(const fs::path& base) { return base / "game/disc/game/NPUB31251"; }
+fs::path jpv_dir(const fs::path& base) { return dlc_dir(base) / "USRDIR/DLC_JPV"; }   /* the voice pack's own folder */
 fs::path mods_dir(const fs::path& base) { return base / "game/mods"; }
 /* each mod's file list and the update's files it replaced (install.h) */
 fs::path modfiles_dir(const fs::path& base) { return base / "game/modfiles"; }
 fs::path staging(const fs::path& base) { return base / "game/setup.partial"; }
 
-/* a file's first four bytes, big-endian, and the next two in `rev` */
-uint32_t magic(const fs::path& p, uint16_t* rev = nullptr)
+/* a DLC chapter's folder name: "ADDSCENARIO0000" and its number */
+std::string chapter_dir(int i) { return "ADDSCENARIO0000" + std::to_string(i); }
+
+/* the title ID in a content ID: "UP0082-BLUS31197_00-..." -> "BLUS31197"; "" if it is too short */
+std::string cid_title(const std::string& cid) { return cid.size() >= 16 ? cid.substr(7, 9) : ""; }
+
+/* a file's first four bytes, big-endian */
+uint32_t magic(const fs::path& p)
 {
     FILE* f = dod3::open_file(p, "rb");
-    uint8_t m[6] = {};
+    uint8_t m[4] = {};
     if (f) {
-        if (fread(m, 1, 6, f) != 6) m[0] = 0;
+        if (fread(m, 1, 4, f) != 4) m[0] = 0;
         fclose(f);
     }
-    if (rev) *rev = (uint16_t)(m[4] << 8 | m[5]);
-    return (uint32_t)m[0] << 24 | (uint32_t)m[1] << 16 | (uint32_t)m[2] << 8 | m[3];
+    return dod3_be32(m);
 }
 
-/* a package's revision: 0x8000 is retail (PSN), 0 debug */
-bool retail(const fs::path& p)
+/* A whole file into memory; false if it cannot be read or is over `max` bytes. */
+bool read_file(const fs::path& p, uint64_t max, std::vector<uint8_t>* out)
 {
-    uint16_t rev = 0;
-    magic(p, &rev);
-    return (rev & 0x8000) != 0;
+    std::error_code ec;
+    const uint64_t n = fs::file_size(p, ec);
+    if (ec || n > max) return false;
+    FILE* f = dod3::open_file(p, "rb");
+    if (!f) return false;
+    out->resize((size_t)n);
+    const bool ok = fread(out->data(), 1, out->size(), f) == out->size();
+    fclose(f);
+    return ok;
+}
+
+/* A whole file written; false if it could not be. */
+bool write_file(const fs::path& p, const void* data, size_t n)
+{
+    FILE* f = dod3::open_file(p, "wb");
+    if (!f) return false;
+    const bool wrote = fwrite(data, 1, n, f) == n;
+    return fclose(f) == 0 && wrote;
+}
+bool write_file(const fs::path& p, const std::string& s) { return write_file(p, s.data(), s.size()); }
+
+/* A text file's lines, without their line ends; empty if it cannot be read. */
+std::vector<std::string> read_lines(const fs::path& p)
+{
+    std::vector<std::string> lines;
+    std::vector<uint8_t> d;
+    if (!read_file(p, 64u << 20, &d)) return lines;
+    std::string l;
+    for (uint8_t c : d) {
+        if (c == '\n') {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            lines.push_back(l);
+            l.clear();
+        } else
+            l += (char)c;
+    }
+    if (!l.empty()) lines.push_back(l);
+    return lines;
 }
 
 /* fs::rename, tried again for a few seconds while it is refused: right after
@@ -247,12 +296,13 @@ bool settle_old(const fs::path& base, std::string* err)
  * port reads the DLC without licences, so they are not wanted. */
 bool licence_only(const Pkg& pkg)
 {
+    bool licences = false;
     for (const PkgEntry& e : pkg.entries) {
-        if (e.dir || e.name.rfind("USRDIR/", 0) != 0) continue;
-        const size_t n = e.name.size();
-        if (n < 5 || strcmp(e.name.c_str() + n - 5, ".EDAT") != 0) return false;
+        if (e.dir || !e.name.starts_with("USRDIR/")) continue;
+        if (!e.name.ends_with(".EDAT")) return false;
+        licences = true;
     }
-    return true;
+    return licences;
 }
 
 /* ---- mods -------------------------------------------------------------------
@@ -289,21 +339,10 @@ std::string upper(std::string s)
     return s;
 }
 
-std::string hex(const uint8_t* p, size_t n)
-{
-    static const char d[] = "0123456789abcdef";
-    std::string s;
-    for (size_t i = 0; i < n; i++) {
-        s += d[p[i] >> 4];
-        s += d[p[i] & 15];
-    }
-    return s;
-}
-
 const KnownPkg* known_pkg(const Pkg& pkg)
 {
     for (const KnownPkg& k : kKnownPkgs)
-        if (pkg.file_size == k.size && hex(pkg.qa, 16) == k.qa) return &k;
+        if (pkg.file_size == k.size && to_hex(pkg.qa, 16) == k.qa) return &k;
     return nullptr;
 }
 
@@ -318,18 +357,18 @@ std::string mod_name(const std::string& id)
  * it is for: "patch/..." into the update's PATCH folder (as the console has
  * it), "tree/..." into game/mods at the path under game/disc it stands in for
  * (the game-data install's files, the DLC's), "" left out (the package's own
- * PARAM.SFO, icons, package.conf), "?" nowhere it could go. */
-std::string mod_layout(const std::string& title, const std::string& name)
+ * PARAM.SFO, icons, package.conf); nothing if it has nowhere to go. */
+std::optional<std::string> mod_layout(const std::string& title, const std::string& name)
 {
+    static const char kPatch[] = "USRDIR/PATCH/";
     if (name.find('/') == std::string::npos) return "";
-    auto starts = [&](const char* p) { return name.rfind(p, 0) == 0; };
     if (title == "BLUS31197") {
-        if (starts("USRDIR/PATCH/")) return "patch/" + name.substr(13);
-        if (starts("USRDIR/FIOS-UNREALENGINE3/")) return "tree/game/BLES00000DATA/" + name;
+        if (name.starts_with(kPatch)) return "patch/" + name.substr(sizeof kPatch - 1);
+        if (name.starts_with("USRDIR/FIOS-UNREALENGINE3/")) return "tree/game/BLES00000DATA/" + name;
     } else if (title == "NPUB31251") {
-        if (starts("USRDIR/DLC/") || starts("USRDIR/DLC_JPV/")) return "tree/game/NPUB31251/" + name;
+        if (name.starts_with("USRDIR/DLC/") || name.starts_with("USRDIR/DLC_JPV/")) return "tree/game/NPUB31251/" + name;
     }
-    return "?";
+    return std::nullopt;
 }
 
 /* A movie archive's entries: every file a .BIK, in MOVIES/ or at the top. */
@@ -340,8 +379,8 @@ bool movie_entries(const std::vector<ZipEntry>& es)
         if (e.dir) continue;
         const std::string u = upper(e.name);
         const size_t sl = u.find('/');
-        if (u.size() < 5 || u.compare(u.size() - 4, 4, ".BIK") != 0) return false;
-        if (sl != std::string::npos && u.rfind("MOVIES/", 0) != 0) return false;
+        if (!u.ends_with(".BIK")) return false;
+        if (sl != std::string::npos && !u.starts_with("MOVIES/")) return false;
         if (u.find('/', sl == std::string::npos ? 0 : sl + 1) != std::string::npos) return false;
         n++;
     }
@@ -355,8 +394,8 @@ fs::path undub_dlc_dir(const fs::path& p)
     std::error_code ec;
     for (const fs::path& g : { p / "GAME", p }) {
         const fs::path d = g / "NPUB31251/USRDIR/DLC";
-        for (int i = 0; i < 6; i++)
-            if (fs::is_directory(d / ("ADDSCENARIO0000" + std::to_string(i)), ec)) return d;
+        for (int i = 0; i < kChapters; i++)
+            if (fs::is_directory(d / chapter_dir(i), ec)) return d;
     }
     return {};
 }
@@ -365,62 +404,61 @@ fs::path undub_dlc_dir(const fs::path& p)
  * DLC Undub Prototype ver.... by ..."), else "". */
 std::string undub_release(const fs::path& folder)
 {
-    std::string l;
-    if (FILE* f = dod3::open_file(folder / "Readme.txt", "rb")) {
-        char line[256] = "";
-        if (fgets(line, sizeof line, f)) l = line;
-        fclose(f);
-    }
-    while (!l.empty() && (l.back() == '\n' || l.back() == '\r' || l.back() == ' ')) l.pop_back();
+    const std::vector<std::string> lines = read_lines(folder / "Readme.txt");
+    std::string l = lines.empty() ? "" : lines[0];
+    while (!l.empty() && l.back() == ' ') l.pop_back();
     return l.find("Undub") != std::string::npos && l.size() < 160 ? l : std::string();
 }
 
 /* game/mods/installed.txt: one line a mod, "<id>\t<where>\t<name>"; where is
  * "patch" (the update's folder), "tree" (game/mods), "jpv" (the voice pack's
  * folder), or a comma-separated mix. */
-std::vector<std::vector<std::string>> mods_read(const fs::path& base)
+struct ModRow {
+    std::string id, where, name;
+    bool in_patch() const { return where.find("patch") != std::string::npos; }
+};
+
+std::vector<ModRow> mods_read(const fs::path& base)
 {
-    std::vector<std::vector<std::string>> out;
-    FILE* f = dod3::open_file(mods_dir(base) / "installed.txt", "rb");
-    if (!f) return out;
-    char line[1024];
-    while (fgets(line, sizeof line, f)) {
-        std::string l(line);
-        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
-        std::vector<std::string> cols;
-        size_t at = 0;
-        for (int i = 0; i < 2; i++) {
-            const size_t t = l.find('\t', at);
-            if (t == std::string::npos) break;
-            cols.push_back(l.substr(at, t - at));
-            at = t + 1;
-        }
-        if (cols.size() == 2) {
-            cols.push_back(l.substr(at));
-            out.push_back(cols);
-        }
+    std::vector<ModRow> rows;
+    for (const std::string& l : read_lines(mods_dir(base) / "installed.txt")) {
+        const size_t a = l.find('\t'), b = a == std::string::npos ? a : l.find('\t', a + 1);
+        if (b != std::string::npos) rows.push_back({ l.substr(0, a), l.substr(a + 1, b - a - 1), l.substr(b + 1) });
     }
-    fclose(f);
-    return out;
+    return rows;
 }
 
-bool mods_write(const fs::path& base, const std::vector<std::vector<std::string>>& rows)
+bool mods_write(const fs::path& base, const std::vector<ModRow>& rows)
 {
     std::error_code ec;
     fs::create_directories(mods_dir(base), ec);
-    FILE* f = dod3::open_file(mods_dir(base) / "installed.txt", "wb");
-    if (!f) return false;
-    for (const auto& r : rows) fprintf(f, "%s\t%s\t%s\n", r[0].c_str(), r[1].c_str(), r[2].c_str());
-    fclose(f);
-    return true;
+    std::string s;
+    for (const ModRow& r : rows) s += r.id + "\t" + r.where + "\t" + r.name + "\n";
+    return write_file(mods_dir(base) / "installed.txt", s);
 }
 
-void mods_record(const fs::path& base, const std::string& id, const std::string& where, const std::string& name)
+bool mods_write(const fs::path& base, const std::vector<ModRow>& rows, std::string* err)
+{
+    if (mods_write(base, rows)) return true;
+    *err = "could not write the list of installed mods (game/mods/installed.txt)";
+    return false;
+}
+
+/* A mod's line taken out of the list. */
+bool mods_forget(const fs::path& base, const std::string& id, std::string* err)
 {
     auto rows = mods_read(base);
-    rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const auto& r) { return r[0] == id; }), rows.end());
-    rows.push_back({ id, where, name });
-    mods_write(base, rows);
+    std::erase_if(rows, [&](const ModRow& r) { return r.id == id; });
+    return mods_write(base, rows, err);
+}
+
+/* A mod's line written, in place of any it had. */
+bool mods_record(const fs::path& base, const ModRow& row, std::string* err)
+{
+    auto rows = mods_read(base);
+    std::erase_if(rows, [&](const ModRow& r) { return r.id == row.id; });
+    rows.push_back(row);
+    return mods_write(base, rows, err);
 }
 
 /* Where the PSN game package's files go: under PS3_GAME, as on the disc. Its
@@ -428,23 +466,19 @@ void mods_record(const fs::path& base, const std::string& id, const std::string&
  * out; the update brings the executable and the plain file. */
 std::string psn_layout(const std::string& name)
 {
-    const size_t n = name.size();
-    if (name == "USRDIR/EBOOT.BIN" || (n > 5 && name.compare(n - 5, 5, ".EDAT") == 0)) return "";
+    if (name == "USRDIR/EBOOT.BIN" || name.ends_with(".EDAT")) return "";
     return "PS3_GAME/" + name;
 }
 
-/* The PSN package's file list names that file as its .EDAT, where the disc's
- * names the plain file; with the line as on the disc, the list is the disc's
- * own (checked). */
+/* The PSN package's file list (PS3TOC.TXT) names COALESCED_INT.BIN as its
+ * .EDAT, where the disc's names the plain file; with that line as on the
+ * disc, the list is the disc's own (checked by its hash). */
 bool psn_fix_toc(const fs::path& disc, std::string* err)
 {
     const fs::path toc = disc / "PS3_GAME/USRDIR/SQEX03GAME/PS3TOC.TXT";
-    std::error_code ec;
-    const uint64_t n = fs::file_size(toc, ec);
-    std::string s(ec ? 0 : (size_t)n, '\0');
-    FILE* f = ec ? nullptr : dod3::open_file(toc, "rb");
-    const bool read = f && fread(&s[0], 1, s.size(), f) == s.size();
-    if (f) fclose(f);
+    std::vector<uint8_t> d;
+    const bool read = read_file(toc, 16u << 20, &d);
+    std::string s(d.begin(), d.end());
     const std::string from = "\\CookedPS3\\COALESCED_INT.BIN.EDAT ", to = "\\CookedPS3\\Coalesced_INT.bin ";
     const size_t at = s.find(from);
     if (read && at != std::string::npos) s.replace(at, from.size(), to);
@@ -452,11 +486,9 @@ bool psn_fix_toc(const fs::path& disc, std::string* err)
         *err = "the PSN package's file list (PS3TOC.TXT) is not the one expected";
         return false;
     }
-    f = dod3::open_file(toc, "wb");
-    const bool wrote = f && fwrite(s.data(), 1, s.size(), f) == s.size();
-    if (f) fclose(f);
-    if (!wrote) *err = "could not write " + utf8(toc);
-    return wrote;
+    if (write_file(toc, s)) return true;
+    *err = "could not write " + utf8(toc);
+    return false;
 }
 
 /* The DLC Undub: the six chapters' voice, lip-sync and message packages and
@@ -475,7 +507,7 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
                    const std::function<bool(uint64_t)>& progress, std::string* err)
 {
     std::error_code ec;
-    const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
+    const fs::path jpv = jpv_dir(base);
     if (!fs::is_directory(jpv / "SQEX03GAME", ec)) {
         *err = "the DLC chapters' Japanese voices need the Japanese Voice Pack: add its package too";
         return false;
@@ -488,36 +520,37 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
     };
     std::vector<Item> items;
     std::map<std::string, int> chapters_of;   /* a package name: in how many chapters */
-    for (int i = 0; i < 6; i++) {
-        const fs::path d = src / ("ADDSCENARIO0000" + std::to_string(i));
-        for (fs::recursive_directory_iterator it(d, ec), end; !ec && it != end; it.increment(ec)) {
+    for (int i = 0; i < kChapters; i++) {
+        for (fs::recursive_directory_iterator it(src / chapter_dir(i), ec), end; !ec && it != end; it.increment(ec)) {
             if (!it->is_regular_file(ec)) continue;
-            const bool movie = upper(it->path().parent_path().filename().string()) == "MOVIES";
+            const bool movie = upper(utf8(it->path().parent_path().filename())) == "MOVIES";
             items.push_back({ it->path(), i, movie });
-            if (!movie) chapters_of[upper(it->path().filename().string())]++;
+            if (!movie) chapters_of[upper(utf8(it->path().filename()))]++;
         }
     }
     if (items.empty()) {
         *err = "no DLC chapter files in " + utf8(src);
         return false;
     }
+    /* a name in more than one chapter, or one the main game or the voice pack has too */
     const fs::path cooked = base / "game/disc/PS3_GAME/USRDIR/SQEX03GAME/COOKEDPS3";
     auto shared = [&](const fs::path& f) {
-        const std::string n = f.filename().string();
-        return chapters_of[upper(n)] > 1 || fs::exists(cooked / n, ec) || fs::exists(jpv / "SQEX03GAME/COOKEDPS3" / n, ec);
+        const auto it = chapters_of.find(upper(utf8(f.filename())));
+        return (it != chapters_of.end() && it->second > 1) || fs::exists(cooked / f.filename(), ec) ||
+               fs::exists(jpv / "SQEX03GAME/COOKEDPS3" / f.filename(), ec);
     };
     const fs::path part = stage / "UNDUB";
     fs::remove_all(part, ec);
     std::set<std::string> by_chapter;
     uint64_t done = 0;
     for (const Item& it : items) {
-        const std::string n = it.from.filename().string();
+        const fs::path n = it.from.filename();
         fs::path to;
         if (it.movie)
             to = part / "MOVIES" / n;
         else if (shared(it.from)) {
-            to = part / ("ADDSCENARIO0000" + std::to_string(it.chapter)) / n;
-            by_chapter.insert(upper(n));
+            to = part / chapter_dir(it.chapter) / n;
+            by_chapter.insert(upper(utf8(n)));
         } else
             to = part / "COOKEDPS3" / n;
         fs::create_directories(to.parent_path(), ec);
@@ -536,9 +569,9 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
     const std::string release = undub_release(s.path);
     std::string txt = (release.empty() ? s.name : release) + "\r\n";
     for (const std::string& n : by_chapter) txt += "C " + n + "\r\n";
-    if (FILE* f = dod3::open_file(part / "UNDUB.TXT", "wb")) {
-        fwrite(txt.data(), 1, txt.size(), f);
-        fclose(f);
+    if (!write_file(part / "UNDUB.TXT", txt)) {   /* the install is told by it (installed, the voice lists) */
+        *err = "could not write " + utf8(part / "UNDUB.TXT");
+        return false;
     }
     fs::remove_all(jpv / "UNDUB", ec);   /* a real folder (no links): the undub installed before */
     move_patiently(part, jpv / "UNDUB", ec);
@@ -550,8 +583,7 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
         *err = "the DLC chapters' Japanese voices installed, but the voice pack's file lists could not be written";
         return false;
     }
-    mods_record(base, s.id, "jpv", s.name);
-    return true;
+    return mods_record(base, { s.id, "jpv", s.name }, err);
 }
 
 /* A mod's list of its files (game/modfiles/<id>.txt): "patch/<path>" in the
@@ -560,21 +592,30 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
  * Switched off (set_mod_enabled), the mod's files are in
  * game/modfiles/<id>/off/<kind>/<path> and <id>.off says so. */
 struct ModFile {
-    std::string kind;
+    std::string kind;   /* "patch" or "tree" */
     fs::path rel;
     bool kept = false;
+    std::string line() const
+    {
+        const auto g = rel.generic_u8string();
+        return kind + "/" + std::string(g.begin(), g.end()) + (kept ? "\t1\n" : "\n");
+    }
 };
+
+fs::path list_file(const fs::path& base, const std::string& id) { return modfiles_dir(base) / (id + ".txt"); }
+fs::path off_mark(const fs::path& base, const std::string& id) { return modfiles_dir(base) / (id + ".off"); }
+bool has_list(const fs::path& base, const std::string& id)
+{
+    std::error_code ec;
+    return fs::exists(list_file(base, id), ec);
+}
 
 bool mod_files(const fs::path& base, const std::string& id, std::vector<ModFile>* out)
 {
-    FILE* f = dod3::open_file(modfiles_dir(base) / (id + ".txt"), "rb");
-    if (!f) return false;
-    char line[1024];
-    while (fgets(line, sizeof line, f)) {
-        std::string l(line);
-        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+    if (!has_list(base, id)) return false;
+    for (std::string l : read_lines(list_file(base, id))) {
         ModFile m;
-        m.kept = l.size() > 2 && l.compare(l.size() - 2, 2, "\t1") == 0;
+        m.kept = l.ends_with("\t1");
         if (m.kept) l.resize(l.size() - 2);
         const size_t sl = l.find('/');
         if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
@@ -583,13 +624,18 @@ bool mod_files(const fs::path& base, const std::string& id, std::vector<ModFile>
         if ((m.kind != "patch" && m.kind != "tree") || m.rel.empty() || m.rel.is_absolute()) continue;
         out->push_back(m);
     }
-    fclose(f);
     return true;
 }
 
 fs::path mod_root(const fs::path& base, const std::string& kind)
 {
     return kind == "patch" ? update_dir(base) / "USRDIR/PATCH" : mods_dir(base);
+}
+
+/* each folder above a mod's files, for remove_empty_dirs */
+void add_dirs(std::set<fs::path>& dirs, const fs::path& root, const fs::path& rel)
+{
+    for (fs::path d = rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
 }
 
 /* the folders a mod's files were in, removed where it leaves them empty (the deepest first) */
@@ -608,13 +654,8 @@ void remove_empty_dirs(const std::set<fs::path>& dirs)
 bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
 {
     std::error_code ec;
-    auto drop_row = [&] {
-        auto rows = mods_read(base);
-        rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const auto& r) { return r[0] == id; }), rows.end());
-        mods_write(base, rows);
-    };
-    if (id == "UNDUB") {
-        const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
+    if (id == kUndubId) {
+        const fs::path jpv = jpv_dir(base);
         fs::remove_all(jpv / "UNDUB", ec);
         if (ec) {
             *err = "could not remove " + utf8(jpv / "UNDUB") + ": " + ec.message();
@@ -624,11 +665,9 @@ bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
             *err = "could not write the voice pack's file lists again";
             return false;
         }
-        drop_row();
-        return true;
+        return mods_forget(base, id, err);
     }
-    const fs::path listf = modfiles_dir(base) / (id + ".txt"), orig = modfiles_dir(base) / id / "orig",
-                   off = modfiles_dir(base) / id / "off";
+    const fs::path orig = modfiles_dir(base) / id / "orig", off = modfiles_dir(base) / id / "off";
     std::vector<ModFile> list;
     if (!mod_files(base, id, &list)) {
         *err = "the files of " + id + " were not listed when it was installed: add the update package and remove "
@@ -638,21 +677,26 @@ bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
     std::set<fs::path> dirs;
     for (const ModFile& m : list) {
         const fs::path root = mod_root(base, m.kind), live = root / m.rel;
-        if (fs::exists(off / m.kind / m.rel, ec)) {   /* switched off: the update's own is back already */
-            if (m.kept && !fs::exists(live, ec)) move_patiently(orig / m.rel, live, ec);
-        } else {
-            fs::remove(live, ec);
-            if (m.kept) move_patiently(orig / m.rel, live, ec);
+        if (m.kept) {
+            /* the update's own back over the mod's -- unless it is back already
+             * (switched off, or a removal cut short) */
+            if (fs::exists(orig / m.rel, ec)) {
+                move_patiently(orig / m.rel, live, ec);
+                if (ec) {   /* the list and what it kept aside stay: removing it again finishes */
+                    *err = "could not put back " + utf8(live) + ": " + ec.message();
+                    return false;
+                }
+            }
+        } else if (!fs::exists(off / m.kind / m.rel, ec)) {
+            fs::remove(live, ec);   /* the mod's own file (switched off, it is in off/) */
         }
-        ec.clear();
-        for (fs::path d = m.rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
+        add_dirs(dirs, root, m.rel);
     }
     remove_empty_dirs(dirs);
     fs::remove_all(modfiles_dir(base) / id, ec);
-    fs::remove(listf, ec);
-    fs::remove(modfiles_dir(base) / (id + ".off"), ec);
-    drop_row();
-    return true;
+    fs::remove(list_file(base, id), ec);
+    fs::remove(off_mark(base, id), ec);
+    return mods_forget(base, id, err);
 }
 
 /* A mod: a package's files where mod_layout puts them, a movie archive's
@@ -680,122 +724,141 @@ bool install_mod(const fs::path& base, const Source& s, const fs::path& stage,
         Pkg pkg;
         if (!pkg_open(s.path, &pkg, err)) return false;
         if (const KnownPkg* k = known_pkg(pkg)) pkg.expect_sha1 = k->sha1;
-        const std::string title = pkg.content_id.size() >= 16 ? pkg.content_id.substr(7, 9) : "";
+        const std::string title = cid_title(pkg.content_id);
         if (!pkg_extract(pkg, part, [&](uint64_t x, uint64_t) { return progress(x); }, err,
-                         [&](const std::string& n) {
-                             const std::string to = mod_layout(title, n);
-                             return to == "?" ? std::string() : to;
-                         }))
+                         [&](const std::string& n) { return mod_layout(title, n).value_or(""); }))
             return false;
     }
     /* The same mod installed before: its files go first (the update's own
      * put back), so what it replaces now is the game's. One installed before
      * the lists were kept, with files in the update's folder, is installed
      * over without a list: removing it still takes the update. */
-    bool listed = true;
-    for (const auto& r : mods_read(base))
-        if (r[0] == s.id && !mod_removable(base, s.id)) listed = r[1].find("patch") == std::string::npos;
-    if (listed && mod_removable(base, s.id) && !remove_mod(base, s.id, err)) return false;
-    std::string where, list;
-    auto add_files = [&](const fs::path& root, const char* kind, const fs::path& to, const fs::path& orig) {
-        for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+    const bool had_list = has_list(base, s.id);
+    bool listed = true;   /* this install keeps a list of its files */
+    if (!had_list)
+        for (const ModRow& r : mods_read(base))
+            if (r.id == s.id && r.in_patch()) listed = false;
+    if (had_list && !remove_mod(base, s.id, err)) return false;
+    /* The list is written before anything moves in, the update's files it
+     * replaces kept aside first: a move cut short is undone by Remove. */
+    std::vector<ModFile> files;
+    auto list_files = [&](const fs::path& from, const char* kind, const fs::path& to, const fs::path& orig) {
+        for (fs::recursive_directory_iterator it(from, ec), end; !ec && it != end; it.increment(ec)) {
             if (!it->is_regular_file(ec)) continue;
-            const fs::path rel = fs::relative(it->path(), root, ec);
-            bool kept = false;
-            if (!orig.empty() && fs::exists(to / rel, ec)) {   /* the update's own: kept aside */
-                fs::create_directories((orig / rel).parent_path(), ec);
-                move_patiently(to / rel, orig / rel, ec);
-                kept = !ec;
+            ModFile m{ kind, fs::relative(it->path(), from, ec) };
+            if (!orig.empty() && fs::exists(to / m.rel, ec)) {   /* the update's own: kept aside */
+                fs::create_directories((orig / m.rel).parent_path(), ec);
+                move_patiently(to / m.rel, orig / m.rel, ec);
+                m.kept = !ec;
                 ec.clear();
             }
-            const auto g = rel.generic_u8string();
-            list += std::string(kind) + "/" + std::string(g.begin(), g.end()) + (kept ? "\t1\n" : "\n");
+            files.push_back(m);
         }
     };
-    if (fs::exists(part / "patch", ec)) {
-        if (!installed(base).update) {
-            *err = s.name + " goes into the 1.01 update's folder: add the update package too";
+    const fs::path patch = mod_root(base, "patch");
+    const bool has_patch = fs::exists(part / "patch", ec), has_tree = fs::exists(part / "tree", ec);
+    if (has_patch && !installed(base).update) {
+        *err = s.name + " goes into the 1.01 update's folder: add the update package too";
+        return false;
+    }
+    if (listed) {
+        if (has_patch) list_files(part / "patch", "patch", patch, modfiles_dir(base) / s.id / "orig");
+        if (has_tree) list_files(part / "tree", "tree", mods_dir(base), fs::path());
+        std::string list;
+        for (const ModFile& m : files) list += m.line();
+        fs::create_directories(modfiles_dir(base), ec);
+        if (!write_file(list_file(base, s.id), list)) {
+            *err = "could not write " + utf8(list_file(base, s.id));
             return false;
         }
-        const fs::path patch = update_dir(base) / "USRDIR/PATCH";
-        if (listed) add_files(part / "patch", "patch", patch, modfiles_dir(base) / s.id / "orig");
+    }
+    std::string where;
+    if (has_patch) {
         if (!merge_move(part / "patch", patch, err)) return false;
         where = "patch";
     }
-    if (fs::exists(part / "tree", ec)) {
-        if (listed) add_files(part / "tree", "tree", mods_dir(base), fs::path());
+    if (has_tree) {
         if (!merge_move(part / "tree", mods_dir(base), err)) return false;
         where += where.empty() ? "tree" : ",tree";
     }
     fs::remove_all(part, ec);
-    if (listed) {
-        fs::create_directories(modfiles_dir(base), ec);
-        if (FILE* f = dod3::open_file(modfiles_dir(base) / (s.id + ".txt"), "wb")) {
-            fwrite(list.data(), 1, list.size(), f);
-            fclose(f);
-        }
-    }
-    mods_record(base, s.id, where, s.name);
-    return true;
+    return mods_record(base, { s.id, where, s.name }, err);
 }
 
-/* The installed mods removed (Plan::remove_mods): game/mods' files (the
- * setup's own, no links there) and the DLC chapters' voices, the voice
- * pack's lists written again without them. A mod with files in the update's
- * folder stays listed until the update is installed again. */
+/* The installed mods removed (Plan::remove_mods): each listed one by itself
+ * (the update's own files put back), then the rest of game/mods' files (the
+ * setup's own, no links there) and the DLC chapters' voices. A mod with files
+ * in the update's folder but no list stays listed until the update is
+ * installed again, which puts its own files back. */
 bool remove_mods(const fs::path& base, std::string* err)
 {
     std::error_code ec;
-    for (const auto& r : mods_read(base))   /* the listed ones: the update's own files put back */
-        if (r[0] != "UNDUB" && mod_removable(base, r[0]) && !remove_mod(base, r[0], err)) return false;
+    for (const ModRow& r : mods_read(base))
+        if ((r.id == kUndubId || has_list(base, r.id)) && !remove_mod(base, r.id, err)) return false;
     for (fs::directory_iterator it(mods_dir(base), ec), end; !ec && it != end; it.increment(ec))
         if (it->path().filename() != "installed.txt") fs::remove_all(it->path(), ec);
-    const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
-    if (fs::exists(jpv / "UNDUB", ec)) {
-        fs::remove_all(jpv / "UNDUB", ec);
-        if (ec) {
-            *err = "could not remove " + utf8(jpv / "UNDUB") + ": " + ec.message();
-            return false;
-        }
-        if (fs::is_directory(jpv / "SQEX03GAME", ec) && !dlc_write_jpv_lists(base / "game/disc", true)) {
-            *err = "could not write the voice pack's file lists again";
-            return false;
-        }
-    }
+    if (fs::exists(jpv_dir(base) / "UNDUB", ec) && !remove_mod(base, kUndubId, err)) return false;
     auto rows = mods_read(base);
-    rows.erase(std::remove_if(rows.begin(), rows.end(),
-                              [](const auto& r) { return r[1].find("patch") == std::string::npos; }),
-               rows.end());
-    for (auto& r : rows) r[1] = "patch";
-    mods_write(base, rows);
-    return true;
+    std::erase_if(rows, [](const ModRow& r) { return !r.in_patch(); });
+    for (ModRow& r : rows) r.where = "patch";
+    return mods_write(base, rows, err);
+}
+
+/* The update installed again (its PATCH folder replaced whole): the mods'
+ * files there went with the old folder, and the update's own files they
+ * kept aside are the old update's. A mod with files only there is
+ * forgotten; one with files in game/mods too is kept, as those. */
+void forget_patch_mods(const fs::path& base)
+{
+    std::error_code ec;
+    auto rows = mods_read(base);
+    bool changed = false;
+    for (auto it = rows.begin(); it != rows.end();) {
+        if (!it->in_patch()) {
+            ++it;
+            continue;
+        }
+        changed = true;
+        const std::string id = it->id;
+        fs::remove_all(modfiles_dir(base) / id / "orig", ec);
+        fs::remove_all(modfiles_dir(base) / id / "off" / "patch", ec);
+        if (it->where.find("tree") == std::string::npos) {
+            fs::remove(list_file(base, id), ec);
+            fs::remove(off_mark(base, id), ec);
+            fs::remove_all(modfiles_dir(base) / id, ec);
+            it = rows.erase(it);
+            continue;
+        }
+        std::vector<ModFile> files;
+        if (mod_files(base, id, &files)) {
+            std::string list;
+            for (const ModFile& m : files)
+                if (m.kind == "tree") list += m.line();
+            write_file(list_file(base, id), list);
+        }
+        it->where = "tree";
+        ++it;
+    }
+    if (changed) mods_write(base, rows);
 }
 
 }  // namespace
 
 bool mods_need_update(const fs::path& base)
 {
-    for (const auto& r : mods_read(base))
-        if (r[1].find("patch") != std::string::npos && !mod_removable(base, r[0])) return true;
+    for (const ModRow& r : mods_read(base))
+        if (r.in_patch() && !has_list(base, r.id)) return true;
     return false;
 }
 
-bool mod_removable(const fs::path& base, const std::string& id)
-{
-    std::error_code ec;
-    return id == "UNDUB" || fs::exists(modfiles_dir(base) / (id + ".txt"), ec);
-}
+bool mod_removable(const fs::path& base, const std::string& id) { return id == kUndubId || has_list(base, id); }
 
-bool mod_switchable(const fs::path& base, const std::string& id)
-{
-    std::error_code ec;
-    return id != "UNDUB" && fs::exists(modfiles_dir(base) / (id + ".txt"), ec);
-}
+bool mod_switchable(const fs::path& base, const std::string& id) { return id != kUndubId && has_list(base, id); }
 
 bool mod_enabled(const fs::path& base, const std::string& id)
 {
     std::error_code ec;
-    return !fs::exists(modfiles_dir(base) / (id + ".off"), ec);
+    return !fs::exists(off_mark(base, id), ec);
 }
 
 /* File by file, each step done only if it is still to do, so a switch cut
@@ -809,7 +872,7 @@ bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::
         return false;
     }
     const fs::path orig = modfiles_dir(base) / id / "orig", off = modfiles_dir(base) / id / "off",
-                   mark = modfiles_dir(base) / (id + ".off");
+                   mark = off_mark(base, id);
     auto move = [&](const fs::path& from, const fs::path& to) {
         fs::create_directories(to.parent_path(), ec);
         ec.clear();
@@ -825,7 +888,7 @@ bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::
         if (!on) {
             if (fs::exists(live, ec) && !fs::exists(aside, ec) && !move(live, aside)) return false;
             if (m.kept && !fs::exists(live, ec) && fs::exists(own, ec) && !move(own, live)) return false;
-            for (fs::path d = m.rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
+            add_dirs(dirs, root, m.rel);
         } else if (fs::exists(aside, ec)) {
             if (m.kept && fs::exists(live, ec) && !fs::exists(own, ec) && !move(live, own)) return false;
             if (!fs::exists(live, ec) && !move(aside, live)) return false;
@@ -833,10 +896,7 @@ bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::
     }
     if (!on) {
         remove_empty_dirs(dirs);
-        if (FILE* f = dod3::open_file(mark, "wb")) {
-            fputs("switched off: the files are in off/\n", f);
-            fclose(f);
-        } else {
+        if (!write_file(mark, std::string("switched off: the files are in off/\n"))) {
             *err = "could not write " + utf8(mark);
             return false;
         }
@@ -919,9 +979,9 @@ Status installed(const fs::path& base)
         update_required() ? update_dir(base) / "USRDIR/EBOOT.BIN" : base / "game/disc/PS3_GAME/USRDIR/EBOOT.BIN", ec);
     for (const DlcInfo& d : known_dlc())
         if (fs::is_directory(dlc_dir(base) / "USRDIR/DLC" / d.id, ec)) s.dlc.insert(d.id);
-    for (const auto& r : mods_read(base)) {
-        if (r[1] == "jpv" && !fs::exists(dlc_dir(base) / "USRDIR/DLC_JPV/UNDUB/UNDUB.TXT", ec)) continue;
-        s.mods.push_back({ r[0], r[2] });
+    for (const ModRow& r : mods_read(base)) {
+        if (r.where == "jpv" && !fs::exists(jpv_dir(base) / "UNDUB/UNDUB.TXT", ec)) continue;
+        s.mods.push_back({ r.id, r.name });
     }
     return s;
 }
@@ -984,20 +1044,190 @@ bool key_art(const Source& game, std::vector<uint8_t>* png)
         return pkg_open(game.path, &pkg, &err) && pkg_read_file(pkg, "PIC1.PNG", png, &err);
     }
     std::error_code ec;
-    if (fs::is_directory(game.path, ec)) {   /* a folder: the file itself (open_disc would list the disc) */
-        const fs::path p = game.path / "PS3_GAME/PIC1.PNG";
-        const uint64_t n = fs::file_size(p, ec);
-        if (ec || n == 0 || n > (64u << 20)) return false;
-        png->resize((size_t)n);
-        FILE* f = dod3::open_file(p, "rb");
-        if (!f) return false;
-        const bool ok = fread(png->data(), 1, png->size(), f) == png->size();
-        fclose(f);
-        return ok;
-    }
+    if (fs::is_directory(game.path, ec))   /* a folder: the file itself (open_disc would list the disc) */
+        return read_file(game.path / "PS3_GAME/PIC1.PNG", 64u << 20, png) && !png->empty();
     Disc disc;
     return open_disc(game.path, &disc, &err) && read_disc_file(disc, "PS3_GAME/PIC1.PNG", png);
 }
+
+namespace {
+
+/* A homebrew (debug) package: a mod, its files where mod_layout puts them.
+ * NoPayStation's licence "FIX" packages are debug packages too. */
+bool identify_mod_pkg(const fs::path& p, const std::string& cid, Source* s, std::string* err)
+{
+    Pkg pkg;
+    if (!pkg_open(p, &pkg, err)) return false;
+    if (licence_only(pkg)) {
+        *err = "this is a licence fix package, not the DLC itself. It is not needed: add the DLC packages";
+        return false;
+    }
+    const std::string title = cid_title(cid);
+    for (const PkgEntry& e : pkg.entries) {
+        if (e.dir) continue;
+        const std::optional<std::string> to = mod_layout(title, e.name);
+        if (!to) {
+            *err = title == "BLUS31197" || title == "NPUB31251"
+                       ? "a homebrew package with files the setup has no place for (" + e.name + ")"
+                       : "a homebrew package for another game (" + cid + ")";
+            return false;
+        }
+        if (!to->empty()) s->bytes += e.size;
+    }
+    if (!s->bytes) {
+        *err = "a homebrew package with nothing in it to install";
+        return false;
+    }
+    if (!update_required()) {
+        *err = "mods are for the 1.01 build";
+        return false;
+    }
+    s->kind = SourceKind::Mod;
+    s->form = ModForm::Pkg;
+    if (const KnownPkg* k = known_pkg(pkg)) {
+        s->id = k->id;
+        s->name = mod_name(k->id);
+    } else {
+        s->id = "PKG-" + to_hex(pkg.qa, 4);
+        s->name = "Mod package " + utf8(p.filename());
+    }
+    return true;
+}
+
+/* A PS3 package: the US PSN game, the update, a DLC pack, or a mod. */
+bool identify_pkg(const fs::path& p, Source* s, std::string* err)
+{
+    const std::string cid = pkg_content_id(p);
+    if (pkg_is_debug(p)) return identify_mod_pkg(p, cid, s, err);
+    if (cid == kPsnGameId) {
+        const std::string sha = pkg_footer_sha1(p);
+        if (sha == kPsnUpdateSha1) {
+            *err = "this is the PSN release's own update, which is not needed: both releases take the disc "
+                   "release's 1.01 update, UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg";
+            return false;
+        }
+        if (sha != kPsnGameSha1) {
+            *err = "this is not the US PSN release's game package (version 1.00), or it is damaged";
+            return false;
+        }
+        if (!update_required()) {
+            *err = "this build plays version 1.00, made from the disc's executable; the PSN package is for the "
+                   "1.01 build";
+            return false;
+        }
+        Pkg pkg;
+        if (!pkg_open(p, &pkg, err)) return false;
+        s->kind = SourceKind::Disc;
+        s->psn = true;
+        s->id = cid;
+        s->name = "Drakengard 3 PSN package (NPUB31251)";
+        for (const PkgEntry& e : pkg.entries)
+            if (!e.dir && !psn_layout(e.name).empty()) s->bytes += e.size;
+        return true;
+    }
+    if (cid.starts_with(kEuPrefix)) {
+        *err = "this package is from the European PSN release (NPEB01407), a build of its own; only the US "
+               "release is supported, as the disc (BLUS31197) or the PSN package (NPUB31251)";
+        return false;
+    }
+    if (cid == kUpdateId) {
+        if (pkg_footer_sha1(p) != kUpdateSha1) {
+            *err = "this update package is not version 1.01, or it is damaged";
+            return false;
+        }
+        if (!update_required()) {
+            *err = "this build plays version 1.00, which takes no update";
+            return false;
+        }
+        Pkg pkg;
+        if (!pkg_open(p, &pkg, err)) return false;
+        s->kind = SourceKind::Update;
+        s->id = cid;
+        s->name = "Update 1.01";
+        s->bytes = pkg.payload();
+        return true;
+    }
+    if (cid.starts_with(kDlcPrefix)) {
+        const std::string id = cid.substr(sizeof kDlcPrefix - 1);
+        for (const DlcInfo& d : known_dlc()) {
+            if (id != d.id) continue;
+            Pkg pkg;
+            if (!pkg_open(p, &pkg, err)) return false;
+            if (licence_only(pkg)) {
+                *err = "this is a licence fix package, not the DLC itself. It is not needed: add the " +
+                       std::string(d.name) + " package";
+                return false;
+            }
+            s->kind = SourceKind::Dlc;
+            s->id = id;
+            s->name = d.name;
+            s->bytes = pkg.payload();
+            return true;
+        }
+        *err = "this Drakengard 3 package (" + id + ") is not one of the DLC packs";
+        return false;
+    }
+    *err = cid.empty() ? "an unreadable PS3 package" : "a package for another game (" + cid + ")";
+    return false;
+}
+
+/* A .zip: a mod's movies (the Spanish translation's MOVIES.zip, or others). */
+bool identify_zip(const fs::path& p, Source* s, std::string* err)
+{
+    std::vector<ZipEntry> es;
+    if (!zip_list(p, &es, err)) return false;
+    if (!movie_entries(es)) {
+        *err = "a .zip that is not a mod's movies: unpack it and add what is inside";
+        return false;
+    }
+    if (!update_required()) {
+        *err = "mods are for the 1.01 build";
+        return false;
+    }
+    bool es_movies = true;
+    size_t n = 0;
+    for (const ZipEntry& e : es) {
+        if (e.dir) continue;
+        const std::string name = upper(utf8(fs::u8path(e.name).filename()));
+        es_movies &= std::any_of(std::begin(kEsMovies), std::end(kEsMovies),
+                                 [&](const auto& k) { return name == k.name && e.crc == k.crc; });
+        n++;
+        s->bytes += e.usize;
+    }
+    s->kind = SourceKind::Mod;
+    s->form = ModForm::Zip;
+    if (es_movies && n == std::size(kEsMovies)) {
+        s->id = "ES-MOVIES";
+        s->name = mod_name("ES-MOVIES");
+    } else {
+        s->id = "ZIP-" + upper(utf8(p.stem()));
+        s->name = "Movies " + utf8(p.filename());
+    }
+    return true;
+}
+
+/* An ELF: the game's executable, made already (this build's version). */
+bool identify_elf(const fs::path& p, Source* s, std::string* err)
+{
+    std::error_code ec;
+    const std::string sha = sha256_file(p);
+    const bool v101 = sha == kElf101Sha256, v100 = sha == kEbootElfSha256;
+    if (update_required() ? v101 : v100) {
+        s->kind = SourceKind::Eboot;
+        s->name = std::string("EBOOT.ELF (") + DOD3_EBOOT_NAME + ")";
+        s->bytes = fs::file_size(p, ec);
+        return true;
+    }
+    if (v100)
+        *err = "this is the disc's executable (1.00); this build plays 1.01, and makes its executable from the update";
+    else if (v101)
+        *err = "this is the update's executable (1.01); this build plays 1.00";
+    else
+        *err = "this EBOOT.ELF is not Drakengard 3's (BLUS31197) " DOD3_EBOOT_NAME;
+    return false;
+}
+
+}  // namespace
 
 bool identify(const fs::path& p, Source* s, std::string* err)
 {
@@ -1013,8 +1243,8 @@ bool identify(const fs::path& p, Source* s, std::string* err)
             s->kind = SourceKind::Mod;
             s->form = ModForm::Undub;
             s->path = p;
-            s->id = "UNDUB";
-            s->name = mod_name("UNDUB");
+            s->id = kUndubId;
+            s->name = mod_name(kUndubId);
             for (fs::recursive_directory_iterator it(dlc, ec), end; !ec && it != end; it.increment(ec))
                 if (it->is_regular_file(ec)) s->bytes += it->file_size(ec);
             return true;
@@ -1032,185 +1262,28 @@ bool identify(const fs::path& p, Source* s, std::string* err)
         return false;
     }
     s->path = p;
-    const uint32_t m = magic(p);
-    if (m == 0x7F504B47u) {   /* a PS3 package */
-        const std::string cid = pkg_content_id(p);
-        if (!retail(p)) {
-            Pkg pkg;
-            if (!pkg_open(p, &pkg, err)) return false;
-            /* NoPayStation's "FIX" packages are debug packages too */
-            if (licence_only(pkg)) {
-                *err = "this is a licence fix package, not the DLC itself. It is not needed: add the DLC packages";
-                return false;
-            }
-            /* a homebrew package: a mod, its files where mod_layout puts them */
-            const std::string title = cid.size() >= 16 ? cid.substr(7, 9) : "";
-            for (const PkgEntry& e : pkg.entries) {
-                if (e.dir) continue;
-                const std::string to = mod_layout(title, e.name);
-                if (to == "?") {
-                    *err = title == "BLUS31197" || title == "NPUB31251"
-                               ? "a homebrew package with files the setup has no place for (" + e.name + ")"
-                               : "a homebrew package for another game (" + cid + ")";
-                    return false;
-                }
-                if (!to.empty()) s->bytes += e.size;
-            }
-            if (!s->bytes) {
-                *err = "a homebrew package with nothing in it to install";
-                return false;
-            }
-            if (!update_required()) {
-                *err = "mods are for the 1.01 build";
-                return false;
-            }
-            s->kind = SourceKind::Mod;
-            s->form = ModForm::Pkg;
-            if (const KnownPkg* k = known_pkg(pkg)) {
-                s->id = k->id;
-                s->name = mod_name(k->id);
-            } else {
-                s->id = "PKG-" + hex(pkg.qa, 4);
-                s->name = "Mod package " + utf8(p.filename());
-            }
-            return true;
-        }
-        if (cid == kPsnGameId) {
-            const std::string sha = pkg_footer_sha1(p);
-            if (sha == kPsnUpdateSha1) {
-                *err = "this is the PSN release's own update, which is not needed: both releases take the disc "
-                       "release's 1.01 update, UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg";
-                return false;
-            }
-            if (sha != kPsnGameSha1) {
-                *err = "this is not the US PSN release's game package (version 1.00), or it is damaged";
-                return false;
-            }
-            if (!update_required()) {
-                *err = "this build plays version 1.00, made from the disc's executable; the PSN package is for the "
-                       "1.01 build";
-                return false;
-            }
-            Pkg pkg;
-            if (!pkg_open(p, &pkg, err)) return false;
-            s->kind = SourceKind::Disc;
-            s->psn = true;
-            s->id = cid;
-            s->name = "Drakengard 3 PSN package (NPUB31251)";
-            for (const PkgEntry& e : pkg.entries)
-                if (!e.dir && !psn_layout(e.name).empty()) s->bytes += e.size;
-            return true;
-        }
-        if (cid.rfind(kEuPrefix, 0) == 0) {
-            *err = "this package is from the European PSN release (NPEB01407), a build of its own; only the US "
-                   "release is supported, as the disc (BLUS31197) or the PSN package (NPUB31251)";
-            return false;
-        }
-        if (cid == kUpdateId) {
-            if (pkg_footer_sha1(p) != kUpdateSha1) {
-                *err = "this update package is not version 1.01, or it is damaged";
-                return false;
-            }
-            if (!update_required()) {
-                *err = "this build plays version 1.00, which takes no update";
-                return false;
-            }
-            Pkg pkg;
-            if (!pkg_open(p, &pkg, err)) return false;
-            s->kind = SourceKind::Update;
-            s->id = cid;
-            s->name = "Update 1.01";
-            s->bytes = pkg.payload();
-            return true;
-        }
-        if (cid.rfind(kDlcPrefix, 0) == 0) {
-            const std::string id = cid.substr(sizeof kDlcPrefix - 1);
-            for (const DlcInfo& d : known_dlc()) {
-                if (id != d.id) continue;
-                Pkg pkg;
-                if (!pkg_open(p, &pkg, err)) return false;
-                if (licence_only(pkg)) {
-                    *err = "this is a licence fix package, not the DLC itself. It is not needed: add the " +
-                           std::string(d.name) + " package";
-                    return false;
-                }
-                s->kind = SourceKind::Dlc;
-                s->id = id;
-                s->name = d.name;
-                s->bytes = pkg.payload();
-                return true;
-            }
-            *err = "this Drakengard 3 package (" + id + ") is not one of the DLC packs";
-            return false;
-        }
-        *err = cid.empty() ? "an unreadable PS3 package" : "a package for another game (" + cid + ")";
-        return false;
-    }
-    if (m == 0x504B0304u) {   /* a .zip: a mod's movies */
-        std::vector<ZipEntry> es;
-        if (!zip_list(p, &es, err)) return false;
-        if (!movie_entries(es)) {
-            *err = "a .zip that is not a mod's movies: unpack it and add what is inside";
-            return false;
-        }
-        if (!update_required()) {
-            *err = "mods are for the 1.01 build";
-            return false;
-        }
-        bool es_movies = true;
-        size_t n = 0;
-        for (const ZipEntry& e : es) {
-            if (e.dir) continue;
-            bool hit = false;
-            for (const auto& k : kEsMovies)
-                hit |= upper(fs::path(e.name).filename().string()) == k.name && e.crc == k.crc;
-            es_movies &= hit;
-            n++;
-            s->bytes += e.usize;
-        }
-        s->kind = SourceKind::Mod;
-        s->form = ModForm::Zip;
-        if (es_movies && n == sizeof kEsMovies / sizeof kEsMovies[0]) {
-            s->id = "ES-MOVIES";
-            s->name = mod_name("ES-MOVIES");
-        } else {
-            s->id = "ZIP-" + upper(p.stem().string());
-            s->name = "Movies " + utf8(p.filename());
-        }
-        return true;
-    }
-    if (m == 0x7F454C46u) {   /* an ELF */
-        const std::string sha = sha256_file(p);
-        const bool v101 = sha == kElf101Sha256, v100 = sha == kEbootElfSha256;
-        if (update_required() ? v101 : v100) {
-            s->kind = SourceKind::Eboot;
-            s->name = std::string("EBOOT.ELF (") + DOD3_EBOOT_NAME + ")";
-            s->bytes = fs::file_size(p, ec);
-            return true;
-        }
-        if (v100)
-            *err =
-                "this is the disc's executable (1.00); this build plays 1.01, and makes its executable from the update";
-        else if (v101)
-            *err = "this is the update's executable (1.01); this build plays 1.00";
-        else
-            *err = "this EBOOT.ELF is not Drakengard 3's (BLUS31197) " DOD3_EBOOT_NAME;
-        return false;
-    }
-    if (m == 0x53434500u) {   /* "SCE\0": a SELF */
+    switch (magic(p)) {
+    case kPkgMagic: return identify_pkg(p, s, err);
+    case 0x504B0304u: return identify_zip(p, s, err);   /* "PK\3\4" */
+    case 0x7F454C46u: return identify_elf(p, s, err);   /* "\x7F" "ELF" */
+    case 0x53434500u:                                    /* "SCE\0": a SELF */
         *err = update_required()
                    ? "EBOOT.BIN is not needed: the setup takes the game's executable from the update package"
                    : "EBOOT.BIN is not needed: the setup takes the game's executable from the disc";
         return false;
+    default: break;
     }
     Disc disc;   /* a disc image */
-    if (open_disc(p, &disc, err)) {
-        s->kind = SourceKind::Disc;
-        s->name = "Drakengard 3 disc image (BLUS31197)";
-        s->bytes = disc.total;
-        return true;
+    if (!open_disc(p, &disc, err)) {
+        if (upper(utf8(p.extension())) != ".ISO")   /* not meant as one: say what is taken */
+            *err = "not a file the setup takes: it takes the disc (a decrypted .iso, or the folder holding "
+                   "PS3_GAME), packages (.pkg), a mod's movies (.zip) and a mod's folder";
+        return false;
     }
-    return false;
+    s->kind = SourceKind::Disc;
+    s->name = "Drakengard 3 disc image (BLUS31197)";
+    s->bytes = disc.total;
+    return true;
 }
 
 bool read_eboot_bin(const fs::path& base, const Plan& plan, std::vector<uint8_t>* self, std::string* err)
@@ -1233,18 +1306,13 @@ bool read_eboot_bin(const fs::path& base, const Plan& plan, std::vector<uint8_t>
         }
         file = base / "game/disc/PS3_GAME/USRDIR/EBOOT.BIN";
     }
-    const uint64_t n = fs::file_size(file, ec);
-    FILE* f = ec ? nullptr : dod3::open_file(file, "rb");
-    if (!f || n > (256u << 20)) {
-        if (f) fclose(f);
+    if (!fs::exists(file, ec)) {
         *err = update_required() ? "the update is not installed" : "the disc is not installed";
         return false;
     }
-    self->resize((size_t)n);
-    const bool ok = fread(self->data(), 1, self->size(), f) == self->size();
-    fclose(f);
-    if (!ok) *err = "cannot read " + utf8(file);
-    return ok;
+    if (read_file(file, 256u << 20, self)) return true;
+    *err = "cannot read " + utf8(file);
+    return false;
 }
 
 bool make_elf(const std::vector<uint8_t>& self, const Keys& keys, std::vector<uint8_t>* elf, bool* wrong_keys,
@@ -1268,13 +1336,15 @@ bool install(const fs::path& base, const Plan& plan,
              const std::function<bool(uint64_t, uint64_t, const std::string&)>& progress, std::string* err)
 {
     std::error_code ec;
-    /* the progress total: the bytes read */
+    /* the progress counts the bytes read: a package's whole file, a disc's or a folder's files */
+    auto disc_read = [&] { return plan.disc.psn ? fs::file_size(plan.disc.path, ec) : plan.disc.bytes; };
+    auto mod_read = [&](const Source& m) { return m.form == ModForm::Undub ? m.bytes : fs::file_size(m.path, ec); };
     uint64_t total = 0, done = 0;
-    if (plan.disc.set()) total += plan.disc.psn ? fs::file_size(plan.disc.path, ec) : plan.disc.bytes;
+    if (plan.disc.set()) total += disc_read();
     if (plan.eboot.set()) total += plan.eboot.bytes;
     if (plan.update.set()) total += fs::file_size(plan.update.path, ec);
     for (const Source& d : plan.dlc) total += fs::file_size(d.path, ec);
-    for (const Source& m : plan.mods) total += m.form == ModForm::Undub ? m.bytes : fs::file_size(m.path, ec);
+    for (const Source& m : plan.mods) total += mod_read(m);
     const fs::path stage = staging(base);
     /* staging is deleted only once nothing of the previous copy is in it */
     auto clean = [&](std::string* why) {
@@ -1311,9 +1381,12 @@ bool install(const fs::path& base, const Plan& plan,
         if (!read_eboot_bin(base, plan, &self, err) || !make_elf(self, plan.keys, &elf, &wrong, err)) return fail(*err);
     }
 
-    if (plan.disc.set() && (plan.disc.psn || !(fs::exists(base / "game/disc", ec) &&
-                                               fs::equivalent(plan.disc.path, base / "game/disc", ec)))) {
-        const fs::path part = stage / "disc", old = stage / "old", final_dir = base / "game/disc";
+    const fs::path final_dir = base / "game/disc";
+    /* the install's own game/disc chosen as the disc: nothing to copy */
+    const bool in_place = plan.disc.set() && !plan.disc.psn && fs::exists(final_dir, ec) &&
+                          fs::equivalent(plan.disc.path, final_dir, ec);
+    if (plan.disc.set() && !in_place) {
+        const fs::path part = stage / "disc", old = stage / "old";
         auto step = [&](uint64_t d, uint64_t) { return progress(done + d, total, "Copying the game"); };
         if (plan.disc.psn) {
             /* the PSN package, laid out as the disc */
@@ -1338,8 +1411,8 @@ bool install(const fs::path& base, const Plan& plan,
         if (!settle_old(base, err)) return false;
     }
     if (plan.disc.set()) {
-        done += plan.disc.psn ? fs::file_size(plan.disc.path, ec) : plan.disc.bytes;
-        gamedata_layout(base / "game/disc");
+        done += disc_read();
+        gamedata_layout(final_dir);
     }
 
     if (plan.eboot.set()) {
@@ -1366,21 +1439,7 @@ bool install(const fs::path& base, const Plan& plan,
          * the executable can be made again); the old PATCH folder goes whole,
          * so a file 1.01 dropped does not linger */
         fs::remove_all(update_dir(base) / "USRDIR/PATCH", ec);
-        {   /* the mods that had files there are gone with them, their lists
-             * and the files they kept aside too (one's files in game/mods stay) */
-            auto rows = mods_read(base);
-            const size_t n = rows.size();
-            rows.erase(std::remove_if(rows.begin(), rows.end(),
-                                      [&](const auto& r) {
-                                          if (r[1].find("patch") == std::string::npos) return false;
-                                          fs::remove(modfiles_dir(base) / (r[0] + ".txt"), ec);
-                                          fs::remove(modfiles_dir(base) / (r[0] + ".off"), ec);
-                                          fs::remove_all(modfiles_dir(base) / r[0], ec);
-                                          return true;
-                                      }),
-                       rows.end());
-            if (rows.size() != n) mods_write(base, rows);
-        }
+        forget_patch_mods(base);
         if (!merge_move(part, update_dir(base), err)) return fail(*err);
         done = start + pkg.file_size;
     }
@@ -1390,9 +1449,7 @@ bool install(const fs::path& base, const Plan& plan,
         const fs::path part = stage / "EBOOT.ELF", to = base / eboot_path();
         fs::create_directories(stage, ec);
         fs::create_directories(to.parent_path(), ec);
-        FILE* f = dod3::open_file(part, "wb");
-        const bool wrote = f && fwrite(elf.data(), 1, elf.size(), f) == elf.size();
-        if (f) fclose(f);
+        const bool wrote = write_file(part, elf.data(), elf.size());
         if (wrote) move_patiently(part, to, ec);
         if (!wrote || ec) return fail("could not write " + utf8(to));
         if (!builtin_keys().complete()) keys_save(keys_file(base), plan.keys); /* the player's, for the next time */
@@ -1410,7 +1467,7 @@ bool install(const fs::path& base, const Plan& plan,
          * fills USRDIR/DLC_JPV. The shared PARAM.SFO and icons are the same
          * in every pack. */
         if (!merge_move(part, dlc_dir(base), err)) return fail(*err);
-        if (d.id == "ADDJAPANESEVOICE" && !dlc_write_jpv_lists(base / "game/disc", true))
+        if (d.id == kVoicePackId && !dlc_write_jpv_lists(base / "game/disc", true))
             return fail("the Japanese Voice Pack installed, but its file lists could not be written");
         done = start + pkg.file_size;
     }
@@ -1420,7 +1477,7 @@ bool install(const fs::path& base, const Plan& plan,
         const std::string what = "Installing " + md.name;
         if (!install_mod(base, md, stage, [&](uint64_t x) { return progress(start + x, total, what); }, err))
             return fail(*err);
-        done = start + (md.form == ModForm::Undub ? md.bytes : fs::file_size(md.path, ec));
+        done = start + mod_read(md);
     }
     fs::remove_all(stage, ec);
     progress(total, total, "Done");
@@ -1429,11 +1486,29 @@ bool install(const fs::path& base, const Plan& plan,
 
 bool needs_voice_pack(const Plan& plan, const Status& have)
 {
-    bool undub = false, pack = have.dlc.count("ADDJAPANESEVOICE") != 0;
+    bool undub = false, pack = have.dlc.count(kVoicePackId) != 0;
     for (const Source& m : plan.mods) undub |= m.form == ModForm::Undub;
-    for (const Source& d : plan.dlc) pack |= d.id == "ADDJAPANESEVOICE";
+    for (const Source& d : plan.dlc) pack |= d.id == kVoicePackId;
     return undub && !pack;
 }
+
+void plan_add(Plan& plan, const Source& s)
+{
+    auto replace = [&](std::vector<Source>& v) {
+        std::erase_if(v, [&](const Source& o) { return o.id == s.id; });
+        v.push_back(s);
+    };
+    switch (s.kind) {
+    case SourceKind::Disc: plan.disc = s; break;
+    case SourceKind::Update: plan.update = s; break;
+    case SourceKind::Eboot: plan.eboot = s; break;
+    case SourceKind::Dlc: replace(plan.dlc); break;
+    case SourceKind::Mod: replace(plan.mods); break;
+    case SourceKind::Unknown: break;
+    }
+}
+
+uint64_t made_eboot_bytes() { return update_required() ? 26872424u : 26872552u; }
 
 int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, const fs::path& keys_path)
 {
@@ -1462,24 +1537,7 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
             return 1;
         }
         printf("%s: %s\n", utf8(f).c_str(), s.name.c_str());
-        switch (s.kind) {
-        case SourceKind::Disc: plan.disc = s; break;
-        case SourceKind::Update: plan.update = s; break;
-        case SourceKind::Eboot: plan.eboot = s; break;
-        case SourceKind::Dlc:
-            plan.dlc.erase(
-                std::remove_if(plan.dlc.begin(), plan.dlc.end(), [&](const Source& o) { return o.id == s.id; }),
-                plan.dlc.end());
-            plan.dlc.push_back(s);
-            break;
-        case SourceKind::Mod:
-            plan.mods.erase(
-                std::remove_if(plan.mods.begin(), plan.mods.end(), [&](const Source& o) { return o.id == s.id; }),
-                plan.mods.end());
-            plan.mods.push_back(s);
-            break;
-        default: break;
-        }
+        plan_add(plan, s);
     }
     const Status have = installed(base);
     std::string missing;

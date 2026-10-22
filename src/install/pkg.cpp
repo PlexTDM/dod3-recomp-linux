@@ -6,6 +6,7 @@
  */
 #include "install/pkg.h"
 #include "install/crypto.h"
+#include "install/file.h"
 #include "ps3recomp_pkg_key.h"
 #include "util.h"
 
@@ -21,26 +22,9 @@ namespace {
 
 using dod3::utf8;
 
-/* a FILE* closed when it goes, with 64-bit seeks */
-struct File {
-    FILE* f = nullptr;
-    File(const fs::path& p, const char* mode) : f(dod3::open_file(p, mode)) {}
-    ~File()
-    {
-        if (f) fclose(f);
-    }
-    bool seek(uint64_t o)
-    {
-#ifdef _WIN32
-        return _fseeki64(f, (long long)o, SEEK_SET) == 0;
-#else
-        return fseeko(f, (off_t)o, SEEK_SET) == 0;
-#endif
-    }
-};
-
-/* Decrypt (or encrypt: the same) bytes [off, off + n) of the data area. */
-void crypt(const Pkg& pkg, const Aes& aes, uint64_t off, uint8_t* buf, size_t n)
+/* Decrypt (or encrypt: the same) bytes [off, off + n) of the data area: the
+ * retail key's AES-CTR, or a debug package's SHA-1 keystream (pkg.h). */
+void decrypt_range(const Pkg& pkg, const Aes& aes, uint64_t off, uint8_t* buf, size_t n)
 {
     if (!pkg.debug) {
         aes_ctr(aes, pkg.riv, off, buf, n);
@@ -77,8 +61,15 @@ std::string pkg_content_id(const fs::path& p)
 {
     File f(p, "rb");
     uint8_t h[0x60];
-    if (!f.f || fread(h, 1, sizeof h, f.f) != sizeof h || dod3_be32(h) != 0x7F504B47u) return "";
+    if (!f.f || !f.read(h, sizeof h) || dod3_be32(h) != kPkgMagic) return "";
     return std::string((const char*)h + 0x30, strnlen((const char*)h + 0x30, 0x24));
+}
+
+bool pkg_is_debug(const fs::path& p)
+{
+    File f(p, "rb");
+    uint8_t h[8];
+    return f.f && f.read(h, sizeof h) && dod3_be32(h) == kPkgMagic && !(h[4] & 0x80);
 }
 
 std::string pkg_footer_sha1(const fs::path& p)
@@ -87,10 +78,8 @@ std::string pkg_footer_sha1(const fs::path& p)
     const uint64_t size = fs::file_size(p, ec);
     File f(p, "rb");
     uint8_t t[20];
-    if (ec || size < 64 || !f.f || !f.seek(size - 32) || fread(t, 1, 20, f.f) != 20) return "";
-    char s[41];
-    for (int i = 0; i < 20; i++) snprintf(s + 2 * i, 3, "%02x", t[i]);
-    return s;
+    if (ec || size < 64 || !f.f || !f.seek(size - 32) || !f.read(t, sizeof t)) return "";
+    return to_hex(t, sizeof t);
 }
 
 bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
@@ -104,15 +93,11 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
     pkg->file_size = fs::file_size(p, ec);
     File f(p, "rb");
     uint8_t h[0x80];
-    if (ec || !f.f || fread(h, 1, sizeof h, f.f) != sizeof h || dod3_be32(h) != 0x7F504B47u) {
-        *err = "not a PS3 package";
+    if (ec || !f.f || !f.read(h, sizeof h) || dod3_be32(h) != kPkgMagic || dod3_be16(h + 6) != 1) {
+        *err = "not a PS3 package";   /* the type at 6: 1 is the PS3's */
         return false;
     }
-    if ((h[6] << 8 | h[7]) != 1) {
-        *err = "not a PS3 package";
-        return false;
-    }
-    pkg->debug = !(h[4] & 0x80);
+    pkg->debug = !(h[4] & 0x80);   /* the revision's top bit: retail */
     memcpy(pkg->qa, h + 0x60, 16);
     const uint32_t items = dod3_be32(h + 0x14);
     pkg->data_offset = dod3_be64(h + 0x20);
@@ -130,7 +115,7 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
         *err = "cannot read the package";
         return false;
     }
-    crypt(*pkg, aes, 0, tab.data(), tab.size());
+    decrypt_range(*pkg, aes, 0, tab.data(), tab.size());
     pkg->entries.clear();
     for (uint32_t i = 0; i < items; i++) {
         const uint8_t* e = tab.data() + (size_t)i * 32;
@@ -150,7 +135,7 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
             *err = "cannot read the package";
             return false;
         }
-        crypt(*pkg, aes, name_off, nm.data(), nm.size());
+        decrypt_range(*pkg, aes, name_off, nm.data(), nm.size());
         ent.name.assign((const char*)nm.data(), strnlen((const char*)nm.data(), nm.size()));
         if (ent.name.empty() || ent.name.find("..") != std::string::npos || ent.name[0] == '/' || ent.name[0] == '\\') {
             *err = "the package names a file outside its folder";
@@ -206,7 +191,6 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
                 cur = e;
                 next++;
                 const std::string to = where(*e);
-                out.reset();
                 if (!to.empty()) {   /* else left out: read past it */
                     const fs::path t = dest / fs::path(to);
                     fs::create_directories(t.parent_path(), ec);
@@ -226,7 +210,7 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
             const uint64_t b = std::min(hi, pkg.data_offset + cur->offset + cur->size);
             if (a < b && out) {
                 work.assign(buf.begin() + (size_t)(a - lo), buf.begin() + (size_t)(b - lo));
-                crypt(pkg, aes, a - pkg.data_offset, work.data(), work.size());
+                decrypt_range(pkg, aes, a - pkg.data_offset, work.data(), work.size());
                 if (fwrite(work.data(), 1, work.size(), out->f) != work.size()) {
                     *err = "disk full or not writable";
                     return false;
@@ -278,7 +262,7 @@ bool pkg_read_file(const Pkg& pkg, const std::string& name, std::vector<uint8_t>
     }
     Aes aes;
     aes.set_key(k_ps3recomp_pkg_key, 128);
-    crypt(pkg, aes, e->offset, out->data(), out->size());
+    decrypt_range(pkg, aes, e->offset, out->data(), out->size());
     return true;
 }
 

@@ -1,5 +1,6 @@
 /*
- * PS3 package (.pkg) reading for the setup: the 1.01 update and the DLC.
+ * PS3 package (.pkg) reading for the setup: the 1.01 update, the DLC, the
+ * US PSN release's game package and homebrew (mod) packages.
  *
  * A retail package is a header, a file table and the files, the table and
  * files under AES-128-CTR with the retail package key (ps3recomp's, from its
@@ -46,12 +47,18 @@ struct Pkg {
     uint64_t payload() const;        /* bytes of the files */
 };
 
+/* A package's first four bytes, "\x7FPKG". */
+const uint32_t kPkgMagic = 0x7F504B47u;
+
 /* Read the header and the file table. False (with `err`) if it is not a PS3
  * package (retail or debug). */
 bool pkg_open(const std::filesystem::path& p, Pkg* pkg, std::string* err);
 
 /* Just the content ID, from the plain-text header (cheap). */
 std::string pkg_content_id(const std::filesystem::path& p);
+
+/* Is it a debug package (a homebrew one), from the header alone (cheap). */
+bool pkg_is_debug(const std::filesystem::path& p);
 
 /* Extract the whole package under `dest`. Reads it once, start to end,
  * checking its SHA-1 footer. progress(bytes read, total) returns false to

@@ -1,5 +1,6 @@
 /* .zip reading for the setup: see install/zip.h. */
 #include "install/zip.h"
+#include "install/file.h"
 #include "util.h"
 
 #include <zlib.h>
@@ -17,23 +18,11 @@ namespace {
 uint16_t le16(const uint8_t* p) { return (uint16_t)(p[0] | p[1] << 8); }
 uint32_t le32(const uint8_t* p) { return (uint32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24); }
 
-struct File {
-    FILE* f = nullptr;
-    explicit File(const fs::path& p, const char* mode) : f(dod3::open_file(p, mode)) {}
-    ~File()
-    {
-        if (f) fclose(f);
-    }
-    bool seek(uint64_t o)
-    {
-#ifdef _WIN32
-        return _fseeki64(f, (long long)o, SEEK_SET) == 0;
-#else
-        return fseeko(f, (off_t)o, SEEK_SET) == 0;
-#endif
-    }
-    bool read(void* p, size_t n) { return fread(p, 1, n, f) == n; }
-};
+/* The records of a .zip (PKWARE's APPNOTE): their signatures and fixed sizes. */
+const uint32_t kEndSig = 0x06054b50u;       /* the end of the central directory */
+const uint32_t kCentralSig = 0x02014b50u;   /* an entry in the central directory */
+const uint32_t kLocalSig = 0x04034b50u;     /* an entry's own header, before its data */
+const size_t kEndSize = 22, kCentralSize = 46, kLocalSize = 30;
 
 }  // namespace
 
@@ -43,20 +32,20 @@ bool zip_list(const fs::path& zip, std::vector<ZipEntry>* entries, std::string* 
     std::error_code ec;
     const uint64_t size = fs::file_size(zip, ec);
     File in(zip, "rb");
-    if (ec || !in.f || size < 22) {
+    if (ec || !in.f || size < kEndSize) {
         *err = "cannot read the archive";
         return false;
     }
-    /* the end of central directory record: in the last 64 KB + 22 bytes */
-    const uint64_t tail = std::min<uint64_t>(size, 65536 + 22);
+    /* the end of central directory record: in the last 64 KB (its comment's most) and its own size */
+    const uint64_t tail = std::min<uint64_t>(size, 65536 + kEndSize);
     std::vector<uint8_t> t((size_t)tail);
     if (!in.seek(size - tail) || !in.read(t.data(), t.size())) {
         *err = "cannot read the archive";
         return false;
     }
     size_t eocd = SIZE_MAX;
-    for (size_t i = t.size() - 22 + 1; i-- > 0;)
-        if (le32(&t[i]) == 0x06054b50u) {
+    for (size_t i = t.size() - kEndSize + 1; i-- > 0;)
+        if (le32(&t[i]) == kEndSig) {
             eocd = i;
             break;
         }
@@ -65,8 +54,12 @@ bool zip_list(const fs::path& zip, std::vector<ZipEntry>* entries, std::string* 
         return false;
     }
     const uint32_t count = le16(&t[eocd + 10]), cd_size = le32(&t[eocd + 12]), cd_off = le32(&t[eocd + 16]);
-    if (cd_off == 0xFFFFFFFFu || count == 0xFFFF || (uint64_t)cd_off + cd_size > size) {
+    if (cd_off == 0xFFFFFFFFu || count == 0xFFFF) {
         *err = "a ZIP64 archive, which the setup does not read: unpack it and add what is inside";
+        return false;
+    }
+    if ((uint64_t)cd_off + cd_size > size) {
+        *err = "the archive is cut short";
         return false;
     }
     std::vector<uint8_t> cd(cd_size);
@@ -75,7 +68,7 @@ bool zip_list(const fs::path& zip, std::vector<ZipEntry>* entries, std::string* 
         return false;
     }
     for (size_t p = 0, i = 0; i < count; i++) {
-        if (p + 46 > cd.size() || le32(&cd[p]) != 0x02014b50u) {
+        if (p + kCentralSize > cd.size() || le32(&cd[p]) != kCentralSig) {
             *err = "the archive's directory is damaged";
             return false;
         }
@@ -87,11 +80,11 @@ bool zip_list(const fs::path& zip, std::vector<ZipEntry>* entries, std::string* 
         e.usize = le32(&cd[p + 24]);
         const uint16_t n = le16(&cd[p + 28]), x = le16(&cd[p + 30]), c = le16(&cd[p + 32]);
         e.header = le32(&cd[p + 42]);
-        if (p + 46 + n > cd.size()) {
+        if (p + kCentralSize + n > cd.size()) {
             *err = "the archive's directory is damaged";
             return false;
         }
-        e.name.assign((const char*)&cd[p + 46], n);
+        e.name.assign((const char*)&cd[p + kCentralSize], n);
         e.dir = !e.name.empty() && e.name.back() == '/';
         if (flags & 1) {
             *err = "an encrypted archive";
@@ -106,7 +99,7 @@ bool zip_list(const fs::path& zip, std::vector<ZipEntry>* entries, std::string* 
             return false;
         }
         entries->push_back(e);
-        p += 46 + (size_t)n + x + c;
+        p += kCentralSize + (size_t)n + x + c;
     }
     return true;
 }
@@ -115,12 +108,12 @@ bool zip_extract(const fs::path& zip, const ZipEntry& e, const fs::path& dest,
                  const std::function<bool(uint64_t)>& progress, std::string* err)
 {
     File in(zip, "rb");
-    uint8_t lh[30];
-    if (!in.f || !in.seek(e.header) || !in.read(lh, sizeof lh) || le32(lh) != 0x04034b50u) {
+    uint8_t lh[kLocalSize];
+    if (!in.f || !in.seek(e.header) || !in.read(lh, sizeof lh) || le32(lh) != kLocalSig) {
         *err = "cannot read " + e.name + " from the archive";
         return false;
     }
-    if (!in.seek(e.header + 30 + le16(&lh[26]) + le16(&lh[28]))) {
+    if (!in.seek(e.header + kLocalSize + le16(&lh[26]) + le16(&lh[28]))) {   /* past its name and extra field */
         *err = "cannot read " + e.name + " from the archive";
         return false;
     }
@@ -160,10 +153,13 @@ bool zip_extract(const fs::path& zip, const ZipEntry& e, const fs::path& dest,
         } else {
             z.next_in = ibuf.data();
             z.avail_in = (uInt)n;
-            while (z.avail_in > 0 && !ended) {
+            /* until the input is used up and nothing more is pending: a full
+             * output buffer may leave output behind (zlib's zpipe loop) */
+            do {
                 z.next_out = obuf.data();
                 z.avail_out = (uInt)obuf.size();
                 const int r = inflate(&z, Z_NO_FLUSH);
+                if (r == Z_BUF_ERROR) break;   /* nothing to do until more input comes */
                 if (r != Z_OK && r != Z_STREAM_END) {
                     *err = e.name + " in the archive is damaged";
                     return false;
@@ -176,7 +172,7 @@ bool zip_extract(const fs::path& zip, const ZipEntry& e, const fs::path& dest,
                 }
                 written += got;
                 ended = r == Z_STREAM_END;
-            }
+            } while (!ended && (z.avail_in > 0 || z.avail_out == 0));
         }
         if (progress && !progress(done)) {
             *err = "cancelled";
