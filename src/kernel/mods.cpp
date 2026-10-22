@@ -57,6 +57,7 @@ std::unordered_set<std::string> s_in_main_game;         /* of those names, the o
 std::unordered_map<std::string, std::string> s_mod_dlc;  /* a DLC package's name -> its path in game/mods */
 std::atomic<int> s_playing{ -1 };           /* the DLC chapter whose map was read last, else -1 */
 bool s_jpvoice = false;
+bool s_spanish_menus = false;   /* the Spanish translation's menus (ES-DATA) installed and on */
 std::atomic<int> s_logged{ 0 };
 
 std::string upper_slash(const std::string& s)
@@ -151,6 +152,15 @@ void hook(char* path, size_t cap)
  * join), bridge 18 keeps the chapters in Japanese. */
 bool dod3_dlc_jpvoice() { return s_jpvoice; }
 
+/* The Settings pages in Spanish (src/ui/settings_menu.cpp): the Spanish
+ * translation's menus are installed and not switched off in the launcher.
+ * DOD3_MENU_LANGUAGE=es|en says which instead (tests). */
+bool dod3_menus_spanish()
+{
+    if (const char* l = getenv("DOD3_MENU_LANGUAGE")) return !strcmp(l, "es");
+    return s_spanish_menus;
+}
+
 /* At boot: what game/mods and DLC_JPV/UNDUB hold, and the hook if either has
  * anything. */
 void dod3_mods_prepare()
@@ -164,6 +174,14 @@ void dod3_mods_prepare()
 
     const fs::path mods = root.parent_path() / "mods";
     s_mods = dod3::utf8(mods);
+    /* game/mods/installed.txt has a line a mod, "<id>\t..." (src/install/install.cpp);
+     * a mod switched off has game/modfiles/<id>.off */
+    if (FILE* f = dod3::open_file(mods / "installed.txt", "rb")) {
+        char line[512];
+        while (fgets(line, sizeof line, f))
+            if (!strncmp(line, "ES-DATA\t", 8)) s_spanish_menus = !fs::exists(root.parent_path() / "modfiles/ES-DATA.off", ec);
+        fclose(f);
+    }
     for (fs::recursive_directory_iterator it(mods, ec), end; !ec && it != end; it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
         const std::string rel = dod3::utf8(fs::relative(it->path(), mods, ec));

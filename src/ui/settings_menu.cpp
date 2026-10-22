@@ -45,6 +45,9 @@
  * Metal (LIVE_DISPLAY). The others wait for the next start, and a row whose
  * saved value differs from the running one says so.
  *
+ * With the Spanish fan translation's menus installed and on, the pages speak
+ * Spanish too, in its words ("Ajustes ..."): kSpanish, by the English text.
+ *
  * The field of view: Sqex03GameCamera.UpdateViewTarget passes every view's
  * final FOV here (bridge 9, with whether the gameplay camera made it) and
  * uses the one returned. DOD3_FOV=+N widens the gameplay camera as a zoom
@@ -64,6 +67,7 @@
 #include <string.h>
 #include <math.h>
 #include <chrono>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -73,6 +77,7 @@ extern "C" void rsx_present_set_screen_aspect(float aspect);    /* rsx_draw_engi
 extern "C" float rsx_present_window_aspect(void);
 void dod3_hud_aspect(int phase, uint32_t canvas, bool on);       /* src/patches/hud_aspect.cpp */
 bool dod3_dlc_jpvoice();                                          /* src/kernel/mods.cpp */
+bool dod3_menus_spanish();                                        /* src/kernel/mods.cpp */
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
@@ -140,17 +145,131 @@ uint32_t app_realloc(ppu_context* ctx, uint32_t p, uint32_t size)
     return (uint32_t)ctx->gpr[3];
 }
 
+/* UTF-8 to UTF-16 (the Basic Multilingual Plane: all the text here). */
+std::u16string utf16(const std::string& s)
+{
+    std::u16string out;
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = (unsigned char)s[i];
+        const int n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : 1;
+        uint32_t u = n == 1 ? c : n == 2 ? (c & 0x1F) : (c & 0x0F);
+        for (int k = 1; k < n && i + k < s.size(); k++) u = u << 6 | ((unsigned char)s[i + k] & 0x3F);
+        out += (char16_t)u;
+        i += n;
+    }
+    return out;
+}
+
 /* *fs = text, as the thunk assigns: Data reallocated to the exact size,
  * Num = Max = characters + the terminator, UTF-16. */
 void set_fstring(ppu_context* ctx, uint32_t fs, const std::string& text)
 {
-    const uint32_t n = (uint32_t)text.size() + 1;
+    const std::u16string t = utf16(text);
+    const uint32_t n = (uint32_t)t.size() + 1;
     const uint32_t data = app_realloc(ctx, vm_read32(fs), n * 2);
-    for (uint32_t i = 0; i + 1 < n; i++) vm_write16(data + 2 * i, (uint8_t)text[i]);
+    for (uint32_t i = 0; i + 1 < n; i++) vm_write16(data + 2 * i, t[i]);
     vm_write16(data + 2 * (n - 1), 0);
     vm_write32(fs, data);
     vm_write32(fs + 4, n);
     vm_write32(fs + 8, n);
+}
+
+/* ---- the pages in Spanish ---------------------------------------------------- */
+
+/* The text in the Spanish translation's words: its menu is "Ajustes", with
+ * "Ajustes de mando", "Ajustes visuales" and descriptions as "Ajustes
+ * relacionados con ...". Values left out (1280x720, MSAA 4x, Xbox, ...) are
+ * the same in both. */
+const struct {
+    const char* en;
+    const char* es;
+} kSpanish[] = {
+    /* the Settings root's entries */
+    { "Graphics Settings", "Ajustes gráficos" },
+    { "Adjust settings related to graphics and the display.", "Ajustes relacionados con los gráficos y la pantalla." },
+    { "System Settings", "Ajustes del sistema" },
+    { "Adjust the start-up, focus, prompt, mouse and renderer options.",
+      "Ajustes del inicio, el segundo plano, los botones y el ratón." },
+    { "Advanced Graphics", "Gráficos avanzados" },
+    { "Adjust the engine's shadows, motion blur and post-processing.",
+      "Ajustes de sombras, desenfoque de movimiento y posprocesado." },
+    /* what rows add */
+    { " Applies after a restart.", " Se aplica al reiniciar." },
+    { " (next start)", " (al reiniciar)" },
+    { "Custom", "Personalizado" },
+    /* values many rows have */
+    { "On", "Sí" },
+    { "Off", "No" },
+    { "Original", "Original" },
+    { "Default", "Predeterminado" },
+    { "Auto", "Auto" },
+    /* Graphics Settings */
+    { "Resolution", "Resolución" },
+    { "The resolution the game is drawn at.", "La resolución a la que se dibuja el juego." },
+    { "Display Mode", "Modo de pantalla" },
+    { "Window, borderless window or fullscreen.", "Ventana, ventana sin bordes o pantalla completa." },
+    { "Windowed", "Ventana" },
+    { "Borderless", "Sin bordes" },
+    { "Fullscreen", "Pantalla completa" },
+    { "Frame Rate", "Fotogramas por segundo" },
+    { "The frame rate limit. 60 is recommended.", "El límite de fotogramas por segundo. Se recomienda 60." },
+    { "30 (Original)", "30 (original)" },
+    { "Adaptive", "Adaptativo" },
+    { "Unlimited", "Sin límite" },
+    { "V-Sync", "Sincronización vertical" },
+    { "Wait for the display's refresh.", "Espera al refresco de la pantalla." },
+    { "Anti-Aliasing", "Suavizado de bordes" },
+    { "Smooths jagged edges. FXAA softens the picture slightly.", "Suaviza los bordes dentados. FXAA suaviza algo la imagen." },
+    { "Texture Filtering", "Filtrado de texturas" },
+    { "Sharper ground and walls when seen at an angle.", "Suelos y paredes más nítidos vistos en ángulo." },
+    { "Trilinear", "Trilineal" },
+    { "2x Anisotropic", "Anisotrópico 2x" },
+    { "4x Anisotropic", "Anisotrópico 4x" },
+    { "8x Anisotropic", "Anisotrópico 8x" },
+    { "16x Anisotropic", "Anisotrópico 16x" },
+    { "Field of View", "Campo de visión" },
+    { "Widens the gameplay camera. Cutscenes keep their framing.", "Amplía la cámara de juego. Las cinemáticas no cambian." },
+    /* System Settings */
+    { "Skip Intro", "Saltar introducción" },
+    { "Skip the logos and the opening movie.", "Salta los logotipos y el vídeo de apertura." },
+    { "When Unfocused", "En segundo plano" },
+    { "What the game does while its window is in the background.", "Qué hace el juego con su ventana en segundo plano." },
+    { "Keep Running", "Seguir" },
+    { "Mute", "Silenciar" },
+    { "Pause", "Pausar" },
+    { "Button Prompts", "Iconos de botones" },
+    { "The buttons the game shows. Auto follows the pad you hold.", "Los botones que muestra el juego. Auto sigue a tu mando." },
+    { "Keyboard", "Teclado" },
+    { "Mouse Sensitivity", "Sensibilidad del ratón" },
+    { "How far the mouse turns the camera.", "Cuánto gira la cámara con el ratón." },
+    { "Renderer", "Renderizador" },
+    { "The graphics API the game is drawn with.", "La API gráfica con la que se dibuja el juego." },
+    /* Advanced Graphics (src/patches/sysset.cpp) */
+    { "Aspect Ratio", "Relación de aspecto" },
+    { "Your screen's shape. Auto follows the window.", "La forma de tu pantalla. Auto sigue a la ventana." },
+    { "Shadow Quality", "Calidad de las sombras" },
+    { "Sharper, more defined shadows.", "Sombras más nítidas y definidas." },
+    { "High", "Alta" },
+    { "Ultra", "Ultra" },
+    { "Motion Blur", "Desenfoque de movimiento" },
+    { "Blur on fast movement of the camera and characters.", "Desenfoque al mover rápido la cámara y los personajes." },
+    { "Post-Processing", "Posprocesado" },
+    { "Depth of field, bloom and the game's colour grading.", "Profundidad de campo, resplandor y etalonaje del juego." },
+    { "Draw Distance", "Distancia de dibujado" },
+    { "How far away props, plants and other scenery are drawn.", "Hasta dónde se dibujan objetos, plantas y escenario." },
+    { "Tree Detail", "Detalle de los árboles" },
+    { "How far trees show and stay detailed. From the next area.", "Distancia de detalle de los árboles. Desde la próxima zona." },
+};
+
+bool s_spanish;   /* the Spanish translation's menus are on (init_rows) */
+
+/* The text as the pages show it: in Spanish with the translation's menus, else as it is. */
+const char* tr(const char* en)
+{
+    if (!s_spanish || !en) return en;
+    for (const auto& t : kSpanish)
+        if (!strcmp(t.en, en)) return t.es;
+    return en;
 }
 
 /* ---- the settings ---------------------------------------------------------- */
@@ -424,6 +543,7 @@ void init_rows()
     if (s_init) return;
     s_init = true;
     set_fov(getenv("DOD3_FOV"));   /* (the aspect ratio is set at boot: dod3_settings_menu_install) */
+    s_spanish = dod3_menus_spanish();
     std::vector<Dod3RowSpec> specs;
     build_rows(specs);
     for (const Dod3RowSpec& a : specs) {
@@ -431,8 +551,6 @@ void init_rows()
         for (const auto& c : a.choices) r.choices.push_back({ c.first, c.second });
         r.page = a.page;
         r.apply_fn = a.apply;
-        /* kept for the program's life: the page reads it every frame */
-        if (!r.live) r.desc = strdup((std::string(r.desc) + " Applies after a restart.").c_str());
         read_current(r, r.running);
         r.saved = r.pending = r.running;
         s_page_rows[r.page].push_back((int)s_rows.size());
@@ -442,9 +560,15 @@ void init_rows()
 
 std::string value_text(const Row& r, int idx)
 {
-    std::string t = idx >= 0 ? r.choices[idx].text : ("Custom (" + r.other + ")");
-    if (!r.live && idx != r.running) t += " (next start)";
+    std::string t = idx >= 0 ? tr(r.choices[idx].text) : std::string(tr("Custom")) + " (" + r.other + ")";
+    if (!r.live && idx != r.running) t += tr(" (next start)");
     return t;
+}
+
+/* a row's description, and that it waits for the next start if it does */
+std::string desc_text(const Row& r)
+{
+    return std::string(tr(r.desc)) + (r.live ? "" : tr(" Applies after a restart."));
 }
 
 bool menu_text(int i, std::string& out)
@@ -453,24 +577,19 @@ bool menu_text(int i, std::string& out)
     init_rows();
     const int k = i - MAGIC;
     const Row* r = row_at(k % 100);
-    if (k == 0)
-        out = "Graphics Settings";
-    else if (k == 1)
-        out = "Adjust settings related to graphics and the display.";
-    else if (k == 2)
-        out = "System Settings";
-    else if (k == 3)
-        out = "Adjust the start-up, focus, prompt, mouse and renderer options.";
-    else if (k == 4)
-        out = "Advanced Graphics";
-    else if (k == 5)
-        out = "Adjust the engine's shadows, motion blur and post-processing.";
+    static const char* const kRoot[] = {   /* the Settings root's entries: label, description */
+        "Graphics Settings", "Adjust settings related to graphics and the display.",
+        "System Settings",   "Adjust the start-up, focus, prompt, mouse and renderer options.",
+        "Advanced Graphics", "Adjust the engine's shadows, motion blur and post-processing.",
+    };
+    if (k >= 0 && k < (int)std::size(kRoot))
+        out = tr(kRoot[k]);
     else if (k >= 100 && k < 200)
-        out = r ? r->label : "";
+        out = r ? tr(r->label) : "";
     else if (k >= 200 && k < 300)
         out = r ? value_text(*r, r->pending) : "";
     else if (k >= 300 && k < 400)
-        out = r ? r->desc : "";
+        out = r ? desc_text(*r) : "";
     else
         out = "";
     return true;

@@ -363,6 +363,9 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
 set(PORT_UI_SOURCES                  # the in-game settings pages
     src/ui/settings_menu.cpp
     src/ui/ini.cpp)                  # dod3.ini, edited in place (the pages' and the launcher's)
+if(MSVC)   # the pages' Spanish text is UTF-8 in the source (clang reads it so anyway)
+    set_property(SOURCE src/ui/settings_menu.cpp APPEND PROPERTY COMPILE_OPTIONS "/utf-8")
+endif()
 set(PORT_SOURCES
     src/main.cpp
     src/util.cpp

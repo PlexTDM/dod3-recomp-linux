@@ -245,8 +245,9 @@ game/mods folder (and the voice pack's folder, for the DLC Undub).
   DLC, Drakengard_DLC_ES_BLUS31197_NPUB31251_V2.pkg and, with the Japanese
   Voice Pack, Drakengard_ES_DLC_Voices_BLUS31197_NPUB31251_V2.pkg. Add
   them as they are, the movies' .zip too; do not copy anything into the
-  game's folders by hand. The port's Settings pages are there with it, in
-  English.
+  game's folders by hand. The port's own Settings pages are there with it,
+  in Spanish too (Ajustes gráficos, Ajustes del sistema, Gráficos
+  avanzados); switched off, the game and the pages are in English again.
 
 - The DLC Undub by Canzah and Slow (Japanese voices for the DLC chapters):
   unpack its .7z and add the folder that holds GAME and ISO with Add
