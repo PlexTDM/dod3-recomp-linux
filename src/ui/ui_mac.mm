@@ -219,6 +219,7 @@ bool ui_init(const char* title, int width, int height, const std::string& font_p
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.IniFilename = nullptr;                /* no imgui.ini in the data folder */
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         if (!ImGui_ImplOSX_Init(s_ui.view) || !ImGui_ImplMetal_Init(s_ui.device)) {
             ImGui::DestroyContext();
             [s_ui.window orderOut:nil];
