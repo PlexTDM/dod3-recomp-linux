@@ -5,15 +5,18 @@
 #include <utility>
 #include <vector>
 
+/* The in-game Settings pages a row is on. */
+enum { PAGE_GRAPHICS, PAGE_SYSTEM, PAGE_ADVANCED };
+
 struct Dod3RowSpec {
     const char* key;      /* the dod3.ini key */
     const char* label;
     const char* desc;     /* about 60 characters at most */
     std::vector<std::pair<const char*, const char*>> choices;   /* value, text; NULL value = key unset */
-    int def;
-    bool live;            /* applied at once; otherwise at the next start */
-    void (*apply)(const char* value);
-    int page = 2;         /* 0 Graphics Settings, 1 System Settings, 2 Advanced Graphics */
+    int def = 0;          /* the default choice */
+    bool live = false;    /* applied at once; otherwise at the next start */
+    void (*apply)(const char* value) = nullptr;   /* a live row's own way of applying it */
+    int page = PAGE_ADVANCED;
 };
 
 /* The Advanced Graphics page's rows. */

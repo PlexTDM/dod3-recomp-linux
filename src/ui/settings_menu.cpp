@@ -1,5 +1,5 @@
-/* The Graphics Settings and System Settings pages in the title's own
- * Settings menu.
+/* The Graphics Settings, System Settings and Advanced Graphics pages in the
+ * title's own Settings menu.
  *
  * tools/menu_patch.py rewrites a few script functions in SQEX03GAME.XXX (the
  * copy served through PS3_VFS_OVERLAY): the Settings root gets two more
@@ -30,20 +30,20 @@
  *     the pause screen's dimming and frost are then left out)
  *     11 to 14: the camera's stick and the view's rotation, for
  *     src/input/camera.cpp
+ *     15 to 17: the view's aspect ratio, its FOV and the HUD (DOD3_ASPECT)
+ *     18 entering a DLC mission (1.01): keep the Japanese voices?
+ *   (tools/menu_patch.py has the same numbers, as CMD_*; Cmd below)
  *
  * Both natives' exec thunks are replaced in the function registry the
  * script VM calls them through. A thunk evaluates its own arguments from the
  * caller's FFrame (Object at +0x14, Code at +0x18) by running the native
  * for each opcode out of GNatives -- src/cpu/uscript.h does the same.
  *
- * The values are the dod3.ini keys (RSX_SCALE, RSX_DISPLAY, DOD3_FPS,
- * RSX_VSYNC, RSX_AA, RSX_ANISO, DOD3_FOV; RSX_BACKEND, DOD3_SKIP_INTRO,
- * DOD3_UNFOCUSED); Apply writes the open page's to dod3.ini and applies what
- * can change while running: the frame rate, texture filtering, the field
- * of view, the background behaviour and (Direct3D 12 / Vulkan) the
- * resolution, display mode, v-sync and anti-aliasing. The renderer and the
- * intro wait for the next start -- a row whose saved value differs from the
- * running one says so.
+ * The values are dod3.ini keys (build_rows lists them, and the launcher shows
+ * the same list); Apply writes the open page's to dod3.ini and applies the
+ * live rows at once -- the display rows too, on Direct3D 12, Vulkan and
+ * Metal (LIVE_DISPLAY). The others wait for the next start, and a row whose
+ * saved value differs from the running one says so.
  *
  * The field of view: Sqex03GameCamera.UpdateViewTarget passes every view's
  * final FOV here (bridge 9, with whether the gameplay camera made it) and
@@ -72,7 +72,7 @@ const char* dod3_settings_path();   /* main.cpp: the dod3.ini read at boot, or t
 extern "C" void rsx_present_set_screen_aspect(float aspect);    /* rsx_draw_engine.h */
 extern "C" float rsx_present_window_aspect(void);
 void dod3_hud_aspect(int phase, uint32_t canvas, bool on);       /* src/patches/hud_aspect.cpp */
-bool dod3_dlc_jpvoice();                                          /* src/kernel/dlc.cpp */
+bool dod3_dlc_jpvoice();                                          /* src/kernel/mods.cpp */
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
@@ -90,6 +90,45 @@ const uint32_t FRAME_CODE = uscript::kFrameCode;
 using uscript::eval_int;
 
 const int MAGIC = 900000;
+
+/* The bridge's commands (the header): tools/menu_patch.py's CMD_*, in order. */
+enum Cmd {
+    CMD_BEGIN,
+    CMD_CHANGE,
+    CMD_ISDEF,
+    CMD_RESET,
+    CMD_APPLY,
+    CMD_CHANGED,
+    CMD_SKIPINTRO,
+    CMD_OPEN,
+    CMD_ROWS,
+    CMD_FOV,
+    CMD_GRAPHICS_SHOWN,
+    CMD_CAM_DT,
+    CMD_CAM_ACTIVE,
+    CMD_CAM_AXIS,
+    CMD_CAM_VIEW,
+    CMD_ASPECT,
+    CMD_ASPECT_FOV,
+    CMD_HUD,
+    CMD_DLC_JPVOICE,
+};
+
+/* The script passes floats as their bits in an int. */
+float as_float(int bits)
+{
+    float f;
+    memcpy(&f, &bits, 4);
+    return f;
+}
+int as_bits(float f)
+{
+    int b;
+    memcpy(&b, &f, 4);
+    return b;
+}
+
+const double kRadian = 3.14159265358979 / 180.0;   /* a degree, in radians */
 
 uint32_t app_realloc(ppu_context* ctx, uint32_t p, uint32_t size)
 {
@@ -129,7 +168,7 @@ struct Row {
     bool live;                /* applied at once (else on the next start) */
     int running, saved, pending;   /* choice indices; -1 = a value not in the list */
     std::string other;        /* that value */
-    int page;                 /* 0 Graphics, 1 System, 2 Advanced Graphics */
+    int page;                 /* PAGE_GRAPHICS, PAGE_SYSTEM, PAGE_ADVANCED */
     void (*apply_fn)(const char* value);   /* a live row's own apply (src/patches/sysset.cpp) */
 };
 
@@ -146,8 +185,8 @@ float s_aspect_now;                 /* the one it has (0: as it was) */
 
 void set_fov(const char* v)
 {
-    const double rad = 3.14159265358979 / 180.0, add = v ? atof(v) : 0.0;
-    s_fov_k = (float)(tan((65.0 + add) * rad / 2) / tan(65.0 * rad / 2));
+    const double add = v ? atof(v) : 0.0;
+    s_fov_k = (float)(tan((65.0 + add) * kRadian / 2) / tan(65.0 * kRadian / 2));
 }
 
 /* A screen shape the view can take: 5:4 to 8:1, and not 16:9 (the title's). */
@@ -239,7 +278,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      LIVE_DISPLAY,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "RSX_DISPLAY",
                      "Display Mode",
                      "Window, borderless window or fullscreen.",
@@ -247,7 +286,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      LIVE_DISPLAY,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "DOD3_FPS",
                      "Frame Rate",
                      "The frame rate limit. 60 is recommended.",
@@ -259,7 +298,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      true,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "RSX_VSYNC",
                      "V-Sync",
                      "Wait for the display's refresh.",
@@ -267,7 +306,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      LIVE_DISPLAY,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "RSX_AA",
                      "Anti-Aliasing",
                      "Smooths jagged edges. FXAA softens the picture slightly.",
@@ -279,7 +318,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      LIVE_DISPLAY,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "RSX_ANISO",
                      "Texture Filtering",
                      "Sharper ground and walls when seen at an angle.",
@@ -291,7 +330,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      4,
                      true,
                      nullptr,
-                     0 });
+                     PAGE_GRAPHICS });
     rows.push_back({ "DOD3_FOV",
                      "Field of View",
                      "Widens the gameplay camera. Cutscenes keep their framing.",
@@ -304,8 +343,8 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                        { "30", "+30" } },
                      0,
                      true,
-                     nullptr,
-                     0 });
+                     [](const char* v) { set_fov(v); },
+                     PAGE_GRAPHICS });
     /* Advanced Graphics: the aspect ratio, then the engine's own switches
      * (below). The Graphics page has the layout's seven rows. */
     rows.push_back({ "DOD3_ASPECT",
@@ -315,7 +354,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      true,
                      [](const char* v) { set_aspect(v); },
-                     2 });
+                     PAGE_ADVANCED });
     /* System Settings */
     rows.push_back({ "DOD3_SKIP_INTRO",
                      "Skip Intro",
@@ -324,7 +363,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      false,
                      nullptr,
-                     1 });
+                     PAGE_SYSTEM });
     rows.push_back({ "DOD3_UNFOCUSED",
                      "When Unfocused",
                      "What the game does while its window is in the background.",
@@ -332,7 +371,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      true,
                      nullptr,
-                     1 });
+                     PAGE_SYSTEM });
     rows.push_back({ "DOD3_PROMPTS",
                      "Button Prompts",
                      "The buttons the game shows. Auto follows the pad you hold.",
@@ -346,7 +385,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      0,
                      true,
                      [](const char*) { dod3_prompts_poll(true); },
-                     1 });
+                     PAGE_SYSTEM });
     rows.push_back({ "DOD3_MOUSE_SENS",
                      "Mouse Sensitivity",
                      "How far the mouse turns the camera.",
@@ -363,26 +402,19 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      4,
                      true,
                      [](const char*) { dod3_camera_reload(); },
-                     1 });
+                     PAGE_SYSTEM });
+    rows.push_back({ "RSX_BACKEND",
+                     "Renderer",
+                     "The graphics API the game is drawn with.",
 #ifdef _WIN32
-    rows.push_back({ "RSX_BACKEND",
-                     "Renderer",
-                     "The graphics API the game is drawn with.",
                      { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
-                     0,
-                     false,
-                     nullptr,
-                     1 });
 #else
-    rows.push_back({ "RSX_BACKEND",
-                     "Renderer",
-                     "The graphics API the game is drawn with.",
                      { { NULL, "Metal" } },
+#endif
                      0,
                      false,
                      nullptr,
-                     1 });
-#endif
+                     PAGE_SYSTEM });
     /* Advanced Graphics: the engine's own switches (src/patches/sysset.cpp) */
     dod3_sysset_rows(rows);
 }
@@ -391,9 +423,7 @@ void init_rows()
 {
     if (s_init) return;
     s_init = true;
-    const char* restart = " Applies after a restart.";
-    set_fov(getenv("DOD3_FOV"));
-    set_aspect(getenv("DOD3_ASPECT"));
+    set_fov(getenv("DOD3_FOV"));   /* (the aspect ratio is set at boot: dod3_settings_menu_install) */
     std::vector<Dod3RowSpec> specs;
     build_rows(specs);
     for (const Dod3RowSpec& a : specs) {
@@ -401,14 +431,12 @@ void init_rows()
         for (const auto& c : a.choices) r.choices.push_back({ c.first, c.second });
         r.page = a.page;
         r.apply_fn = a.apply;
-        s_rows.push_back(r);
-    }
-    for (size_t i = 0; i < s_rows.size(); i++) {
-        Row& r = s_rows[i];
-        if (!r.live) r.desc = strdup((std::string(r.desc) + restart).c_str());
+        /* kept for the program's life: the page reads it every frame */
+        if (!r.live) r.desc = strdup((std::string(r.desc) + " Applies after a restart.").c_str());
         read_current(r, r.running);
         r.saved = r.pending = r.running;
-        s_page_rows[r.page].push_back((int)i);
+        s_page_rows[r.page].push_back((int)s_rows.size());
+        s_rows.push_back(r);
     }
 }
 
@@ -485,7 +513,6 @@ void apply()
                 display = true;
             if (!strcmp(r.key, "DOD3_FPS")) fps = true;
             if (!strcmp(r.key, "DOD3_UNFOCUSED")) unfocused = true;
-            if (!strcmp(r.key, "DOD3_FOV")) set_fov(v);
             if (r.apply_fn) r.apply_fn(v);
         }
     });
@@ -499,10 +526,10 @@ std::chrono::steady_clock::time_point s_page_drawn;   /* the page's last is-defa
 
 int bridge(int cmd, int a, int b)
 {
-    if (cmd < 11 || cmd >= 15) init_rows();
+    if (cmd < CMD_CAM_DT || cmd > CMD_CAM_VIEW) init_rows();   /* the camera's come every frame and need no rows */
     switch (cmd) {
-    case 0: /* begin: edit the saved values */ each([](Row& r) { r.pending = r.saved; }); return 0;
-    case 1: { /* change row a by b */
+    case CMD_BEGIN: /* edit the saved values */ each([](Row& r) { r.pending = r.saved; }); return 0;
+    case CMD_CHANGE: { /* row a, a step in direction b */
         Row* r = row_at(a);
         if (!r) return 0;
         const int m = (int)r->choices.size();
@@ -512,63 +539,60 @@ int bridge(int cmd, int a, int b)
         r->pending = i;
         return 1;
     }
-    case 2: { /* is row a at its default? (asked for every row every frame the page is drawn) */
+    case CMD_ISDEF: { /* is row a at its default? (asked for every row every frame the page is drawn) */
         s_page_drawn = std::chrono::steady_clock::now();
         const Row* r = row_at(a);
         return (r && r->pending == r->def) ? 1 : 0;
     }
-    case 3: /* reset */ each([](Row& r) { r.pending = r.def; }); return 0;
-    case 4: apply(); return 0;
-    case 5: {
+    case CMD_RESET: each([](Row& r) { r.pending = r.def; }); return 0;
+    case CMD_APPLY: apply(); return 0;
+    case CMD_CHANGED: {
         int changed = 0;
         each([&](Row& r) {
             if (r.pending != r.saved) changed = 1;
         });
         return changed;
     }
-    case 6: { /* skip the boot logos and the opening movie? DOD3_SKIP_INTRO, on unless 0 */
+    case CMD_SKIPINTRO: { /* skip the boot logos and the opening movie? DOD3_SKIP_INTRO, on unless 0 */
         const char* e = getenv("DOD3_SKIP_INTRO");
         return (e && e[0] == '0') ? 0 : 1;
     }
-    case 7:   /* the root opens entry a: 3 + page, then Restore Defaults (every page) */
+    case CMD_OPEN:   /* the root opens entry a: 3 + page, then Restore Defaults (every page) */
         if (a >= 3 && a < 3 + NPAGES)
             s_page = a - 3;
         else if (a == 3 + NPAGES)
             s_page = -1;
         return 0;
-    case 10:  /* is the Graphics page on screen? The pause screen's dimming and
-               * frost are left out while it is, so changes can be seen. */
-        return ((s_page == 0 || s_page == 2) &&     /* Graphics, Advanced Graphics */
+    case CMD_ROWS: /* the open page's rows */ return (int)s_page_rows[s_page > 0 ? s_page : 0].size();
+    case CMD_FOV: { /* the camera's field of view (float bits); b: the gameplay camera's */
+        float fov = as_float(a);
+        if (!b || s_fov_k == 1.0f || !(fov > 0.0f && fov < 170.0f)) return a;
+        fov = (float)(2.0 * atan(tan(fov * kRadian / 2) * s_fov_k) / kRadian);
+        return as_bits(fov > 150.0f ? 150.0f : fov);
+    }
+    case CMD_GRAPHICS_SHOWN:   /* is a graphics page on screen? The pause screen's dimming and
+                                * frost are left out while it is, so changes can be seen. */
+        return ((s_page == PAGE_GRAPHICS || s_page == PAGE_ADVANCED) &&
                 std::chrono::steady_clock::now() - s_page_drawn < std::chrono::milliseconds(250))
                    ? 1
                    : 0;
-    case 8: /* the open page's rows */ return (int)s_page_rows[s_page > 0 ? s_page : 0].size();
     /* the camera's stick on its way to the pawn (src/input/camera.cpp) */
-    case 11: { /* the frame's fDelta (float bits); b: the pawn is the dragon */
-        float dt;
-        memcpy(&dt, &a, 4);
-        dod3_camera_frame(dt, b);
+    case CMD_CAM_DT: /* the frame's fDelta (float bits); b: the pawn is the dragon */
+        dod3_camera_frame(as_float(a), b);
         return 0;
-    }
-    case 12: /* is the mouse turning the camera? */ return dod3_camera_active();
-    case 13: { /* the stick's value on axis a (float bits) -> the one to use */
-        float v;
-        memcpy(&v, &b, 4);
-        v = dod3_camera_axis(a, v);
-        int r;
-        memcpy(&r, &v, 4);
-        return r;
-    }
+    case CMD_CAM_ACTIVE: /* is the mouse turning the camera? */ return dod3_camera_active();
+    case CMD_CAM_AXIS: /* the stick's value on axis a (float bits) -> the one to use */
+        return as_bits(dod3_camera_axis(a, as_float(b)));
+    /* (CMD_CAM_VIEW takes a Rotator: hook_bridge) */
     /* the view's aspect ratio: Sqex03GameCamera.DoUpdateCamera, before it
      * fills the camera cache. A constrained view -- in play; the title's is
      * not -- is letterboxed (or pillarboxed) by the engine to its ratio, with
      * the projection made for it: it gets DOD3_ASPECT. A wider view's FOV
      * (horizontal) is widened by the ratio's change so that the view keeps
      * its height; a narrower one keeps its FOV and is taller. The HUD is
-     * fitted into the view, and the present told its shape, by bridge 17. */
-    case 15: { /* the camera's ConstrainedAspectRatio (float bits); b: is the view constrained to it */
-        float ar;
-        memcpy(&ar, &a, 4);
+     * fitted into the view, and the present told its shape, by CMD_HUD. */
+    case CMD_ASPECT: { /* the camera's ConstrainedAspectRatio (float bits); b: is the view constrained to it */
+        const float ar = as_float(a);
         s_aspect_from = (b && ar > 0.5f && ar < 8.0f) ? ar : 0.0f;
         if (getenv("DOD3_ASPECT_LOG")) {
             static float last_ar = -1.0f;
@@ -583,38 +607,19 @@ int bridge(int cmd, int a, int b)
             want = wa > 0.0f ? aspect_ok(wa) : 0.0f;
         }
         s_aspect_now = s_aspect_from > 0.0f ? want : 0.0f;
-        if (s_aspect_now <= 0.0f) return a;
-        int r;
-        memcpy(&r, &s_aspect_now, 4);
-        return r;
+        return s_aspect_now > 0.0f ? as_bits(s_aspect_now) : a;
     }
-    case 16: { /* the view's FOV (float bits) */
-        float fov;
-        memcpy(&fov, &a, 4);
+    case CMD_ASPECT_FOV: { /* the view's FOV (float bits) */
+        float fov = as_float(a);
         if (s_aspect_now <= s_aspect_from || !(fov > 0.0f && fov < 170.0f)) return a;
-        const double rad = 3.14159265358979 / 180.0;
-        fov = (float)(2.0 * atan(tan(fov * rad / 2) * s_aspect_now / s_aspect_from) / rad);
-        if (fov > 170.0f) fov = 170.0f;
-        int r;
-        memcpy(&r, &fov, 4);
-        return r;
+        fov = (float)(2.0 * atan(tan(fov * kRadian / 2) * s_aspect_now / s_aspect_from) / kRadian);
+        return as_bits(fov > 170.0f ? 170.0f : fov);
     }
-    case 17: /* the HUD's drawing: a phase, and for the begin its UCanvas */
+    case CMD_HUD: /* the HUD's drawing: a phase, and for the begin its UCanvas */
         dod3_hud_aspect(a, (uint32_t)b, s_aspect_now > 0.0f);
         return 0;
-    case 18: /* entering a DLC mission (1.01): keep the Japanese voices? */
+    case CMD_DLC_JPVOICE: /* entering a DLC mission (1.01): keep the Japanese voices? */
         return dod3_dlc_jpvoice() ? 1 : 0;
-    case 9: { /* the camera's field of view (float bits); b: the gameplay camera's */
-        float fov;
-        memcpy(&fov, &a, 4);
-        if (!b || s_fov_k == 1.0f || !(fov > 0.0f && fov < 170.0f)) return a;
-        const double rad = 3.14159265358979 / 180.0;
-        fov = (float)(2.0 * atan(tan(fov * rad / 2) * s_fov_k) / rad);
-        if (fov > 150.0f) fov = 150.0f;
-        int r;
-        memcpy(&r, &fov, 4);
-        return r;
-    }
     }
     return 0;
 }
@@ -637,9 +642,9 @@ void hook_getstring(ppu_context* ctx)
         /* The title's own: the original thunk, fed the value already
          * evaluated (an argument is evaluated once, as it would be). */
         if (!s_scratch) s_scratch = app_realloc(ctx, 0, 16);
-        vm_write8(s_scratch, 0x1D);
+        vm_write8(s_scratch, uscript::kIntConst);
         vm_write32(s_scratch + 1, (uint32_t)idx);
-        vm_write8(s_scratch + 5, 0x16);
+        vm_write8(s_scratch + 5, uscript::kEndParms);
         vm_write32(stack + FRAME_CODE, s_scratch);
         ctx->gpr[2] = r2;
         ctx->gpr[3] = self;
@@ -658,7 +663,7 @@ void hook_bridge(ppu_context* ctx)
 {
     const uint64_t lr = ctx->lr, r2 = ctx->gpr[2];
     const uint32_t stack = (uint32_t)ctx->gpr[4], result = (uint32_t)ctx->gpr[5];
-    if (vm_read8(vm_read32(stack + FRAME_CODE)) == 0x16) {   /* no arguments: the title's call */
+    if (uscript::at_end(stack)) {   /* no arguments: the title's call */
         DOD3_FN_EXEC_BRIDGE(ctx);
         dod3_drain(ctx);
         ctx->gpr[2] = r2;
@@ -666,8 +671,8 @@ void hook_bridge(ppu_context* ctx)
         return;
     }
     int args[3] = { 0, 0, 0 }, rot_yaw = 0;
-    for (int k = 0; k < 3 && vm_read8(vm_read32(stack + FRAME_CODE)) != 0x16; k++) {
-        if (k == 1 && args[0] == 14) {   /* a Rotator -- Pitch, Yaw, Roll: the first two */
+    for (int k = 0; k < 3 && !uscript::at_end(stack); k++) {
+        if (k == 1 && args[0] == CMD_CAM_VIEW) {   /* a Rotator -- Pitch, Yaw, Roll: the first two */
             const uint64_t sp = ctx->gpr[1];
             const uint32_t nsp = ((uint32_t)sp - 0xA0u) & ~0xFu;
             vm_write64(nsp, sp);
@@ -680,11 +685,11 @@ void hook_bridge(ppu_context* ctx)
         }
         args[k] = eval_int(ctx, stack);
     }
-    while (vm_read8(vm_read32(stack + FRAME_CODE)) != 0x16)   /* extra arguments: evaluate, drop */
+    while (!uscript::at_end(stack))   /* extra arguments: evaluate, drop */
         eval_int(ctx, stack);
     vm_write32(stack + FRAME_CODE, vm_read32(stack + FRAME_CODE) + 1);
     int v = 0;
-    if (args[0] == 14)
+    if (args[0] == CMD_CAM_VIEW)
         dod3_camera_view(args[1], rot_yaw, args[2]);   /* the view's rotation; is it the gameplay camera's */
     else
         v = bridge(args[0], args[1], args[2]);

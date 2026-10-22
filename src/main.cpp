@@ -49,6 +49,7 @@
 #include "app_version.h"              /* generated: the port's version label */
 #include "install/crypto.h"
 #include "install/install.h"           /* the release layout (the installer) */
+#include "ui/ini.h"                    /* dod3.ini */
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
  * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
@@ -1638,30 +1639,22 @@ static std::string s_settings_path = "dod3.ini";
 /* The file read at boot, else the one beside the executable: where the
  * Graphics Settings page (src/ui/settings_menu.cpp) saves. */
 const char* dod3_settings_path() { return s_settings_path.c_str(); }
-static std::string s_exe_path;   /* argv[0] */
+static std::string s_exe_path;   /* argv[0], set first thing in main */
 
 /* Which file that is, found now: beside the executable, else in the current
  * directory; with neither, the one beside the executable. */
 static void find_settings_file()
 {
-    char path[1024];
-    const char* tried[2] = { NULL, "dod3.ini" };
-    const char* argv0 = s_exe_path.c_str();
-    size_t n = strlen(argv0);
-    while (n && argv0[n - 1] != '/' && argv0[n - 1] != '\\') n--;
-    if (n && n + 9 < sizeof path) {
-        memcpy(path, argv0, n);
-        strcpy(path + n, "dod3.ini");
-        tried[0] = path;
-    }
-    const char* used = NULL;
-    for (int i = 0; i < 2 && !used; i++)
-        if (tried[i])
-            if (FILE* f = fopen(tried[i], "r")) {
+    const size_t slash = s_exe_path.find_last_of("/\\");
+    const std::string beside = slash == std::string::npos ? "" : s_exe_path.substr(0, slash + 1) + "dod3.ini";
+    for (const std::string& p : { beside, std::string("dod3.ini") })
+        if (!p.empty())
+            if (FILE* f = fopen(p.c_str(), "r")) {
                 fclose(f);
-                used = tried[i];
+                s_settings_path = p;
+                return;
             }
-    s_settings_path = used ? used : tried[0] ? tried[0] : "dod3.ini";
+    s_settings_path = beside.empty() ? "dod3.ini" : beside;
 }
 
 /* The launcher's (src/ui/launcher.cpp), before the game has read the file:
@@ -1672,41 +1665,15 @@ const char* dod3_settings_path_now()
     return s_settings_path.c_str();
 }
 
-static void load_settings_file(const char* argv0)
+static void load_settings_file()
 {
-    s_exe_path = argv0;
     find_settings_file();
-    FILE* f = fopen(s_settings_path.c_str(), "r");
-    if (!f) return;
-    char line[512];
     int applied = 0;
-    while (fgets(line, sizeof line, f)) {
-        char* p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == '#' || *p == ';' || *p == '\n' || *p == '\r' || !*p) continue;
-        char* eq = strchr(p, '=');
-        if (!eq) continue;
-        /* key */
-        char* ke = eq;
-        while (ke > p && (ke[-1] == ' ' || ke[-1] == '\t')) ke--;
-        *ke = 0;
-        /* value: up to a comment or the end of the line, trimmed */
-        char* v = eq + 1;
-        while (*v == ' ' || *v == '\t') v++;
-        for (char* c = v; *c; c++)
-            if (*c == '#' || *c == ';' || *c == '\n' || *c == '\r') {
-                *c = 0;
-                break;
-            }
-        char* ve = v + strlen(v);
-        while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) ve--;
-        *ve = 0;
-        if (!*p) continue;
-        if (getenv(p)) continue;            /* the environment wins */
-        dod3_setenv(p, v, 1);
-        applied++;
-    }
-    fclose(f);
+    for (const auto& [key, value] : dod3::ini_read(std::filesystem::path(s_settings_path)))
+        if (!getenv(key.c_str())) {   /* the environment wins */
+            dod3_setenv(key.c_str(), value.c_str(), 1);
+            applied++;
+        }
     if (applied) fprintf(stderr, "[settings] %d from %s\n", applied, s_settings_path.c_str());
 }
 
@@ -1912,7 +1879,7 @@ int main(int argc, char** argv)
         return dod3setup::install_files_cli(tb && *tb ? std::filesystem::u8path(tb) : base, install_files, keys);
     }
     const bool force_setup = argc >= 2 && !strcmp(argv[1], "--setup");
-    if (argv[0]) s_exe_path = argv[0];
+    if (argv[0]) s_exe_path = argv[0];   /* dod3.ini is found beside it, the launcher's before the game's */
     if (argc < 2 || force_setup) {
 #ifdef _WIN32
         wchar_t dir[MAX_PATH] = L"";
@@ -1954,7 +1921,7 @@ int main(int argc, char** argv)
         argv = s_release_argv;
         argc = 2;
     }
-    if (argc >= 1 && argv[0]) load_settings_file(argv[0]);
+    load_settings_file();
 
     if (argc < 2) {
         printf("usage: %s <PPU ELF>\n", argv[0]);

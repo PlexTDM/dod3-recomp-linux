@@ -34,7 +34,8 @@ stick's value (axis, the title's own) -> the one to use, 14 the view's
 rotation, 15 the camera's aspect ratio (and: is the view constrained to
 it?) -> the one to use, 16 the view's FOV -> the one to use, 17 the HUD's
 drawing (1 begin, with its canvas; 0 end; 2 and 3 around a full-screen
-rectangle; 4 and 5 around the radar; 7 and 8 around the pause screen).
+rectangle; 4 and 5 around the radar; 7 and 8 around the pause screen),
+18 (1.01) entering a DLC mission: keep the Japanese voices?
 
 Also: Sqex03GameCamera.UpdateViewTarget hands every view's final FOV to the
 port (bridge(9, FOV, the gameplay camera made it)) and takes back the one to
@@ -109,6 +110,12 @@ def main():
 
     OPT, ROOTC, DISP = 'Sqex03GameHUDOption', 'Sqex03GameHUDOptionRoot', 'Sqex03GameHUDOptionDisplay'
     bridge = graphics_page(pk, new, show)
+
+    def bridge_via(gi, cmd, a=None, b=None):
+        # the bridge reached through `gi`: the function's own way to the GameInfo
+        c = bridge(cmd, a, b)
+        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
+        return c
 
     # ---- in play, the pause screen's dimming (a black rectangle) and frost
     # (HUD_Pause's pause_bg) are left out while the Graphics page is on
@@ -268,14 +275,12 @@ def main():
     gi = findnode(st[pk.find(st, 'xGamePawn = Sqex03GameInfo(obj(WorldInfo).static.GetWorldInfo().self.Game).GetPlayerPawn()')],
                   'Sqex03GameInfo(obj(WorldInfo).static.GetWorldInfo().self.Game)')
     third = st[pk.find(st, 'if !(EqualEqual_ObjectObject(self.CurrentCamera, self.ThirdPersonCam)) goto 0x04aa')].parts[1][1]
-    call = bridge(CMD_FOV, clone(fov), clone(third))
-    subst(call, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
+    call = bridge_via(gi, CMD_FOV, clone(fov), clone(third))
     st.insert(i + 1, pk.let(clone(fov), call))
     # ... and the view's rotation (a Rotator: the port reads Pitch and Yaw),
     # which the mouse's vertical gain goes by and DOD3_CAM_LOG prints.
     rot = st[pk.find(st, 'self.m_rMatineeInterpRotation = out OutVT.POV.Rotation')].parts[1][1]
-    view = bridge(CMD_CAM_VIEW, clone(rot), clone(third))
-    subst(view, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
+    view = bridge_via(gi, CMD_CAM_VIEW, clone(rot), clone(third))
     st.insert(i + 2, view)
     new[f] = st
 
@@ -293,9 +298,7 @@ def main():
     i = pk.find(st, 'FillCameraCache(NewPOV)')
     gi_cam = pk.local(f, 'xGameInfo')
     def cam_bridge(cmd, a=None, b=None):
-        c = bridge(cmd, a, b)
-        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_cam))
-        return c
+        return bridge_via(gi_cam, cmd, a, b)
     has_gi = lambda: pk.native('NotEqual_ObjectObject', clone(gi_cam), Node(0x2A, []))
     ar = st[pk.find(st, 'self.ConstrainedAspectRatio = self.ViewTarget.AspectRatio')].parts[0][1]
     on = st[pk.find(st, 'self.bConstrainAspectRatio = true')].parts[0][1]
@@ -322,9 +325,7 @@ def main():
     # whole view instead (17, 2 before it, 17, 3 after). The GameInfo, for
     # the bridge, through WorldInfo: any class can reach it so.
     def gi_bridge(cmd, a=None, b=None):
-        c = bridge(cmd, a, b)
-        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi))
-        return c
+        return bridge_via(gi, cmd, a, b)
     f = pk.func('Sqex03GameHUD', 'DrawHUD'); st = pk.parse(f)
     canvas = findnode(st[pk.find(st, 'self.m_xOverlayImg.Draw(self.Canvas)')], 'self.Canvas')
     i = pk.find(st, 'return nothing')
@@ -387,9 +388,7 @@ def main():
     lock = pk.find(st, 'if !(OrOr_BoolBool(self.m_xGamePawn.GetAnimSequence().self.m_bLockCamX, self.m_xGamePawn.self.m_xGameInfo.self.m_bToggleCamMove)) goto 0x0077')
     gi_pc = findnode(st[lock], 'self.m_xGamePawn.self.m_xGameInfo')
     def pc_bridge(cmd, a=None, b=None):
-        c = bridge(cmd, a, b)
-        subst(c, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_pc))
-        return c
+        return bridge_via(gi_pc, cmd, a, b)
     for fn, axis, texts in (('GetCameraMoveX', 0, ('return self.m_xGameInput.GetAxis(b0)', 'return self.m_xGameInput.GetAxis(b2)')),
                             ('GetCameraMoveY', 1, ('return self.m_xGameInput.GetAxis(b1)', 'return self.m_xGameInput.GetAxis(b3)'))):
         f = pk.func(PC, fn); st = pk.parse(f)
@@ -417,9 +416,9 @@ def main():
         f = pk.func('Sqex03GameHUDBook', 'UpdateFadeOut'); st = pk.parse(f)
         i = pk.find(st, 'if !(self.m_xGameInfo.self.m_xMissionMng.IsDLCMissionFromNo(self.m_iEntryMissionNo)) goto 0x014b')
         gi_book = findnode(st[i], 'self.m_xGameInfo')
-        keep = bridge(CMD_DLC_JPVOICE)
-        subst(keep, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_book))
+        keep = bridge_via(gi_book, CMD_DLC_JPVOICE)
         dlc = st[i].parts[1][1]
+        # keep != 0 ? false : IsDLCMissionFromNo(...)   (0x28: EX_False)
         st[i].parts[1] = ('e', pk.cond(pk.native('NotEqual_IntInt', keep, pk.int_(0)), Node(0x28, []), dlc))
         new[f] = st
 
@@ -500,15 +499,7 @@ def graphics_page(pk, new, show):
     ret = st[-2:]      # return nothing; <end>
     def bridge(cmd, a=None, b=None):
         n = clone(call_tpl)
-        # the innermost call node: 0x1B/0x1C with only the end-parms part left
-        def inner(x):
-            for k, v in x.parts:
-                if k == 'e':
-                    r = inner(v)
-                    if r: return r
-            if x.op in (0x1B, 0x1C): return x
-            return None
-        c = inner(n)
+        c = inner_call(n)   # the innermost call node: its arguments go in
         args = [pk.int_(cmd), a if a is not None else pk.int_(0), b if b is not None else pk.int_(0)]
         c.parts = c.parts[:1] + [('e', x) for x in args] + [('u8', 0x16)]
         return n

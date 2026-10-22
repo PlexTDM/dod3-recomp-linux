@@ -17,7 +17,8 @@
  * A package that is not the one the patch was made from -- a mod's: fan
  * translations replace it along with the cutscene packages -- is played as
  * it is. Its own hash goes into the EBOOT's table, as it would in a modded
- * EBOOT; the Settings menu stays as the title shipped it.
+ * EBOOT; the Settings menu stays as the title shipped it. The stamp then
+ * says so, with the hash, so the package is not read again at every start.
  *
  * On 1.00 two copies of the package go into the overlay: the title reads its
  * packages from the game-data install (/dev_hdd0/game/BLES00000DATA/USRDIR/
@@ -335,6 +336,14 @@ bool generated(const fs::path& ov)
 }
 #endif
 
+/* The EBOOT's table entry for the script package (the title checks the
+ * package against it), now this hash: 40 hex digits. */
+bool override_hash(const std::string& hex)
+{
+    std::vector<uint8_t> h;
+    return dod3setup::from_hex(hex, &h) && h.size() == 20 && dod3_sha_override("sqex03game.xxx", h.data());
+}
+
 /* The player's package as the stamp names it: its size and the time it was
  * written. */
 std::string source_id(const fs::path& pkg)
@@ -360,30 +369,36 @@ bool dod3_menu_patch_prepare()
     const fs::path root(r);
     const fs::path ov = root.parent_path().empty() ? fs::path(MENU_OVERLAY) : root.parent_path() / MENU_OVERLAY;
     const fs::path stamp = ov / "menu_patch.stamp";
+    /* the stamp: this patch, made from this package -- or "... mod <its hash>",
+     * a mod's package, seen before and played as it is */
     const std::string want =
         std::string(k_menu_patch_version) + " " + k_menu_patch_sha1 + " " + source_id(source_package(root));
-    std::vector<uint8_t> have;
-    std::error_code ec;
-    const bool fresh = read_file(stamp, have) && std::string(have.begin(), have.end()) == want && generated(ov);
-    if (!fresh) {
+    const std::string mod_mark = want + " mod ";
+    std::vector<uint8_t> stamped;
+    const std::string have = read_file(stamp, stamped) ? std::string(stamped.begin(), stamped.end()) : "";
+    if (have.starts_with(mod_mark)) {
+        const std::string own = have.substr(mod_mark.size());
+        if (override_hash(own)) fprintf(stderr, "[menu] SQEX03GAME.XXX is a mod's, played as it is (%s)\n", own.c_str());
+        return false;
+    }
+    if (have != want || !generated(ov)) {
         fprintf(stderr, "[menu] adding Graphics Settings to the title's Settings menu (%s)...\n", utf8(ov).c_str());
+        std::error_code ec;
         fs::remove(stamp, ec);
         std::string own;
         if (!generate(root, ov, &own)) {
             /* a mod's package: the title's own check would end the game on it */
-            std::vector<uint8_t> h;
-            if (!own.empty() && dod3setup::from_hex(own, &h) && h.size() == 20 &&
-                dod3_sha_override("sqex03game.xxx", h.data()))
+            if (!own.empty() && override_hash(own)) {
                 fprintf(stderr, "[menu] SQEX03GAME.XXX: the EBOOT's hash for it is now this package's (%s)\n",
                         own.c_str());
+                const std::string mark = mod_mark + own;
+                write_file(stamp, mark.data(), mark.size());
+            }
             return false;
         }
         if (!write_file(stamp, want.data(), want.size())) return false;
     }
-    std::vector<uint8_t> sha;
-    if (!dod3setup::from_hex(k_menu_patch_sha1, &sha) || sha.size() != 20 ||
-        !dod3_sha_override("sqex03game.xxx", sha.data()))
-        return false;
+    if (!override_hash(k_menu_patch_sha1)) return false;
     const std::string ovs = utf8(ov);
     dod3_setenv("PS3_VFS_OVERLAY", ovs.c_str(), 1);
     fprintf(stderr, "[menu] Graphics Settings in the Settings menu (overlay %s)\n", ovs.c_str());
