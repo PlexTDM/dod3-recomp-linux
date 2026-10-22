@@ -81,9 +81,28 @@ macOS:
 3. The setup opens, as on Windows. The game's files go into
    ~/Library/Application Support/Drakengard 3 Recompiled.
 
-To run the setup again -- to add DLC later, or to replace a file -- run
-dod3.exe --setup from a command prompt on Windows, or hold Option while
-opening the app on a Mac. Everything already installed stays.
+## The launcher
+
+Once the game is installed, it opens on a launcher, over the game's own key
+art (from your copy of the game):
+
+- Play (Enter, or the pad's confirm button, starts it straight away)
+- Mods: the Spanish translation and the DLC Undub, what of them is
+  installed, Remove, and Add Files / Add Folder for more (see Mods below)
+- DLC: which of the 20 packs are installed, and Add DLC Packages
+- Settings: the display, graphics, controls (the keyboard's keys too) and
+  system settings, saved to dod3.ini as you change them
+- Game Files, at the bottom: the setup, to install the disc or the update
+  again
+
+It works with the mouse, the keyboard and a controller (Esc or the pad's
+back button closes a page). To start the game without it, set Settings >
+System > Launcher at Start to Off; holding Shift (Option on a Mac) while
+starting the game opens it anyway.
+
+To run the setup again -- to replace a file -- use Game Files in the
+launcher, or run dod3.exe --setup from a command prompt on Windows.
+Everything already installed stays.
 
 If the setup cannot open its window, it can run from a command prompt:
 
@@ -213,8 +232,7 @@ and English when English is chosen.
 
 ## Mods
 
-The setup installs two fan-made mods by name, on its Mods page (run
-dod3.exe --setup, or on a Mac hold Option while opening the app). Unzip
+The launcher installs two fan-made mods by name, on its Mods page. Unzip
 or unpack what you downloaded first, then add the files with Add Files or
 Add Folder. Your own game files stay as they are: a mod's files go to the
 game/mods folder (and the voice pack's folder, for the DLC Undub).
@@ -243,9 +261,11 @@ Other mods made as homebrew packages for this release, laid out as the
 console installs them (in the update's folder, the game-data folder, or
 the DLC's), are taken too and listed by their file names.
 
-To take the mods out: the Mods page's Remove Mods, then Install. A mod with
-files in the update's folder (the translation's game package) needs the
-update package added as well, which puts the update's own files back.
+To take a mod out: Remove on its card in the launcher's Mods page. The
+update's own files that a mod replaced are kept aside while it is
+installed and put back. (A mod installed by an older version of the setup
+has no such list: removing it asks for the update package, which puts the
+update's files back, and takes out all the mods.)
 
 A mod copied into the update's folder by hand
 (game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe) is played as it

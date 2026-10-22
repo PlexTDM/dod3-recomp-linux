@@ -51,6 +51,8 @@ using dod3::utf8;
 fs::path update_dir(const fs::path& base) { return base / "game/disc/game/BLES00000"; }
 fs::path dlc_dir(const fs::path& base) { return base / "game/disc/game/NPUB31251"; }
 fs::path mods_dir(const fs::path& base) { return base / "game/mods"; }
+/* each mod's file list and the update's files it replaced (install.h) */
+fs::path modfiles_dir(const fs::path& base) { return base / "game/modfiles"; }
 fs::path staging(const fs::path& base) { return base / "game/setup.partial"; }
 
 /* a file's first four bytes, big-endian, and the next two in `rev` */
@@ -552,6 +554,68 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
     return true;
 }
 
+/* One mod removed (Plan::remove_ids): the DLC Undub's folder, the voice
+ * pack's lists written again; any other by its list -- its files in
+ * game/mods and the update's folder deleted, the update's own put back, the
+ * folders it leaves empty removed. A mod without a list (mod_removable) is
+ * left as it is, with an error. */
+bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
+{
+    std::error_code ec;
+    auto drop_row = [&] {
+        auto rows = mods_read(base);
+        rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const auto& r) { return r[0] == id; }), rows.end());
+        mods_write(base, rows);
+    };
+    if (id == "UNDUB") {
+        const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
+        fs::remove_all(jpv / "UNDUB", ec);
+        if (ec) {
+            *err = "could not remove " + utf8(jpv / "UNDUB") + ": " + ec.message();
+            return false;
+        }
+        if (fs::is_directory(jpv / "SQEX03GAME", ec) && !dlc_write_jpv_lists(base / "game/disc", true)) {
+            *err = "could not write the voice pack's file lists again";
+            return false;
+        }
+        drop_row();
+        return true;
+    }
+    const fs::path listf = modfiles_dir(base) / (id + ".txt"), orig = modfiles_dir(base) / id / "orig";
+    FILE* f = dod3::open_file(listf, "rb");
+    if (!f) {
+        *err = "the files of " + id + " were not listed when it was installed: add the update package and remove "
+               "all the mods";
+        return false;
+    }
+    const fs::path patch = update_dir(base) / "USRDIR/PATCH";
+    std::set<fs::path> dirs;
+    char line[1024];
+    while (fgets(line, sizeof line, f)) {
+        std::string l(line);
+        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+        const bool kept = l.size() > 2 && l.compare(l.size() - 2, 2, "\t1") == 0;
+        if (kept) l.resize(l.size() - 2);
+        const size_t sl = l.find('/');
+        if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
+        const std::string kind = l.substr(0, sl);
+        const fs::path rel = fs::u8path(l.substr(sl + 1));
+        const fs::path root = kind == "patch" ? patch : kind == "tree" ? mods_dir(base) : fs::path();
+        if (root.empty() || rel.empty() || rel.is_absolute()) continue;
+        fs::remove(root / rel, ec);
+        if (kept) move_patiently(orig / rel, root / rel, ec);
+        ec.clear();
+        for (fs::path d = rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
+    }
+    fclose(f);
+    for (auto it = dirs.rbegin(); it != dirs.rend(); ++it)   /* the deepest first */
+        if (fs::is_directory(*it, ec) && fs::is_empty(*it, ec)) fs::remove(*it, ec);
+    fs::remove_all(modfiles_dir(base) / id, ec);
+    fs::remove(listf, ec);
+    drop_row();
+    return true;
+}
+
 /* A mod: a package's files where mod_layout puts them, a movie archive's
  * movies into game/mods (in place of the disc's), the DLC Undub (above). */
 bool install_mod(const fs::path& base, const Source& s, const fs::path& stage,
@@ -585,20 +649,53 @@ bool install_mod(const fs::path& base, const Source& s, const fs::path& stage,
                          }))
             return false;
     }
-    std::string where;
+    /* The same mod installed before: its files go first (the update's own
+     * put back), so what it replaces now is the game's. One installed before
+     * the lists were kept, with files in the update's folder, is installed
+     * over without a list: removing it still takes the update. */
+    bool listed = true;
+    for (const auto& r : mods_read(base))
+        if (r[0] == s.id && !mod_removable(base, s.id)) listed = r[1].find("patch") == std::string::npos;
+    if (listed && mod_removable(base, s.id) && !remove_mod(base, s.id, err)) return false;
+    std::string where, list;
+    auto add_files = [&](const fs::path& root, const char* kind, const fs::path& to, const fs::path& orig) {
+        for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            const fs::path rel = fs::relative(it->path(), root, ec);
+            bool kept = false;
+            if (!orig.empty() && fs::exists(to / rel, ec)) {   /* the update's own: kept aside */
+                fs::create_directories((orig / rel).parent_path(), ec);
+                move_patiently(to / rel, orig / rel, ec);
+                kept = !ec;
+                ec.clear();
+            }
+            const auto g = rel.generic_u8string();
+            list += std::string(kind) + "/" + std::string(g.begin(), g.end()) + (kept ? "\t1\n" : "\n");
+        }
+    };
     if (fs::exists(part / "patch", ec)) {
         if (!installed(base).update) {
             *err = s.name + " goes into the 1.01 update's folder: add the update package too";
             return false;
         }
-        if (!merge_move(part / "patch", update_dir(base) / "USRDIR/PATCH", err)) return false;
+        const fs::path patch = update_dir(base) / "USRDIR/PATCH";
+        if (listed) add_files(part / "patch", "patch", patch, modfiles_dir(base) / s.id / "orig");
+        if (!merge_move(part / "patch", patch, err)) return false;
         where = "patch";
     }
     if (fs::exists(part / "tree", ec)) {
+        if (listed) add_files(part / "tree", "tree", mods_dir(base), fs::path());
         if (!merge_move(part / "tree", mods_dir(base), err)) return false;
         where += where.empty() ? "tree" : ",tree";
     }
     fs::remove_all(part, ec);
+    if (listed) {
+        fs::create_directories(modfiles_dir(base), ec);
+        if (FILE* f = dod3::open_file(modfiles_dir(base) / (s.id + ".txt"), "wb")) {
+            fwrite(list.data(), 1, list.size(), f);
+            fclose(f);
+        }
+    }
     mods_record(base, s.id, where, s.name);
     return true;
 }
@@ -610,6 +707,8 @@ bool install_mod(const fs::path& base, const Source& s, const fs::path& stage,
 bool remove_mods(const fs::path& base, std::string* err)
 {
     std::error_code ec;
+    for (const auto& r : mods_read(base))   /* the listed ones: the update's own files put back */
+        if (r[0] != "UNDUB" && mod_removable(base, r[0]) && !remove_mod(base, r[0], err)) return false;
     for (fs::directory_iterator it(mods_dir(base), ec), end; !ec && it != end; it.increment(ec))
         if (it->path().filename() != "installed.txt") fs::remove_all(it->path(), ec);
     const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
@@ -638,8 +737,14 @@ bool remove_mods(const fs::path& base, std::string* err)
 bool mods_need_update(const fs::path& base)
 {
     for (const auto& r : mods_read(base))
-        if (r[1].find("patch") != std::string::npos) return true;
+        if (r[1].find("patch") != std::string::npos && !mod_removable(base, r[0])) return true;
     return false;
+}
+
+bool mod_removable(const fs::path& base, const std::string& id)
+{
+    std::error_code ec;
+    return id == "UNDUB" || fs::exists(modfiles_dir(base) / (id + ".txt"), ec);
 }
 
 const std::vector<DlcInfo>& known_mods()
@@ -1066,6 +1171,10 @@ bool install(const fs::path& base, const Plan& plan,
         if (!progress(0, total, "Removing the mods")) return fail("cancelled");
         if (!remove_mods(base, err)) return fail(*err);
     }
+    for (const std::string& id : plan.remove_ids) {
+        if (!progress(0, total, "Removing a mod")) return fail("cancelled");
+        if (!remove_mod(base, id, err)) return fail(*err);
+    }
 
     /* The executable, made first (in memory) so wrong keys stop the install
      * before anything is copied; written once the update is in place. */
@@ -1133,11 +1242,17 @@ bool install(const fs::path& base, const Plan& plan,
          * the executable can be made again); the old PATCH folder goes whole,
          * so a file 1.01 dropped does not linger */
         fs::remove_all(update_dir(base) / "USRDIR/PATCH", ec);
-        {   /* the mods that had files there are gone with them */
+        {   /* the mods that had files there are gone with them, their lists
+             * and the files they kept aside too (one's files in game/mods stay) */
             auto rows = mods_read(base);
             const size_t n = rows.size();
             rows.erase(std::remove_if(rows.begin(), rows.end(),
-                                      [](const auto& r) { return r[1].find("patch") != std::string::npos; }),
+                                      [&](const auto& r) {
+                                          if (r[1].find("patch") == std::string::npos) return false;
+                                          fs::remove(modfiles_dir(base) / (r[0] + ".txt"), ec);
+                                          fs::remove_all(modfiles_dir(base) / r[0], ec);
+                                          return true;
+                                      }),
                        rows.end());
             if (rows.size() != n) mods_write(base, rows);
         }

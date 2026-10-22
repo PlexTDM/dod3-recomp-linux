@@ -89,9 +89,13 @@ extern "C" void dod3_mac_log_to_file(void)
     }).detach();
 }
 
-/* 0 when the game's files are in place under base (running the installer
- * first if not, or always with force); nonzero if the player quit. The
- * player's dod3.ini is seeded from the app's default (Contents/Resources). */
+extern "C" int dod3_mac_option_held(void);
+
+/* 0 to start the game: its files are in place under base (the installer
+ * run first if not, or always with force), and the launcher
+ * (src/ui/launcher.cpp) said Play, unless dod3.ini turns it off (Option held
+ * at launch opens it anyway); nonzero if the player quit. The player's
+ * dod3.ini is seeded from the app's default (Contents/Resources). */
 extern "C" int dod3_setup_mac(const char* base_dir, int force)
 {
     using namespace dod3setup;
@@ -117,13 +121,25 @@ extern "C" int dod3_setup_mac(const char* base_dir, int force)
                     fs::copy_file(shipped / "pipelines.list", base / "cache/pipelines.list", ec);
             }
         }
-        if (installed(base).ready() && !force) return 0;
-        const int r = run_installer(base);
-        if (r >= 0) return r;
-        no_window(base);
-        return 1;
+        const bool option = dod3_mac_option_held() != 0;   /* read first: it is soon let go of */
+        if (!installed(base).ready() || force) {
+            const int r = run_installer(base);
+            if (r >= 0) return r;
+            no_window(base);
+            return 1;
+        }
+        if (!launcher_wanted(base, option)) return 0;
+        for (;;) {
+            const int r = run_launcher(base);
+            if (r != 2) return r < 0 ? 0 : r;   /* no window: the game starts as before */
+            /* Game Files: the installer, then back to the launcher (its Start
+             * Game starts the game) */
+            const int i = run_installer(base);
+            if (i == 0) return 0;
+            if (!installed(base).ready()) return 1;
+        }
     }
 }
 
-/* Option held at launch: run setup again (the --setup of a double-click). */
+/* Option held at launch: the launcher, even when dod3.ini turns it off. */
 extern "C" int dod3_mac_option_held(void) { return ([NSEvent modifierFlags] & NSEventModifierFlagOption) != 0; }

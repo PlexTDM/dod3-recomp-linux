@@ -41,7 +41,7 @@ What you need:
 - Optionally, the DLC packages you own (`UP0082-NPUB31251_00-...`). No
   licence files are needed.
 - Optionally, mods: the Spanish fan translation and the DLC Undub
-  (Japanese voices for the DLC chapters), which the setup installs on its
+  (Japanese voices for the DLC chapters), which the launcher installs on its
   Mods page; see [docs/PLAYING.md](docs/PLAYING.md#mods).
 
 Windows:
@@ -56,7 +56,8 @@ Windows:
    Add Folder, in any
    order, then Install. The game's files are copied into the `game` folder
    next to `dod3.exe` (a few minutes).
-4. Start Game.
+4. Start Game. From then on `dod3.exe` opens the launcher: Play, and the
+   game's mods, DLC and settings.
 
 macOS:
 
@@ -71,9 +72,9 @@ macOS:
    `~/Library/Application Support/Drakengard 3 Recompiled`.
 
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
-view, draw distance, skipping the intro) are in the game's own Settings
-menu, under Graphics Settings, System Settings and Advanced Graphics, or in
-`dod3.ini`.
+view, draw distance, skipping the intro, the keyboard's keys) are in the
+launcher's Settings, in the game's own Settings menu (Graphics Settings,
+System Settings and Advanced Graphics), or in `dod3.ini`.
 [docs/PLAYING.md](docs/PLAYING.md) has the controls, the saves, the Japanese
 voices, and what to do if something goes wrong.
 

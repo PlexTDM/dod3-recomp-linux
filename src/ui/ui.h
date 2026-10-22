@@ -59,4 +59,15 @@ std::string ui_default_font();
  * player quit, -1 if the UI could not start (show an alert instead). */
 int run_installer(const std::filesystem::path& base);
 
+/* The launcher (src/ui/launcher.cpp), shown at each start once the game is
+ * installed: Play, the mods, the DLC and the settings in dod3.ini. Returns 0
+ * to start the game, 1 if the player quit, 2 to run the installer (Game
+ * Files), -1 if the UI could not start (start the game then). */
+int run_launcher(const std::filesystem::path& base);
+
+/* Is the launcher to open: dod3.ini's DOD3_LAUNCHER (the environment's
+ * first) is not 0, or the player holds the key that asks for it anyway
+ * (`key_held`: Shift on Windows, Option on the Mac). */
+bool launcher_wanted(const std::filesystem::path& base, bool key_held);
+
 }  // namespace dod3setup

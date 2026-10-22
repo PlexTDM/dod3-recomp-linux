@@ -188,6 +188,11 @@ bool ui_init(const char* title, int width, int height, const std::string& font_p
         }
 
         s_ui.delegate = [[Dod3SetupWindowDelegate alloc] init];
+        /* made smaller (its shape kept) where the screen has no room for it */
+        const NSRect vf = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame : NSMakeRect(0, 0, width, height);
+        const CGFloat k = MIN(1.0, MIN(vf.size.width * 0.94 / width, vf.size.height * 0.90 / height));
+        width = (int)(width * k);
+        height = (int)(height * k);
         s_ui.window = [[NSWindow alloc]
             initWithContentRect:NSMakeRect(0, 0, width, height)
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable

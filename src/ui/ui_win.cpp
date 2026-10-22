@@ -21,6 +21,7 @@
 #include <d3d12.h>
 #include <dxgi1_5.h>
 #include <io.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -411,10 +412,15 @@ bool ui_init(const char* title, int width, int height, const std::string& font_p
     wc.lpszClassName = kClass;
     RegisterClassExW(&wc);
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = { 0, 0, (LONG)(width * g_dpi), (LONG)(height * g_dpi) };
+    const RECT& wa = mi.rcWork;
+    /* the size asked for at the display's scale, made smaller (its shape
+     * kept) where the screen has no room for it */
+    float k = g_dpi;
+    const float room_w = (float)(wa.right - wa.left) * 0.94f, room_h = (float)(wa.bottom - wa.top) * 0.90f;
+    if (width * k > room_w || height * k > room_h) k = (std::min)(room_w / width, room_h / height);
+    RECT r = { 0, 0, (LONG)(width * k), (LONG)(height * k) };
     AdjustWindowRectEx(&r, style, FALSE, 0);
     const int ww = r.right - r.left, wh = r.bottom - r.top;
-    const RECT& wa = mi.rcWork;
     g_hwnd = CreateWindowExW(0, kClass, widen(title).c_str(), style, wa.left + (wa.right - wa.left - ww) / 2,
                              wa.top + (wa.bottom - wa.top - wh) / 2, ww, wh, nullptr, nullptr, wc.hInstance, nullptr);
     if (!g_hwnd) {

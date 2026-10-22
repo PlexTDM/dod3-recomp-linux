@@ -13,10 +13,15 @@ struct Dod3RowSpec {
     int def;
     bool live;            /* applied at once; otherwise at the next start */
     void (*apply)(const char* value);
+    int page = 2;         /* 0 Graphics Settings, 1 System Settings, 2 Advanced Graphics */
 };
 
 /* The Advanced Graphics page's rows. */
 void dod3_sysset_rows(std::vector<Dod3RowSpec>& rows);
+
+/* Every Settings page's rows, in order (src/ui/settings_menu.cpp): the
+ * in-game pages' and the launcher's. Making the list changes nothing. */
+void dod3_setting_rows(std::vector<Dod3RowSpec>& rows);
 
 /* From the vblank loop, often: once the title has read its INI (and before
  * the engine object makes its render targets from it), the dod3.ini keys

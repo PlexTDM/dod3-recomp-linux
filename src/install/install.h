@@ -38,12 +38,17 @@
  *                                                own files stay as they
  *                                                are), and installed.txt,
  *                                                the mods installed
+ *   game/modfiles/                               each mod's list of its files
+ *                                                (<id>.txt), and the update's
+ *                                                files a mod replaced
+ *                                                (<id>/orig/), so a mod can be
+ *                                                removed by itself
  *   .../PATCH/                                   a mod's files for the
  *                                                update's folder, which the
  *                                                title lists: there, as the
- *                                                console has them (the update
- *                                                installed again puts its own
- *                                                files back)
+ *                                                console has them (removing
+ *                                                the mod puts the update's
+ *                                                own back)
  *   .../NPUB31251/USRDIR/DLC_JPV/UNDUB/          the DLC chapters' Japanese
  *                                                voices, beside the voice
  *                                                pack's (src/kernel/dlc.cpp)
@@ -117,6 +122,8 @@ struct Plan {
      * voices go; the files a mod put in the update's folder go with the
      * update installed again, which the plan then needs (mods_need_update) */
     bool remove_mods = false;
+    /* these installed mods removed first, each by itself (mod_removable) */
+    std::vector<std::string> remove_ids;
     Keys keys;                                           /* when the executable is to be made */
     uint64_t bytes() const;
 };
@@ -126,8 +133,13 @@ struct Plan {
 bool needs_voice_pack(const Plan& plan, const Status& have);
 
 /* Removing the installed mods needs the update package: a mod put files in
- * its folder. */
+ * its folder and its list of them was not kept (a mod installed before the
+ * lists were). */
 bool mods_need_update(const fs::path& base);
+
+/* Can the mod `id` be removed by itself: its files are listed, or it is the
+ * DLC Undub. */
+bool mod_removable(const fs::path& base, const std::string& id);
 
 /* The encrypted executable: from the plan's update (1.01) or disc (1.00) if
  * set, else from the install. */

@@ -79,7 +79,6 @@ extern "C" {   /* src/os/macos/setup_mac.mm */
 const char* dod3_mac_data_dir(void);
 void dod3_mac_log_to_file(void);
 int dod3_setup_mac(const char* base_dir, int force);
-int dod3_mac_option_held(void);
 }
 #endif
 
@@ -1905,7 +1904,7 @@ int main(int argc, char** argv)
         /* Not the app's folder -- a signed .app is read-only, and a
          * downloaded one may run from a translocated copy -- but
          * ~/Library/Application Support/Drakengard 3 Recompiled
-         * (src/os/macos/setup_mac.mm). Option held at launch runs setup again. */
+         * (src/os/macos/setup_mac.mm). Option held at launch opens the launcher. */
         const char* data = dod3_mac_data_dir();
         /* DOD3_INSTALL_BASE: somewhere else (tests) */
         if (const char* tb = getenv("DOD3_INSTALL_BASE"))
@@ -1915,7 +1914,7 @@ int main(int argc, char** argv)
             return 1;
         }
         dod3_mac_log_to_file();
-        if (dod3_setup_mac(data, (force_setup || dod3_mac_option_held()) ? 1 : 0) != 0) return 1;
+        if (dod3_setup_mac(data, force_setup ? 1 : 0) != 0) return 1;
 #else
         if (!dod3setup::installed(".").ready()) {
             printf("usage: %s <PPU ELF>\n(or run it from a folder the installer has set up: %s --install <file>...; "

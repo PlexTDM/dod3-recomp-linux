@@ -272,6 +272,8 @@ if(WIN32)
         "${IMGUI_DIR}/backends/imgui_impl_dx12.cpp")
     list(APPEND SETUP_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_win.cpp"
         ${IMGUI_SOURCES})
 elseif(APPLE)
@@ -282,6 +284,8 @@ elseif(APPLE)
         "${IMGUI_DIR}/backends/imgui_impl_metal.mm")
     list(APPEND SETUP_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
         ${IMGUI_SOURCES})
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
@@ -308,6 +312,25 @@ set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp" APPEND PRO
 set_property(SOURCE ${SETUP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGUI_DIR}")
 # third-party code: its warnings are not ours to act on
 set_property(SOURCE ${IMGUI_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "-w")
+if(WIN32 OR APPLE)
+    # the launcher's PNG decoder: stb_image, the copy in the runtime's codec
+    # library, compiled privately (src/ui/png.cpp)
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY
+                 INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/libs/codec")
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY COMPILE_OPTIONS "-w")
+    # the launcher's typeface, Inter 4.1 (SIL Open Font License 1.1,
+    # third_party/fonts/inter), as arrays in gen/launcher_fonts.h
+    set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
+    foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
+        set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ttf}")
+        file(READ "${_ttf}" _hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+        string(MAKE_C_IDENTIFIER "${_font}" _id)
+        string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
+    endforeach()
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/launcher_fonts.h" CONTENT "${_font_h}" @ONLY)
+endif()
 
 # The port's own sources, on every platform, one list per module under src/
 # (the SPU-side ones -- src/patches/spu_hooks.c and src/apu -- are in
@@ -334,7 +357,8 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
     src/patches/hud_aspect.cpp       # the HUD in a view wider or narrower than 16:9
     src/patches/sysset.cpp)
 set(PORT_UI_SOURCES                  # the in-game settings pages
-    src/ui/settings_menu.cpp)
+    src/ui/settings_menu.cpp
+    src/ui/ini.cpp)                  # dod3.ini, edited in place (the pages' and the launcher's)
 set(PORT_SOURCES
     src/main.cpp
     src/util.cpp

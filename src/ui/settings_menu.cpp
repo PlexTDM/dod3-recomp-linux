@@ -57,6 +57,7 @@
 #include "input/camera.h"    /* bridge 11 to 14: the camera's stick and the mouse */
 #include "patches/prompts.h"     /* DOD3_PROMPTS: the button prompts' glyphs */
 #include "patches/sysset.h"      /* the Advanced Graphics page's rows */
+#include "ui/ini.h"             /* dod3.ini, edited in place */
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,152 +224,182 @@ void read_current(Row& r, int& idx)
 #define LIVE_DISPLAY false
 #endif
 
+/* Every page's rows, in order: what each is, not what it is set to. The
+ * launcher (src/ui/launcher.cpp) shows the same list. */
+void build_rows(std::vector<Dod3RowSpec>& rows)
+{
+    rows.push_back({ "RSX_SCALE",
+                     "Resolution",
+                     "The resolution the game is drawn at.",
+                     { { "1", "1280x720" },
+                       { "1.5", "1920x1080" },
+                       { "2", "2560x1440" },
+                       { "3", "3840x2160" },
+                       { "4", "5120x2880" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     0 });
+    rows.push_back({ "RSX_DISPLAY",
+                     "Display Mode",
+                     "Window, borderless window or fullscreen.",
+                     { { "windowed", "Windowed" }, { "borderless", "Borderless" }, { "fullscreen", "Fullscreen" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     0 });
+    rows.push_back({ "DOD3_FPS",
+                     "Frame Rate",
+                     "The frame rate limit. 60 is recommended.",
+                     { { NULL, "30 (Original)" },
+                       { "60", "60" },
+                       { "120", "120" },
+                       { "adaptive", "Adaptive" },
+                       { "uncapped", "Unlimited" } },
+                     0,
+                     true,
+                     nullptr,
+                     0 });
+    rows.push_back({ "RSX_VSYNC",
+                     "V-Sync",
+                     "Wait for the display's refresh.",
+                     { { "1", "On" }, { "0", "Off" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     0 });
+    rows.push_back({ "RSX_AA",
+                     "Anti-Aliasing",
+                     "Smooths jagged edges. FXAA softens the picture slightly.",
+                     { { NULL, "Off" },
+                       { "fxaa", "FXAA" },
+                       { "msaa2", "MSAA 2x" },
+                       { "msaa4", "MSAA 4x" },
+                       { "msaa8", "MSAA 8x" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     0 });
+    rows.push_back({ "RSX_ANISO",
+                     "Texture Filtering",
+                     "Sharper ground and walls when seen at an angle.",
+                     { { "1", "Trilinear" },
+                       { "2", "2x Anisotropic" },
+                       { "4", "4x Anisotropic" },
+                       { "8", "8x Anisotropic" },
+                       { "16", "16x Anisotropic" } },
+                     4,
+                     true,
+                     nullptr,
+                     0 });
+    rows.push_back({ "DOD3_FOV",
+                     "Field of View",
+                     "Widens the gameplay camera. Cutscenes keep their framing.",
+                     { { NULL, "Default" },
+                       { "5", "+5" },
+                       { "10", "+10" },
+                       { "15", "+15" },
+                       { "20", "+20" },
+                       { "25", "+25" },
+                       { "30", "+30" } },
+                     0,
+                     true,
+                     nullptr,
+                     0 });
+    /* Advanced Graphics: the aspect ratio, then the engine's own switches
+     * (below). The Graphics page has the layout's seven rows. */
+    rows.push_back({ "DOD3_ASPECT",
+                     "Aspect Ratio",
+                     "Your screen's shape. Auto follows the window.",
+                     { { NULL, "16:9" }, { "16:10", "16:10" }, { "21:9", "21:9" }, { "32:9", "32:9" }, { "auto", "Auto" } },
+                     0,
+                     true,
+                     [](const char* v) { set_aspect(v); },
+                     2 });
+    /* System Settings */
+    rows.push_back({ "DOD3_SKIP_INTRO",
+                     "Skip Intro",
+                     "Skip the logos and the opening movie.",
+                     { { "1", "On" }, { "0", "Off" } },
+                     0,
+                     false,
+                     nullptr,
+                     1 });
+    rows.push_back({ "DOD3_UNFOCUSED",
+                     "When Unfocused",
+                     "What the game does while its window is in the background.",
+                     { { NULL, "Keep Running" }, { "mute", "Mute" }, { "pause", "Pause" } },
+                     0,
+                     true,
+                     nullptr,
+                     1 });
+    rows.push_back({ "DOD3_PROMPTS",
+                     "Button Prompts",
+                     "The buttons the game shows. Auto follows the pad you hold.",
+                     { { NULL, "Auto" },
+                       { "ps3", "PlayStation 3" },
+                       { "ps4", "PlayStation 4" },
+                       { "ps5", "PlayStation 5" },
+                       { "xbox", "Xbox" },
+                       { "switch", "Nintendo Switch" },
+                       { "keyboard", "Keyboard" } },
+                     0,
+                     true,
+                     [](const char*) { dod3_prompts_poll(true); },
+                     1 });
+    rows.push_back({ "DOD3_MOUSE_SENS",
+                     "Mouse Sensitivity",
+                     "How far the mouse turns the camera.",
+                     { { "0.25", "1" },
+                       { "0.4", "2" },
+                       { "0.55", "3" },
+                       { "0.75", "4" },
+                       { NULL, "5" },
+                       { "1.3", "6" },
+                       { "1.7", "7" },
+                       { "2.2", "8" },
+                       { "3", "9" },
+                       { "4", "10" } },
+                     4,
+                     true,
+                     [](const char*) { dod3_camera_reload(); },
+                     1 });
+#ifdef _WIN32
+    rows.push_back({ "RSX_BACKEND",
+                     "Renderer",
+                     "The graphics API the game is drawn with.",
+                     { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
+                     0,
+                     false,
+                     nullptr,
+                     1 });
+#else
+    rows.push_back({ "RSX_BACKEND",
+                     "Renderer",
+                     "The graphics API the game is drawn with.",
+                     { { NULL, "Metal" } },
+                     0,
+                     false,
+                     nullptr,
+                     1 });
+#endif
+    /* Advanced Graphics: the engine's own switches (src/patches/sysset.cpp) */
+    dod3_sysset_rows(rows);
+}
+
 void init_rows()
 {
     if (s_init) return;
     s_init = true;
     const char* restart = " Applies after a restart.";
-    s_rows.push_back({ "RSX_SCALE",
-                       "Resolution",
-                       "The resolution the game is drawn at.",
-                       { { "1", "1280x720" },
-                         { "1.5", "1920x1080" },
-                         { "2", "2560x1440" },
-                         { "3", "3840x2160" },
-                         { "4", "5120x2880" } },
-                       0,
-                       LIVE_DISPLAY });
-    s_rows.push_back({ "RSX_DISPLAY",
-                       "Display Mode",
-                       "Window, borderless window or fullscreen.",
-                       { { "windowed", "Windowed" }, { "borderless", "Borderless" }, { "fullscreen", "Fullscreen" } },
-                       0,
-                       LIVE_DISPLAY });
-    s_rows.push_back({ "DOD3_FPS",
-                       "Frame Rate",
-                       "The frame rate limit. 60 is recommended.",
-                       { { NULL, "30 (Original)" },
-                         { "60", "60" },
-                         { "120", "120" },
-                         { "adaptive", "Adaptive" },
-                         { "uncapped", "Unlimited" } },
-                       0,
-                       true });
-    s_rows.push_back({ "RSX_VSYNC",
-                       "V-Sync",
-                       "Wait for the display's refresh.",
-                       { { "1", "On" }, { "0", "Off" } },
-                       0,
-                       LIVE_DISPLAY });
-    s_rows.push_back({ "RSX_AA",
-                       "Anti-Aliasing",
-                       "Smooths jagged edges. FXAA softens the picture slightly.",
-                       { { NULL, "Off" },
-                         { "fxaa", "FXAA" },
-                         { "msaa2", "MSAA 2x" },
-                         { "msaa4", "MSAA 4x" },
-                         { "msaa8", "MSAA 8x" } },
-                       0,
-                       LIVE_DISPLAY });
-    s_rows.push_back({ "RSX_ANISO",
-                       "Texture Filtering",
-                       "Sharper ground and walls when seen at an angle.",
-                       { { "1", "Trilinear" },
-                         { "2", "2x Anisotropic" },
-                         { "4", "4x Anisotropic" },
-                         { "8", "8x Anisotropic" },
-                         { "16", "16x Anisotropic" } },
-                       4,
-                       true });
-    s_rows.push_back({ "DOD3_FOV",
-                       "Field of View",
-                       "Widens the gameplay camera. Cutscenes keep their framing.",
-                       { { NULL, "Default" },
-                         { "5", "+5" },
-                         { "10", "+10" },
-                         { "15", "+15" },
-                         { "20", "+20" },
-                         { "25", "+25" },
-                         { "30", "+30" } },
-                       0,
-                       true });
     set_fov(getenv("DOD3_FOV"));
     set_aspect(getenv("DOD3_ASPECT"));
-    /* System Settings */
-    /* Advanced Graphics: the aspect ratio, then the engine's own switches
-     * (below). The Graphics page has the layout's seven rows. */
-    s_rows.push_back({ "DOD3_ASPECT",
-                       "Aspect Ratio",
-                       "Your screen's shape. Auto follows the window.",
-                       { { NULL, "16:9" }, { "16:10", "16:10" }, { "21:9", "21:9" }, { "32:9", "32:9" }, { "auto", "Auto" } },
-                       0,
-                       true });
-    s_rows.back().page = 2;
-    s_rows.back().apply_fn = [](const char* v) { set_aspect(v); };
-    s_rows.push_back({ "DOD3_SKIP_INTRO",
-                       "Skip Intro",
-                       "Skip the logos and the opening movie.",
-                       { { "1", "On" }, { "0", "Off" } },
-                       0,
-                       false });
-    s_rows.back().page = 1;
-    s_rows.push_back({ "DOD3_UNFOCUSED",
-                       "When Unfocused",
-                       "What the game does while its window is in the background.",
-                       { { NULL, "Keep Running" }, { "mute", "Mute" }, { "pause", "Pause" } },
-                       0,
-                       true });
-    s_rows.back().page = 1;
-    s_rows.push_back({ "DOD3_PROMPTS",
-                       "Button Prompts",
-                       "The buttons the game shows. Auto follows the pad you hold.",
-                       { { NULL, "Auto" },
-                         { "ps3", "PlayStation 3" },
-                         { "ps4", "PlayStation 4" },
-                         { "ps5", "PlayStation 5" },
-                         { "xbox", "Xbox" },
-                         { "switch", "Nintendo Switch" },
-                         { "keyboard", "Keyboard" } },
-                       0,
-                       true });
-    s_rows.back().page = 1;
-    s_rows.back().apply_fn = [](const char*) { dod3_prompts_poll(true); };
-    s_rows.push_back({ "DOD3_MOUSE_SENS",
-                       "Mouse Sensitivity",
-                       "How far the mouse turns the camera.",
-                       { { "0.25", "1" },
-                         { "0.4", "2" },
-                         { "0.55", "3" },
-                         { "0.75", "4" },
-                         { NULL, "5" },
-                         { "1.3", "6" },
-                         { "1.7", "7" },
-                         { "2.2", "8" },
-                         { "3", "9" },
-                         { "4", "10" } },
-                       4,
-                       true });
-    s_rows.back().page = 1;
-    s_rows.back().apply_fn = [](const char*) { dod3_camera_reload(); };
-#ifdef _WIN32
-    s_rows.push_back({ "RSX_BACKEND",
-                       "Renderer",
-                       "The graphics API the game is drawn with.",
-                       { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
-                       0,
-                       false });
-#else
-    s_rows.push_back(
-        { "RSX_BACKEND", "Renderer", "The graphics API the game is drawn with.", { { NULL, "Metal" } }, 0, false });
-#endif
-    s_rows.back().page = 1;
-    /* Advanced Graphics: the engine's own switches (src/patches/sysset.cpp) */
-    std::vector<Dod3RowSpec> adv;
-    dod3_sysset_rows(adv);
-    for (const Dod3RowSpec& a : adv) {
+    std::vector<Dod3RowSpec> specs;
+    build_rows(specs);
+    for (const Dod3RowSpec& a : specs) {
         Row r{ a.key, a.label, a.desc, {}, a.def, a.live };
         for (const auto& c : a.choices) r.choices.push_back({ c.first, c.second });
-        r.page = 2;
+        r.page = a.page;
         r.apply_fn = a.apply;
         s_rows.push_back(r);
     }
@@ -417,64 +448,10 @@ bool menu_text(int i, std::string& out)
     return true;
 }
 
-/* dod3.ini: KEY = VALUE on the key's line (uncommenting "#KEY = ..."), or
- * appended; a NULL value comments the line out. */
+/* dod3.ini, edited in place (src/ui/ini.cpp) */
 void write_ini(const std::vector<std::pair<std::string, const char*>>& kv)
 {
-    const char* path = dod3_settings_path();
-    std::vector<std::string> lines;
-    bool crlf = false;    /* written back with the line ends it had */
-    if (FILE* f = fopen(path, "rb")) {
-        char buf[1024];
-        while (fgets(buf, sizeof buf, f)) {
-            std::string l(buf);
-            if (l.size() >= 2 && l[l.size() - 2] == '\r') crlf = true;
-            while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
-            lines.push_back(l);
-        }
-        fclose(f);
-    }
-    for (const auto& p : kv) {
-        const std::string& key = p.first;
-        int hit = -1, commented = -1;
-        for (size_t i = 0; i < lines.size(); i++) {
-            const char* s = lines[i].c_str();
-            while (*s == ' ' || *s == '\t') s++;
-            const bool c = *s == '#';
-            if (c) {
-                s++;
-                while (*s == ' ' || *s == '\t') s++;
-            }
-            if (strncmp(s, key.c_str(), key.size())) continue;
-            const char* e = s + key.size();
-            while (*e == ' ' || *e == '\t') e++;
-            if (*e != '=') continue;
-            if (!c) {
-                hit = (int)i;
-                break;
-            }
-            if (commented < 0) commented = (int)i;
-        }
-        const std::string line = p.second ? key + " = " + p.second : "#" + key + " = ";
-        if (hit >= 0) {
-            if (p.second)
-                lines[hit] = line;
-            else
-                lines[hit] = "#" + lines[hit];
-        } else if (p.second) {
-            if (commented >= 0)
-                lines[commented] = line;
-            else
-                lines.push_back(line);
-        }
-    }
-    if (FILE* f = fopen(path, "wb")) {
-        for (const std::string& l : lines) fprintf(f, "%s%s", l.c_str(), crlf ? "\r\n" : "\n");
-        fclose(f);
-        fprintf(stderr, "[settings] saved %s\n", path);
-    } else {
-        fprintf(stderr, "[settings] could not write %s\n", path);
-    }
+    dod3::ini_write(std::filesystem::path(dod3_settings_path()), kv);   /* the narrow path main.cpp opened */
 }
 
 void apply()
@@ -725,3 +702,5 @@ void dod3_settings_menu_install()
     ppu_register_function(THUNK_BRIDGE, hook_bridge);
     set_aspect(getenv("DOD3_ASPECT"));   /* the present's screen shape, before the first movie */
 }
+
+void dod3_setting_rows(std::vector<Dod3RowSpec>& rows) { build_rows(rows); }
