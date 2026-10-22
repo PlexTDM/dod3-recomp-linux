@@ -1638,12 +1638,15 @@ static std::string s_settings_path = "dod3.ini";
 /* The file read at boot, else the one beside the executable: where the
  * Graphics Settings page (src/ui/settings_menu.cpp) saves. */
 const char* dod3_settings_path() { return s_settings_path.c_str(); }
+static std::string s_exe_path;   /* argv[0] */
 
-static void load_settings_file(const char* argv0)
+/* Which file that is, found now: beside the executable, else in the current
+ * directory; with neither, the one beside the executable. */
+static void find_settings_file()
 {
     char path[1024];
-    FILE* f = NULL;
     const char* tried[2] = { NULL, "dod3.ini" };
+    const char* argv0 = s_exe_path.c_str();
     size_t n = strlen(argv0);
     while (n && argv0[n - 1] != '/' && argv0[n - 1] != '\\') n--;
     if (n && n + 9 < sizeof path) {
@@ -1652,9 +1655,28 @@ static void load_settings_file(const char* argv0)
         tried[0] = path;
     }
     const char* used = NULL;
-    for (int i = 0; i < 2 && !f; i++)
-        if (tried[i] && (f = fopen(tried[i], "r")) != NULL) used = tried[i];
+    for (int i = 0; i < 2 && !used; i++)
+        if (tried[i])
+            if (FILE* f = fopen(tried[i], "r")) {
+                fclose(f);
+                used = tried[i];
+            }
     s_settings_path = used ? used : tried[0] ? tried[0] : "dod3.ini";
+}
+
+/* The launcher's (src/ui/launcher.cpp), before the game has read the file:
+ * the one the game will read. */
+const char* dod3_settings_path_now()
+{
+    find_settings_file();
+    return s_settings_path.c_str();
+}
+
+static void load_settings_file(const char* argv0)
+{
+    s_exe_path = argv0;
+    find_settings_file();
+    FILE* f = fopen(s_settings_path.c_str(), "r");
     if (!f) return;
     char line[512];
     int applied = 0;
@@ -1685,7 +1707,7 @@ static void load_settings_file(const char* argv0)
         applied++;
     }
     fclose(f);
-    if (applied) fprintf(stderr, "[settings] %d from %s\n", applied, used);
+    if (applied) fprintf(stderr, "[settings] %d from %s\n", applied, s_settings_path.c_str());
 }
 
 #ifdef _WIN32
@@ -1890,6 +1912,7 @@ int main(int argc, char** argv)
         return dod3setup::install_files_cli(tb && *tb ? std::filesystem::u8path(tb) : base, install_files, keys);
     }
     const bool force_setup = argc >= 2 && !strcmp(argv[1], "--setup");
+    if (argv[0]) s_exe_path = argv[0];
     if (argc < 2 || force_setup) {
 #ifdef _WIN32
         wchar_t dir[MAX_PATH] = L"";

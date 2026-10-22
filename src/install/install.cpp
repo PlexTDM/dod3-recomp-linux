@@ -554,11 +554,57 @@ bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
     return true;
 }
 
+/* A mod's list of its files (game/modfiles/<id>.txt): "patch/<path>" in the
+ * update's PATCH folder, "tree/<path>" in game/mods, with "\t1" after it when
+ * the update's own file there was kept aside (game/modfiles/<id>/orig/<path>).
+ * Switched off (set_mod_enabled), the mod's files are in
+ * game/modfiles/<id>/off/<kind>/<path> and <id>.off says so. */
+struct ModFile {
+    std::string kind;
+    fs::path rel;
+    bool kept = false;
+};
+
+bool mod_files(const fs::path& base, const std::string& id, std::vector<ModFile>* out)
+{
+    FILE* f = dod3::open_file(modfiles_dir(base) / (id + ".txt"), "rb");
+    if (!f) return false;
+    char line[1024];
+    while (fgets(line, sizeof line, f)) {
+        std::string l(line);
+        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+        ModFile m;
+        m.kept = l.size() > 2 && l.compare(l.size() - 2, 2, "\t1") == 0;
+        if (m.kept) l.resize(l.size() - 2);
+        const size_t sl = l.find('/');
+        if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
+        m.kind = l.substr(0, sl);
+        m.rel = fs::u8path(l.substr(sl + 1));
+        if ((m.kind != "patch" && m.kind != "tree") || m.rel.empty() || m.rel.is_absolute()) continue;
+        out->push_back(m);
+    }
+    fclose(f);
+    return true;
+}
+
+fs::path mod_root(const fs::path& base, const std::string& kind)
+{
+    return kind == "patch" ? update_dir(base) / "USRDIR/PATCH" : mods_dir(base);
+}
+
+/* the folders a mod's files were in, removed where it leaves them empty (the deepest first) */
+void remove_empty_dirs(const std::set<fs::path>& dirs)
+{
+    std::error_code ec;
+    for (auto it = dirs.rbegin(); it != dirs.rend(); ++it)
+        if (fs::is_directory(*it, ec) && fs::is_empty(*it, ec)) fs::remove(*it, ec);
+}
+
 /* One mod removed (Plan::remove_ids): the DLC Undub's folder, the voice
  * pack's lists written again; any other by its list -- its files in
- * game/mods and the update's folder deleted, the update's own put back, the
- * folders it leaves empty removed. A mod without a list (mod_removable) is
- * left as it is, with an error. */
+ * game/mods and the update's folder deleted (or, switched off, the ones set
+ * aside), the update's own put back, the folders it leaves empty removed. A
+ * mod without a list (mod_removable) is left as it is, with an error. */
 bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
 {
     std::error_code ec;
@@ -581,37 +627,30 @@ bool remove_mod(const fs::path& base, const std::string& id, std::string* err)
         drop_row();
         return true;
     }
-    const fs::path listf = modfiles_dir(base) / (id + ".txt"), orig = modfiles_dir(base) / id / "orig";
-    FILE* f = dod3::open_file(listf, "rb");
-    if (!f) {
+    const fs::path listf = modfiles_dir(base) / (id + ".txt"), orig = modfiles_dir(base) / id / "orig",
+                   off = modfiles_dir(base) / id / "off";
+    std::vector<ModFile> list;
+    if (!mod_files(base, id, &list)) {
         *err = "the files of " + id + " were not listed when it was installed: add the update package and remove "
                "all the mods";
         return false;
     }
-    const fs::path patch = update_dir(base) / "USRDIR/PATCH";
     std::set<fs::path> dirs;
-    char line[1024];
-    while (fgets(line, sizeof line, f)) {
-        std::string l(line);
-        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
-        const bool kept = l.size() > 2 && l.compare(l.size() - 2, 2, "\t1") == 0;
-        if (kept) l.resize(l.size() - 2);
-        const size_t sl = l.find('/');
-        if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
-        const std::string kind = l.substr(0, sl);
-        const fs::path rel = fs::u8path(l.substr(sl + 1));
-        const fs::path root = kind == "patch" ? patch : kind == "tree" ? mods_dir(base) : fs::path();
-        if (root.empty() || rel.empty() || rel.is_absolute()) continue;
-        fs::remove(root / rel, ec);
-        if (kept) move_patiently(orig / rel, root / rel, ec);
+    for (const ModFile& m : list) {
+        const fs::path root = mod_root(base, m.kind), live = root / m.rel;
+        if (fs::exists(off / m.kind / m.rel, ec)) {   /* switched off: the update's own is back already */
+            if (m.kept && !fs::exists(live, ec)) move_patiently(orig / m.rel, live, ec);
+        } else {
+            fs::remove(live, ec);
+            if (m.kept) move_patiently(orig / m.rel, live, ec);
+        }
         ec.clear();
-        for (fs::path d = rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
+        for (fs::path d = m.rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
     }
-    fclose(f);
-    for (auto it = dirs.rbegin(); it != dirs.rend(); ++it)   /* the deepest first */
-        if (fs::is_directory(*it, ec) && fs::is_empty(*it, ec)) fs::remove(*it, ec);
+    remove_empty_dirs(dirs);
     fs::remove_all(modfiles_dir(base) / id, ec);
     fs::remove(listf, ec);
+    fs::remove(modfiles_dir(base) / (id + ".off"), ec);
     drop_row();
     return true;
 }
@@ -747,6 +786,68 @@ bool mod_removable(const fs::path& base, const std::string& id)
     return id == "UNDUB" || fs::exists(modfiles_dir(base) / (id + ".txt"), ec);
 }
 
+bool mod_switchable(const fs::path& base, const std::string& id)
+{
+    std::error_code ec;
+    return id != "UNDUB" && fs::exists(modfiles_dir(base) / (id + ".txt"), ec);
+}
+
+bool mod_enabled(const fs::path& base, const std::string& id)
+{
+    std::error_code ec;
+    return !fs::exists(modfiles_dir(base) / (id + ".off"), ec);
+}
+
+/* File by file, each step done only if it is still to do, so a switch cut
+ * short is finished by doing it again. */
+bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::string* err)
+{
+    std::error_code ec;
+    std::vector<ModFile> list;
+    if (!mod_switchable(base, id) || !mod_files(base, id, &list)) {
+        *err = "this mod was installed without a list of its files; install it again to switch it on and off";
+        return false;
+    }
+    const fs::path orig = modfiles_dir(base) / id / "orig", off = modfiles_dir(base) / id / "off",
+                   mark = modfiles_dir(base) / (id + ".off");
+    auto move = [&](const fs::path& from, const fs::path& to) {
+        fs::create_directories(to.parent_path(), ec);
+        ec.clear();
+        move_patiently(from, to, ec);
+        if (!ec) return true;
+        *err = "could not move " + utf8(from) + " to " + utf8(to) + ": " + ec.message();
+        return false;
+    };
+    std::set<fs::path> dirs;
+    for (const ModFile& m : list) {
+        const fs::path root = mod_root(base, m.kind), live = root / m.rel, aside = off / m.kind / m.rel,
+                       own = orig / m.rel;
+        if (!on) {
+            if (fs::exists(live, ec) && !fs::exists(aside, ec) && !move(live, aside)) return false;
+            if (m.kept && !fs::exists(live, ec) && fs::exists(own, ec) && !move(own, live)) return false;
+            for (fs::path d = m.rel.parent_path(); !d.empty(); d = d.parent_path()) dirs.insert(root / d);
+        } else if (fs::exists(aside, ec)) {
+            if (m.kept && fs::exists(live, ec) && !fs::exists(own, ec) && !move(live, own)) return false;
+            if (!fs::exists(live, ec) && !move(aside, live)) return false;
+        }
+    }
+    if (!on) {
+        remove_empty_dirs(dirs);
+        if (FILE* f = dod3::open_file(mark, "wb")) {
+            fputs("switched off: the files are in off/\n", f);
+            fclose(f);
+        } else {
+            *err = "could not write " + utf8(mark);
+            return false;
+        }
+    } else {
+        fs::remove_all(off, ec);
+        fs::remove(modfiles_dir(base) / id, ec);   /* when nothing was kept aside, the folder is empty */
+        fs::remove(mark, ec);
+    }
+    return true;
+}
+
 const std::vector<DlcInfo>& known_mods()
 {
     static const std::vector<DlcInfo> k = {
@@ -873,6 +974,29 @@ bool gamedata_layout(const fs::path& root)
         if (!links) fs::remove_all(data, ec);
     }
     return ok;
+}
+
+bool key_art(const Source& game, std::vector<uint8_t>* png)
+{
+    std::string err;
+    if (game.psn) {
+        Pkg pkg;
+        return pkg_open(game.path, &pkg, &err) && pkg_read_file(pkg, "PIC1.PNG", png, &err);
+    }
+    std::error_code ec;
+    if (fs::is_directory(game.path, ec)) {   /* a folder: the file itself (open_disc would list the disc) */
+        const fs::path p = game.path / "PS3_GAME/PIC1.PNG";
+        const uint64_t n = fs::file_size(p, ec);
+        if (ec || n == 0 || n > (64u << 20)) return false;
+        png->resize((size_t)n);
+        FILE* f = dod3::open_file(p, "rb");
+        if (!f) return false;
+        const bool ok = fread(png->data(), 1, png->size(), f) == png->size();
+        fclose(f);
+        return ok;
+    }
+    Disc disc;
+    return open_disc(game.path, &disc, &err) && read_disc_file(disc, "PS3_GAME/PIC1.PNG", png);
 }
 
 bool identify(const fs::path& p, Source* s, std::string* err)
@@ -1250,6 +1374,7 @@ bool install(const fs::path& base, const Plan& plan,
                                       [&](const auto& r) {
                                           if (r[1].find("patch") == std::string::npos) return false;
                                           fs::remove(modfiles_dir(base) / (r[0] + ".txt"), ec);
+                                          fs::remove(modfiles_dir(base) / (r[0] + ".off"), ec);
                                           fs::remove_all(modfiles_dir(base) / r[0], ec);
                                           return true;
                                       }),

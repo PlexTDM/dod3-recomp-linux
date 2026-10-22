@@ -88,7 +88,8 @@ art (from your copy of the game):
 
 - Play (Enter, or the pad's confirm button, starts it straight away)
 - Mods: the Spanish translation and the DLC Undub, what of them is
-  installed, Remove, and Add Files / Add Folder for more (see Mods below)
+  installed, a switch to turn one off and on again, Remove, and Add Files /
+  Add Folder for more (see Mods below)
 - DLC: which of the 20 packs are installed, and Add DLC Packages
 - Settings: the display, graphics, controls (the keyboard's keys too) and
   system settings, saved to dod3.ini as you change them
@@ -261,11 +262,17 @@ Other mods made as homebrew packages for this release, laid out as the
 console installs them (in the update's folder, the game-data folder, or
 the DLC's), are taken too and listed by their file names.
 
+To play without a mod for a while -- the game in English again, say --
+turn the switch on its card in the launcher's Mods page to Off: its files
+are set aside and the update's own put back, at once, and the game starts
+without it. On puts it back, again at once. The DLC Undub has no switch:
+Change Outfits/Music > Voice turns it on and off inside the game.
+
 To take a mod out: Remove on its card in the launcher's Mods page. The
 update's own files that a mod replaced are kept aside while it is
 installed and put back. (A mod installed by an older version of the setup
 has no such list: removing it asks for the update package, which puts the
-update's files back, and takes out all the mods.)
+update's files back, and takes out all the mods; it has no switch either.)
 
 A mod copied into the update's folder by hand
 (game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe) is played as it

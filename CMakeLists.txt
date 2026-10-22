@@ -273,6 +273,7 @@ if(WIN32)
     list(APPEND SETUP_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_win.cpp"
         ${IMGUI_SOURCES})
@@ -285,6 +286,7 @@ elseif(APPLE)
     list(APPEND SETUP_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
         ${IMGUI_SOURCES})
@@ -313,12 +315,12 @@ set_property(SOURCE ${SETUP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGU
 # third-party code: its warnings are not ours to act on
 set_property(SOURCE ${IMGUI_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "-w")
 if(WIN32 OR APPLE)
-    # the launcher's PNG decoder: stb_image, the copy in the runtime's codec
+    # the key art's PNG decoder: stb_image, the copy in the runtime's codec
     # library, compiled privately (src/ui/png.cpp)
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY
                  INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/libs/codec")
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY COMPILE_OPTIONS "-w")
-    # the launcher's typeface, Inter 4.1 (SIL Open Font License 1.1,
+    # the launcher's and the installer's typeface, Inter 4.1 (SIL Open Font License 1.1,
     # third_party/fonts/inter), as arrays in gen/launcher_fonts.h
     set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
     foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)

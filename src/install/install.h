@@ -100,6 +100,11 @@ bool update_required();
  * ELF reads it (a hash); a package is checked again as it is installed. */
 bool identify(const fs::path& p, Source* s, std::string* err);
 
+/* The game's key art (PS3_GAME/PIC1.PNG) from the game's source -- the disc
+ * image, the folder holding PS3_GAME, or the PSN package -- for the setup to
+ * show. False if it has none. */
+bool key_art(const Source& game, std::vector<uint8_t>* png);
+
 /* What is installed under `base`. */
 struct Status {
     bool disc = false, update = false, eboot = false;
@@ -140,6 +145,16 @@ bool mods_need_update(const fs::path& base);
 /* Can the mod `id` be removed by itself: its files are listed, or it is the
  * DLC Undub. */
 bool mod_removable(const fs::path& base, const std::string& id);
+
+/* A mod with such a list (not the DLC Undub, which follows the game's Voice
+ * option) switched off and on again, the update package not needed: off,
+ * its files are set aside (game/modfiles/<id>/off) and the update's own files
+ * it replaced put back; on, the other way. The game sees it at its next
+ * start. False with `err` if a file could not be moved: doing it again
+ * finishes the switch. */
+bool mod_switchable(const fs::path& base, const std::string& id);
+bool mod_enabled(const fs::path& base, const std::string& id);
+bool set_mod_enabled(const fs::path& base, const std::string& id, bool on, std::string* err);
 
 /* The encrypted executable: from the plan's update (1.01) or disc (1.00) if
  * set, else from the install. */

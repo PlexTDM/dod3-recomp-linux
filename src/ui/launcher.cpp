@@ -5,25 +5,27 @@
  * Settings, Quit -- and each section opens as a panel over the art:
  *
  *   Mods      the fan-made additions the setup knows (the Spanish translation,
- *             the DLC Undub) and any other installed: what is in, Remove, and
- *             Add Files / Add Folder for more (install/install.h does the work)
+ *             the DLC Undub) and any other installed: what is in, a switch to
+ *             turn one off and on again (not the undub: it follows the game's
+ *             Voice option), Remove, and Add Files / Add Folder for more
+ *             (install/install.h does the work)
  *   DLC       the 20 packs, which are in, and Add DLC Packages
  *   Settings  dod3.ini: the in-game Settings pages' rows (src/ui/settings_menu.cpp,
  *             one list for both), a few that are only in the file (window size,
  *             mouse camera, camera speed, this launcher) and the keyboard's keys.
  *             A change is saved at once, the file's comments kept (ui/ini.h).
  *
- * Everything is drawn in units of the window's height (720 = 1), so the page
- * is the same at any size and on a Retina display; the type is Inter 4.1,
- * built in (third_party/fonts/inter). Keyboard, mouse and controller all work
- * (the backends feed ImGui's navigation).
+ * The look -- Inter, the colours, the art, the widgets -- is the installer's
+ * too (ui/look.h). Keyboard, mouse and controller all work (the backends feed
+ * ImGui's navigation).
  *
  * Tests: DOD3_LAUNCHER_OPEN=mods|dlc|settings[:<tab>] opens a panel at start,
  * DOD3_LAUNCHER_ADD='<file>|<file>' adds files as Add Files would, and
  * DOD3_SETUP_GRAB=<prefix> saves the window as <prefix>_0.ppm once it has
  * settled (the platform's grab); DOD3_LAUNCHER_AUTO=quit then closes it,
  * =install presses Install (or Remove) and closes it when that is done.
- * DOD3_LAUNCHER_REMOVE=spanish|undub starts removing one; DOD3_LAUNCHER_KEYS=
+ * DOD3_LAUNCHER_REMOVE=spanish|undub starts removing one; DOD3_LAUNCHER_SWITCH=
+ * spanish:off|spanish:on switches the translation at start; DOD3_LAUNCHER_KEYS=
  * 'Down,Down,Space,...' presses those keys, one every 12 frames (a key a
  * player presses, as ImGui gets it from the platform). */
 #include "ui/ui.h"
@@ -31,12 +33,10 @@
 #include "install/install.h"
 #include "patches/sysset.h"   /* Dod3RowSpec, dod3_setting_rows */
 #include "util.h"
+#include "ui/look.h"         /* the type, the colours, the art, the widgets */
 #include "app_version.h"      /* generated: the port's version label */
-#include "launcher_fonts.h"   /* generated: kFont_* */
 
-#define IMGUI_DEFINE_MATH_OPERATORS
-#include "imgui.h"
-#include "imgui_internal.h"   /* RegisterUserTexture */
+#include "imgui_internal.h"   /* SetKeyOwner */
 
 #include <algorithm>
 #include <atomic>
@@ -50,59 +50,14 @@
 #include <mutex>
 #include <thread>
 
-namespace dod3setup {
+const char* dod3_settings_path_now();   /* main.cpp: the dod3.ini the game will read */
 
-bool png_rgba(const std::vector<uint8_t>& file, std::vector<uint8_t>* rgba, int* w, int* h);   /* ui/png.cpp */
+namespace dod3setup {
 
 namespace {
 
 using dod3::utf8;
-
-/* ---- look ------------------------------------------------------------------ */
-
-const ImU32 kAccent = IM_COL32(196, 30, 45, 255);
-const ImU32 kAccentHi = IM_COL32(222, 50, 64, 255);
-const ImU32 kText = IM_COL32(242, 240, 236, 255);
-const ImU32 kDim = IM_COL32(170, 166, 172, 255);
-const ImU32 kFaint = IM_COL32(118, 116, 124, 255);
-const ImU32 kOk = IM_COL32(104, 200, 128, 255);
-const ImU32 kWarn = IM_COL32(236, 176, 78, 255);
-const ImU32 kErr = IM_COL32(236, 92, 96, 255);
-const ImU32 kPanel = IM_COL32(13, 13, 17, 232);
-const ImU32 kCard = IM_COL32(255, 255, 255, 9);
-const ImU32 kLine = IM_COL32(255, 255, 255, 20);
-
-ImU32 alpha(ImU32 c, float a)
-{
-    const int na = (int)(((c >> IM_COL32_A_SHIFT) & 0xFF) * std::clamp(a, 0.0f, 1.0f));
-    return (c & ~IM_COL32_A_MASK) | ((ImU32)na << IM_COL32_A_SHIFT);
-}
-
-ImU32 mix(ImU32 a, ImU32 b, float t)
-{
-    const ImVec4 x = ImGui::ColorConvertU32ToFloat4(a), y = ImGui::ColorConvertU32ToFloat4(b);
-    return ImGui::ColorConvertFloat4ToU32(ImLerp(x, y, std::clamp(t, 0.0f, 1.0f)));
-}
-
-float ease_out(float t)
-{
-    t = std::clamp(t, 0.0f, 1.0f);
-    return 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
-}
-
-std::string gb(uint64_t b)
-{
-    char s[32];
-    if (b >= (1ull << 30))
-        snprintf(s, sizeof s, "%.1f GB", b / 1073741824.0);
-    else
-        snprintf(s, sizeof s, "%.0f MB", b / 1048576.0 + 0.5);
-    return s;
-}
-
-struct Fonts {
-    ImFont *regular = nullptr, *medium = nullptr, *semibold = nullptr, *display = nullptr;
-};
+using namespace look;
 
 /* ---- the settings ------------------------------------------------------------ */
 
@@ -261,61 +216,24 @@ const char* key_name(ImGuiKey k)
     }
 }
 
-/* ---- the mods the launcher knows ------------------------------------------------ */
-
-struct ModPart {
-    const char* id;
-    const char* name;
-    const char* needs;   /* what it is for, if not the base game */
-};
-struct ModGroup {
-    const char* title;
-    const char* by;
-    const char* about;
-    std::vector<ModPart> parts;
-};
-const ModGroup kSpanish = { "Spanish Translation",
-                            "Traducciones Vacuno \xC2\xB7 TraduSquare v1.1",
-                            "The whole game in Spanish: text, menus, the title screen and subtitled movies. "
-                            "Add the US release's downloads as they are: the two .pkg files and MOVIES.zip, "
-                            "and the DLC and voice packages if you have those.",
-                            { { "ES-GAME", "Story and mission text", nullptr },
-                              { "ES-DATA", "Title screen and menus", nullptr },
-                              { "ES-MOVIES", "Movies", nullptr },
-                              { "ES-DLC", "DLC chapters", "with the DLC" },
-                              { "ES-JPV", "Japanese voices' movies", "with the Japanese Voice Pack" } } };
-const ModGroup kUndub = { "DLC Undub",
-                          "Canzah and Slow \xC2\xB7 prototype 0.707",
-                          "Japanese voices for the six DLC chapters, retimed to match. Follows the game's own "
-                          "Voice setting (Change Outfits/Music > Voice). Add its folder, the one holding GAME "
-                          "and ISO, with Add Folder.",
-                          { { "UNDUB", "Japanese voices for the DLC chapters", nullptr } } };
-
 /* ---- the launcher -------------------------------------------------------------- */
 
 enum class Panel { None, Mods, Dlc, Settings };
 
-struct Launcher {
+struct Launcher : Kit {
     fs::path base, ini;
-    Fonts F;
     Status have;
     std::map<std::string, std::string> kv;   /* dod3.ini */
     std::vector<Dod3RowSpec> rows;
     ImTextureData* art = nullptr;
 
-    float s = 1.0f, W = 0, H = 0, dt = 0;
-    double now = 0;
-    std::map<ImGuiID, float> anim;
     Panel panel = Panel::None;
     double panel_at = -10;
     bool focus_panel = false;          /* the keyboard or a pad opened it: focus its first item */
     Panel refocus = Panel::None;       /* closed by them: focus its menu entry */
     int tab = kDisplay;
     int capture = -1, capture_frames = 0;   /* a key binding being set */
-    int cooldown = 0;                       /* frames during which Esc and activations are ignored */
-    std::string toast;
-    double toast_at = -10;
-    int frames = 0, grabbed = -1;
+    int grabbed = -1;
     std::string grab;
     bool auto_quit = false, auto_install = false;
     std::vector<ImGuiKey> test_keys;   /* DOD3_LAUNCHER_KEYS */
@@ -332,6 +250,7 @@ struct Launcher {
     Plan plan;
     std::vector<std::string> notes, removing;
     bool remove_legacy = false;   /* a mod an older setup installed: removing it takes the update */
+    std::map<std::string, bool> mod_on, mod_sw;   /* each installed mod: switched on; can be switched */
     std::thread worker;
     std::atomic<bool> cancel{ false }, finished{ false };
     std::atomic<uint64_t> done{ 0 }, total{ 1 };
@@ -339,125 +258,11 @@ struct Launcher {
     std::string what, error;
     bool ok = false;
 
-    float px(float design) const { return design * s; }
-    /* an item the mouse, the keyboard and a pad all reach: ImGui leaves an
-     * invisible button out of its navigation unless asked */
-    static bool hit(const char* id, const ImVec2& size)
-    {
-        return ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav);
-    }
-    /* the last item under the mouse, or focused while the keyboard or a pad is in use */
-    static bool hot_item() { return ImGui::IsItemHovered() || (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible); }
-
-    float& anim_of(ImGuiID id) { return anim[id]; }
     void take_focus()
     {
         if (!focus_panel) return;
         ImGui::SetKeyboardFocusHere();
         focus_panel = false;
-    }
-    void approach(float& v, float target, float speed = 14.0f)
-    {
-        v += (target - v) * (1.0f - std::exp(-speed * dt));
-    }
-
-    /* ---- text ---- */
-
-    ImVec2 text_size(ImFont* f, float size, const char* t, float wrap = 0.0f) const
-    {
-        return f->CalcTextSizeA(px(size), FLT_MAX, wrap, t);
-    }
-    /* letter-spaced, for the title (ASCII) */
-    float tracked_width(ImFont* f, float size, const char* t, float track) const
-    {
-        float w = 0;
-        for (const char* c = t; *c; c++) w += f->CalcTextSizeA(px(size), FLT_MAX, 0, c, c + 1).x + (c[1] ? px(track) : 0);
-        return w;
-    }
-    void tracked(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const char* t, float track)
-    {
-        for (const char* c = t; *c; c++) {
-            dl->AddText(f, px(size), p, col, c, c + 1);
-            p.x += f->CalcTextSizeA(px(size), FLT_MAX, 0, c, c + 1).x + px(track);
-        }
-    }
-    /* ImGui text in a font and size, wrapped to the region */
-    float wrap_right = 0;   /* inside a card: its padding's edge (screen x) */
-    void para(ImFont* f, float size, ImU32 col, const char* t)
-    {
-        ImGui::PushFont(f, size);
-        ImGui::PushStyleColor(ImGuiCol_Text, col);
-        ImGui::PushTextWrapPos(wrap_right > 0 ? wrap_right - ImGui::GetWindowPos().x : 0.0f);
-        ImGui::TextUnformatted(t);
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
-    }
-
-    void say(const std::string& t)
-    {
-        toast = t;
-        toast_at = now;
-    }
-
-    /* ---- widgets ---- */
-
-    /* 0 a quiet button, 1 the accent, 2 a red outline */
-    bool button(const char* label, float w, int kind = 0, bool enabled = true)
-    {
-        ImGui::PushID(label);
-        const float h = px(40);
-        const ImVec2 ts = text_size(F.semibold, 15, label);
-        const ImVec2 sz(w > 0 ? px(w) : ts.x + px(36), h);
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::BeginDisabled(!enabled);
-        const bool pressed = hit("##b", sz) && cooldown == 0;
-        const bool hot = hot_item();
-        const bool held = ImGui::IsItemActive();
-        ImGui::EndDisabled();
-        float& a = anim_of(ImGui::GetItemID());
-        approach(a, hot && enabled ? 1.0f : 0.0f);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float k = enabled ? 1.0f : 0.4f;
-        ImU32 bg, fg = alpha(kText, k);
-        if (kind == 1)
-            bg = alpha(mix(kAccent, kAccentHi, a + (held ? 0.4f : 0.0f)), k);
-        else if (kind == 2)
-            bg = alpha(kErr, 0.10f + 0.18f * a);
-        else
-            bg = IM_COL32(255, 255, 255, (int)((14 + 18 * a + (held ? 10 : 0)) * k));
-        dl->AddRectFilled(p, p + sz, bg, px(10));
-        if (kind == 2) {
-            dl->AddRect(p, p + sz, alpha(kErr, 0.55f + 0.45f * a), px(10), 0, px(1.2f));
-            fg = alpha(mix(kErr, kText, a), k);
-        }
-        dl->AddText(F.semibold, px(15), ImVec2(p.x + (sz.x - ts.x) / 2, p.y + (sz.y - ts.y) / 2), fg, label);
-        ImGui::PopID();
-        return pressed && enabled;
-    }
-
-    /* a light: filled when on */
-    void dot(ImDrawList* dl, ImVec2 c, ImU32 col, bool filled)
-    {
-        if (filled)
-            dl->AddCircleFilled(c, px(4.5f), col);
-        else
-            dl->AddCircle(c, px(4.5f), col, 0, px(1.4f));
-    }
-
-    void tick(ImDrawList* dl, ImVec2 c, ImU32 col)
-    {
-        const float r = px(5.5f);
-        const ImVec2 pts[3] = { ImVec2(c.x - r, c.y), ImVec2(c.x - r * 0.3f, c.y + r * 0.7f), ImVec2(c.x + r, c.y - r * 0.8f) };
-        dl->AddPolyline(pts, 3, col, 0, px(2.0f));
-    }
-
-    void pill(ImDrawList* dl, ImVec2 right_top, const char* t, ImU32 col)
-    {
-        const ImVec2 ts = text_size(F.semibold, 12, t);
-        const ImVec2 p0(right_top.x - ts.x - px(22), right_top.y), p1(right_top.x, right_top.y + ts.y + px(8));
-        dl->AddRectFilled(p0, p1, alpha(col, 0.16f), px(20));
-        dl->AddText(F.semibold, px(12), ImVec2(p0.x + px(11), p0.y + px(4)), col, t);
     }
 
     /* ---- the install, on its own thread ---- */
@@ -578,6 +383,31 @@ struct Launcher {
         flow = Flow::Working;
     }
 
+    void refresh_mods()
+    {
+        mod_on.clear();
+        mod_sw.clear();
+        for (const auto& m : have.mods) {
+            mod_on[m.first] = mod_enabled(base, m.first);
+            mod_sw[m.first] = mod_switchable(base, m.first);
+        }
+    }
+    bool is_on(const std::string& id) const
+    {
+        const auto it = mod_on.find(id);
+        return it == mod_on.end() || it->second;
+    }
+
+    /* a mod's installed parts switched off or on: their files moved (no install) */
+    void switch_mod(const std::vector<std::string>& ids, const std::string& name, bool on)
+    {
+        std::string err;
+        bool moved = true;
+        for (const std::string& id : ids) moved = moved && set_mod_enabled(base, id, on, &err);
+        refresh_mods();
+        say(moved ? name + (on ? " on" : " off") : err);
+    }
+
     void end_flow()
     {
         flow = Flow::Idle;
@@ -591,57 +421,26 @@ struct Launcher {
 
     void background()
     {
-        ImDrawList* dl = ImGui::GetBackgroundDrawList();
-        dl->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), IM_COL32(9, 9, 11, 255));
-        if (art) {
-            /* cover the window, drifting slowly */
-            const float aw = (float)art->Width, ah = (float)art->Height;
-            const float k = std::max(W / aw, H / ah) * (1.05f + 0.02f * (float)std::sin(now * 0.05));
-            const float dw = aw * k, dh = ah * k;
-            const float ox = (W - dw) / 2 + (float)std::sin(now * 0.031) * px(10), oy = (H - dh) / 2;
-            dl->AddImage(art->GetTexRef(), ImVec2(ox, oy), ImVec2(ox + dw, oy + dh));
-        } else {
-            dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), IM_COL32(28, 10, 14, 255), IM_COL32(12, 10, 12, 255),
-                                        IM_COL32(9, 9, 11, 255), IM_COL32(16, 9, 11, 255));
-        }
-        /* the left darkened for the menu, the bottom for the footer */
-        const ImU32 a = IM_COL32(8, 8, 10, 236), z = IM_COL32(8, 8, 10, 0);
-        dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W * 0.62f, H), a, z, z, a);
-        dl->AddRectFilledMultiColor(ImVec2(0, H * 0.62f), ImVec2(W, H), z, z, IM_COL32(8, 8, 10, 210),
-                                    IM_COL32(8, 8, 10, 210));
-        dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H * 0.18f), IM_COL32(8, 8, 10, 120),
-                                    IM_COL32(8, 8, 10, 120), z, z);
         const float open = panel == Panel::None ? 0.0f : ease_out((float)(now - panel_at) / 0.25f);
-        if (open > 0) dl->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), IM_COL32(6, 6, 8, (int)(110 * open)));
-    }
-
-    void title()
-    {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImVec2 p(px(72), px(70));
-        tracked(dl, F.display, 50, p, kText, "DRAKENGARD", 2.5f);
-        const float w = tracked_width(F.display, 50, "DRAKENGARD", 2.5f);
-        tracked(dl, F.display, 50, ImVec2(p.x + w + px(16), p.y), kAccentHi, "3", 0);
-        const float y = p.y + px(66);
-        dl->AddRectFilled(ImVec2(p.x, y + px(7)), ImVec2(p.x + px(34), y + px(9)), kAccent);
-        tracked(dl, F.semibold, 13, ImVec2(p.x + px(48), y), kDim, "RECOMPILED", 4.0f);
+        backdrop(art, 1.0f, open);
     }
 
     std::string mods_summary() const
     {
-        bool es = false, undub = false;
+        bool es = false, es_on = false, undub = false;
         size_t other = 0;
         for (const auto& m : have.mods) {
-            if (m.first.rfind("ES-", 0) == 0)
+            if (m.first.rfind("ES-", 0) == 0) {
                 es = true;
-            else if (m.first == "UNDUB")
+                es_on |= is_on(m.first);
+            } else if (m.first == "UNDUB")
                 undub = true;
             else
                 other++;
         }
         std::string t;
         auto add = [&](const std::string& x) { t += (t.empty() ? "" : " \xC2\xB7 ") + x; };
-        if (es) add("Spanish translation");
+        if (es) add(es_on ? "Spanish translation" : "Spanish translation (off)");
         if (undub) add("DLC Undub");
         if (other) add(std::to_string(other) + (other == 1 ? " other" : " others"));
         return t.empty() ? "None installed" : t;
@@ -766,85 +565,40 @@ struct Launcher {
         return pressed && cooldown == 0 && !busy ? 2 : -1;
     }
 
-    void toast_draw()
-    {
-        const float t = (float)(now - toast_at);
-        if (toast.empty() || t > 2.2f) return;
-        const float a = std::min(1.0f, t / 0.15f) * std::min(1.0f, (2.2f - t) / 0.4f);
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        const ImVec2 ts = text_size(F.semibold, 14, toast.c_str());
-        const ImVec2 c(W / 2, H - px(40) - px(6) * (1 - a));
-        const ImVec2 p0(c.x - ts.x / 2 - px(18), c.y - ts.y / 2 - px(9)), p1(c.x + ts.x / 2 + px(18), c.y + ts.y / 2 + px(9));
-        dl->AddRectFilled(p0, p1, IM_COL32(24, 24, 30, (int)(240 * a)), px(30));
-        dl->AddRect(p0, p1, IM_COL32(255, 255, 255, (int)(26 * a)), px(30));
-        dl->AddText(F.semibold, px(14), ImVec2(p0.x + px(18), p0.y + px(9)), alpha(kText, a), toast.c_str());
-    }
-
     /* ---- the panels ---- */
 
-    /* the panel's frame and header; returns the content's top-left and size */
-    bool panel_frame(const char* heading, const char* sub, ImVec2* body, ImVec2* body_size)
+    /* the switch at a card's top right, for the mod's installed parts `ids`;
+     * false if they cannot be switched (the undub, or installed without a list) */
+    bool card_switch(const std::vector<std::string>& ids, const std::string& name, float right, float y)
     {
-        const float e = ease_out((float)(now - panel_at) / 0.25f);
-        const float x0 = W * 0.385f + px(36) * (1 - e), x1 = W - px(56) + px(36) * (1 - e);
-        const float y0 = px(56), y1 = H - px(56);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(ImVec2(x0 + px(2), y0 + px(10)), ImVec2(x1 + px(2), y1 + px(14)), IM_COL32(0, 0, 0, (int)(90 * e)),
-                          px(20));
-        dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), alpha(kPanel, e), px(18));
-        dl->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), alpha(kLine, e), px(18));
-        dl->AddText(F.display, px(30), ImVec2(x0 + px(36), y0 + px(28)), alpha(kText, e), heading);
-        if (sub) dl->AddText(F.regular, px(14), ImVec2(x0 + px(36), y0 + px(68)), alpha(kDim, e), sub);
-        /* close */
-        const float cs = px(34);
-        const ImVec2 cp(x1 - px(24) - cs, y0 + px(26));
-        ImGui::SetCursorScreenPos(cp);
-        bool close = hit("##close", ImVec2(cs, cs)) && cooldown == 0;
-        float& a = anim_of(ImGui::GetItemID());
-        approach(a, hot_item() ? 1.0f : 0.0f);
-        dl->AddCircleFilled(cp + ImVec2(cs / 2, cs / 2), cs / 2, IM_COL32(255, 255, 255, (int)(10 + 22 * a)));
-        const float r = px(6);
-        const ImVec2 c = cp + ImVec2(cs / 2, cs / 2);
-        dl->AddLine(c - ImVec2(r, r), c + ImVec2(r, r), alpha(kText, 0.6f + 0.4f * a), px(1.6f));
-        dl->AddLine(c + ImVec2(-r, r), c + ImVec2(r, -r), alpha(kText, 0.6f + 0.4f * a), px(1.6f));
-        *body = ImVec2(x0 + px(36), y0 + (sub ? px(104) : px(84)));
-        *body_size = ImVec2(x1 - x0 - px(72), y1 - body->y - px(28));
-        return close;
-    }
-
-    /* a card around what is drawn between card_begin and card_end */
-    float card_x0 = 0, card_x1 = 0;
-    void card_begin()
-    {
-        card_x0 = ImGui::GetCursorScreenPos().x;
-        card_x1 = card_x0 + ImGui::GetContentRegionAvail().x - px(4);
-        wrap_right = card_x1 - px(18);
-        ImGui::GetWindowDrawList()->ChannelsSplit(2);
-        ImGui::GetWindowDrawList()->ChannelsSetCurrent(1);
-        ImGui::BeginGroup();
-        ImGui::Dummy(ImVec2(0, px(14)));
-        ImGui::Indent(px(18));
-    }
-    void card_end()
-    {
-        ImGui::Unindent(px(18));
-        ImGui::Dummy(ImVec2(0, px(10)));
-        ImGui::EndGroup();
-        wrap_right = 0;
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImVec2 a(card_x0, ImGui::GetItemRectMin().y), b(card_x1, ImGui::GetItemRectMax().y);
-        dl->ChannelsSetCurrent(0);
-        dl->AddRectFilled(a, b, kCard, px(14));
-        dl->AddRect(a, b, IM_COL32(255, 255, 255, 14), px(14));
-        dl->ChannelsMerge();
-        ImGui::Dummy(ImVec2(0, px(12)));
+        bool can = !ids.empty(), on = true;
+        for (const std::string& id : ids) {
+            can = can && mod_sw[id];
+            on = on && is_on(id);
+        }
+        if (!can) return false;
+        const ImVec2 back = ImGui::GetCursorScreenPos(), ts = toggle_size();
+        ImGui::SetCursorScreenPos(ImVec2(right - ts.x, y));
+        ImGui::PushID(name.c_str());
+        if (toggle("##on", on)) switch_mod(ids, name, !on);
+        ImGui::PopID();
+        const char* t = on ? "On" : "Off";
+        const ImVec2 ls = text_size(F.semibold, 13, t);
+        ImGui::GetWindowDrawList()->AddText(F.semibold, px(13), ImVec2(right - ts.x - px(10) - ls.x, y + (ts.y - ls.y) / 2),
+                                            on ? kText : kDim, t);
+        ImGui::SetCursorScreenPos(back);
+        return true;
     }
 
     void mod_card(const ModGroup& g)
     {
-        int in = 0;
+        std::vector<std::string> ids;   /* the parts installed */
         for (const ModPart& p : g.parts)
-            for (const auto& m : have.mods) in += m.first == p.id;
+            for (const auto& m : have.mods)
+                if (m.first == p.id) ids.push_back(p.id);
+        const int in = (int)ids.size();
+        bool enabled = true;
+        for (const std::string& id : ids) enabled = enabled && is_on(id);
         card_begin();
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const float right = card_x1 - px(18);
@@ -852,15 +606,21 @@ struct Launcher {
         ImGui::TextUnformatted(g.title);
         ImGui::PopFont();
         const ImVec2 tp = ImGui::GetItemRectMin();
-        if (in == (int)g.parts.size())
-            pill(dl, ImVec2(right, tp.y + px(2)), "Installed", kOk);
-        else if (in > 0)
-            pill(dl, ImVec2(right, tp.y + px(2)), "Partly installed", kWarn);
-        else
-            pill(dl, ImVec2(right, tp.y + px(2)), "Not installed", kFaint);
+        if (!(in > 0 && card_switch(ids, g.title, right, tp.y - px(1)))) {
+            if (in == (int)g.parts.size())
+                pill(dl, ImVec2(right, tp.y + px(2)), "Installed", kOk);
+            else if (in > 0)
+                pill(dl, ImVec2(right, tp.y + px(2)), "Partly installed", kWarn);
+            else
+                pill(dl, ImVec2(right, tp.y + px(2)), "Not installed", kFaint);
+        }
         para(F.medium, 13, kDim, g.by);
         ImGui::Dummy(ImVec2(0, px(4)));
         para(F.regular, 14, alpha(kText, 0.82f), g.about);
+        if (in > 0 && !enabled) {
+            ImGui::Dummy(ImVec2(0, px(4)));
+            para(F.medium, 13, kWarn, "Switched off: the game starts without it. Its files are kept, to switch it on again.");
+        }
         if (g.parts.size() > 1 || in < (int)g.parts.size()) {
             ImGui::Dummy(ImVec2(0, px(4)));
             for (const ModPart& p : g.parts) {
@@ -870,11 +630,11 @@ struct Launcher {
                 ImGui::PushFont(F.regular, 14);
                 const float lh = ImGui::GetTextLineHeight();
                 if (on)
-                    tick(dl, ImVec2(c.x + px(6), c.y + lh / 2), kOk);
+                    tick(dl, ImVec2(c.x + px(6), c.y + lh / 2), enabled ? kOk : kFaint);
                 else
                     dot(dl, ImVec2(c.x + px(6), c.y + lh / 2), kFaint, false);
                 ImGui::SetCursorScreenPos(ImVec2(c.x + px(22), c.y));
-                ImGui::PushStyleColor(ImGuiCol_Text, on ? kText : kDim);
+                ImGui::PushStyleColor(ImGuiCol_Text, on && enabled ? kText : kDim);
                 ImGui::TextUnformatted(p.name);
                 ImGui::PopStyleColor();
                 if (p.needs) {
@@ -930,7 +690,10 @@ struct Launcher {
             ImGui::PushFont(F.semibold, 17);
             ImGui::TextUnformatted(m.second.c_str());
             ImGui::PopFont();
-            para(F.regular, 13, kDim, "Installed from a homebrew package laid out as the console installs it.");
+            card_switch({ m.first }, m.second, card_x1 - px(18), ImGui::GetItemRectMin().y - px(2));
+            para(F.regular, 13, kDim,
+                 is_on(m.first) ? "Installed from a homebrew package laid out as the console installs it."
+                                : "Switched off: the game starts without it. Its files are kept, to switch it on again.");
             ImGui::Dummy(ImVec2(0, px(6)));
             ImGui::PushID(m.first.c_str());
             if (button("Remove", 0, 2)) start_remove_one(m.first, m.second);
@@ -1086,11 +849,7 @@ struct Launcher {
             ImGui::TextUnformatted(w.empty() ? "Starting..." : w.c_str());
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(0, px(14)));
-            const double f = (double)done / (double)(total ? total.load() : 1);
-            const ImVec2 p = ImGui::GetCursorScreenPos(), sz(ImGui::GetContentRegionAvail().x, px(8));
-            ImGui::Dummy(sz);
-            dl->AddRectFilled(p, p + sz, IM_COL32(255, 255, 255, 18), px(4));
-            dl->AddRectFilled(p, ImVec2(p.x + sz.x * (float)std::clamp(f, 0.0, 1.0), p.y + sz.y), kAccentHi, px(4));
+            progress((float)((double)done / (double)(total ? total.load() : 1)));
             ImGui::Dummy(ImVec2(0, px(8)));
             char t[96];
             snprintf(t, sizeof t, "%s of %s", gb(done).c_str(), gb(total).c_str());
@@ -1400,18 +1159,8 @@ struct Launcher {
     /* -1 to go on, else run_launcher's result */
     int frame()
     {
-        frames++;
+        begin_frame();
         ImGuiIO& io = ImGui::GetIO();
-        W = io.DisplaySize.x;
-        H = io.DisplaySize.y;
-        s = H / 720.0f;
-        dt = io.DeltaTime > 0 ? io.DeltaTime : 1.0f / 60;
-        now = ImGui::GetTime();
-        ImGuiStyle& st = ImGui::GetStyle();
-        st.FontScaleMain = s / (st.FontScaleDpi > 0 ? st.FontScaleDpi : 1.0f);
-        st.FrameRounding = px(10);
-        st.ItemSpacing = ImVec2(px(8), px(6));
-        if (cooldown > 0) cooldown--;
         if (test_key < test_keys.size() && frames > 40 && frames % 12 == 0) {   /* tests: down, then up */
             io.AddKeyEvent(test_keys[test_key], true);
         } else if (test_key < test_keys.size() && frames > 40 && frames % 12 == 1) {
@@ -1422,6 +1171,7 @@ struct Launcher {
         if (flow == Flow::Working && finished) {
             worker.join();
             have = installed(base);
+            refresh_mods();
             flow = ok ? Flow::Done : Flow::Failed;
             if (ok) say(!removing.empty() ? "Removed" : "Installed");
         }
@@ -1444,7 +1194,7 @@ struct Launcher {
             const char* sub = panel == Panel::Mods ? "Fan-made additions, installed beside your own game files."
                               : panel == Panel::Dlc ? "The downloadable content you own."
                                                     : "Saved to dod3.ini as you change them; used at the next start.";
-            const bool close = panel_frame(heading, sub, &body, &size);
+            const bool close = panel_frame(heading, sub, ease_out((float)(now - panel_at) / 0.25f), true, &body, &size);
             if (panel == Panel::Settings)
                 settings_panel(body, size);
             else if (flow != Flow::Idle)
@@ -1487,143 +1237,13 @@ struct Launcher {
     }
 };
 
-void load_fonts(Fonts& F)
-{
-    ImGuiIO& io = ImGui::GetIO();
-    ImFontConfig cfg;
-    cfg.FontDataOwnedByAtlas = false;   /* the arrays are the program's own */
-    F.regular = io.Fonts->AddFontFromMemoryTTF((void*)kFont_Inter_Regular, (int)sizeof kFont_Inter_Regular, 17, &cfg);
-    F.medium = io.Fonts->AddFontFromMemoryTTF((void*)kFont_Inter_Medium, (int)sizeof kFont_Inter_Medium, 17, &cfg);
-    F.semibold = io.Fonts->AddFontFromMemoryTTF((void*)kFont_Inter_SemiBold, (int)sizeof kFont_Inter_SemiBold, 17, &cfg);
-    F.display =
-        io.Fonts->AddFontFromMemoryTTF((void*)kFont_InterDisplay_Bold, (int)sizeof kFont_InterDisplay_Bold, 17, &cfg);
-    io.FontDefault = F.regular;
-    ImGui::GetStyle().FontSizeBase = 17;
-}
-
-/* The disc's picture (the PSN release has the same file) carries the Dolby
- * and DTS logos and their trademark lines, which have no place in a
- * launcher: they are painted out. The logos, on black: every grey or white
- * pixel of their boxes; the two lines, partly over the dragon's tail: their
- * pure-white pixels. Each grown by a few pixels (the soft edges, the lines'
- * dark outline), then filled from the pixels around, inward. */
-void clean_disc_art(std::vector<uint8_t>& px, int w, int h)
-{
-    struct Box {
-        int x0, y0, x1, y1;
-        bool white;
-        int grow;
-    };
-    const Box boxes[] = { { 902, 716, 1172, 796, false, 1 },
-                          { 902, 842, 1104, 923, false, 1 },
-                          { 452, 962, 1332, 1030, true, 5 } };
-    std::vector<uint8_t> mask((size_t)w * h);
-    auto at = [&](int x, int y) { return &px[((size_t)y * w + x) * 4]; };
-    for (const Box& b : boxes) {
-        for (int y = b.y0; y < b.y1; y++)
-            for (int x = b.x0; x < b.x1; x++) {
-                const uint8_t* p = at(x, y);
-                const int hi = std::max({ p[0], p[1], p[2] }), lo = std::min({ p[0], p[1], p[2] });
-                if (b.white ? lo > 236 : (hi - lo < 48 && hi > 20)) mask[(size_t)y * w + x] = 1;
-            }
-        for (int g = 0; g < b.grow; g++) {
-            std::vector<size_t> add;
-            for (int y = std::max(1, b.y0 - b.grow); y < std::min(h - 1, b.y1 + b.grow); y++)
-                for (int x = std::max(1, b.x0 - b.grow); x < std::min(w - 1, b.x1 + b.grow); x++) {
-                    const size_t i = (size_t)y * w + x;
-                    if (!mask[i] && (mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w])) add.push_back(i);
-                }
-            for (size_t i : add) mask[i] = 1;
-        }
-    }
-    std::vector<size_t> todo;
-    for (size_t i = 0; i < mask.size(); i++)
-        if (mask[i]) todo.push_back(i);
-    while (!todo.empty()) {
-        std::vector<size_t> next;
-        std::vector<std::pair<size_t, uint32_t>> filled;
-        for (size_t i : todo) {
-            const int x = (int)(i % w), y = (int)(i / w);
-            int acc[3] = { 0, 0, 0 }, n = 0;
-            for (int dy = -1; dy <= 1; dy++)
-                for (int dx = -1; dx <= 1; dx++) {
-                    const int nx = x + dx, ny = y + dy;
-                    if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= w || ny >= h || mask[(size_t)ny * w + nx]) continue;
-                    const uint8_t* p = at(nx, ny);
-                    acc[0] += p[0];
-                    acc[1] += p[1];
-                    acc[2] += p[2];
-                    n++;
-                }
-            if (n >= 2)
-                filled.push_back(
-                    { i, (uint32_t)(acc[0] / n) | (uint32_t)(acc[1] / n) << 8 | (uint32_t)(acc[2] / n) << 16 });
-            else
-                next.push_back(i);
-        }
-        if (filled.empty()) break;
-        for (const auto& f : filled) {
-            uint8_t* p = &px[f.first * 4];
-            p[0] = (uint8_t)f.second;
-            p[1] = (uint8_t)(f.second >> 8);
-            p[2] = (uint8_t)(f.second >> 16);
-            mask[f.first] = 0;
-        }
-        todo.swap(next);
-    }
-}
-
-/* the player's own key art, if the install has it */
-ImTextureData* load_art(const fs::path& base)
-{
-    std::error_code ec;
-    const fs::path p = base / "game/disc/PS3_GAME/PIC1.PNG";
-    const uint64_t n = fs::file_size(p, ec);
-    if (ec || n == 0 || n > (64u << 20)) return nullptr;
-    std::vector<uint8_t> file((size_t)n);
-    FILE* f = dod3::open_file(p, "rb");
-    if (!f) return nullptr;
-    const size_t got = fread(file.data(), 1, file.size(), f);
-    fclose(f);
-    std::vector<uint8_t> rgba;
-    int w = 0, h = 0;
-    if (got != file.size() || !png_rgba(file, &rgba, &w, &h) || w <= 0 || h <= 0) return nullptr;
-    if (n == 1181776 && w == 1920 && h == 1080) clean_disc_art(rgba, w, h);   /* the disc's own */
-    ImTextureData* t = new ImTextureData();
-    t->Create(ImTextureFormat_RGBA32, w, h);
-    memcpy(t->Pixels, rgba.data(), rgba.size());
-    t->UseColors = true;
-    ImGui::RegisterUserTexture(t);
-    return t;
-}
-
-void style()
-{
-    ImGuiStyle& s = ImGui::GetStyle();
-    ImGui::StyleColorsDark(&s);
-    s.WindowPadding = ImVec2(0, 0);
-    s.WindowBorderSize = 0;
-    s.ChildBorderSize = 0;
-    s.ScrollbarSize = 8;
-    s.ScrollbarRounding = 8;
-    ImVec4* c = s.Colors;
-    c[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.035f, 0.043f, 1);
-    c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_Text] = ImGui::ColorConvertU32ToFloat4(kText);
-    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(1, 1, 1, 0.12f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(1, 1, 1, 0.22f);
-    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(1, 1, 1, 0.30f);
-    c[ImGuiCol_NavCursor] = ImVec4(0, 0, 0, 0);   /* the items show their own focus */
-}
-
 }  // namespace
 
 bool launcher_wanted(const fs::path& base, bool key_held)
 {
     if (key_held) return true;
     if (const char* e = getenv("DOD3_LAUNCHER")) return strcmp(e, "0") != 0;
-    const auto kv = dod3::ini_read(base / "dod3.ini");
+    const auto kv = dod3::ini_read(fs::path(dod3_settings_path_now()));
     const auto it = kv.find("DOD3_LAUNCHER");
     return it == kv.end() || it->second != "0";
 }
@@ -1631,13 +1251,14 @@ bool launcher_wanted(const fs::path& base, bool key_held)
 int run_launcher(const fs::path& base)
 {
     if (!ui_init("Drakengard 3 Recompiled", 1280, 720, "", 17.0f)) return -1;
-    style();
+    look::style();
     Launcher L;
     L.base = base;
-    L.ini = base / "dod3.ini";
-    load_fonts(L.F);
-    L.art = load_art(base);
+    L.ini = fs::path(dod3_settings_path_now());
+    look::load_fonts(L.F);
+    L.art = look::load_art(base);
     L.have = installed(base);
+    L.refresh_mods();
     L.kv = dod3::ini_read(L.ini);
     dod3_setting_rows(L.rows);
     extra_rows(L.rows);
@@ -1681,6 +1302,13 @@ int run_launcher(const fs::path& base)
             if (!e) break;
             p = e + 1;
         }
+    }
+    if (const char* sw = getenv("DOD3_LAUNCHER_SWITCH")) {   /* spanish:on | spanish:off */
+        std::vector<std::string> ids;
+        for (const ModPart& p : kSpanish.parts)
+            if (L.mod_on.count(p.id)) ids.push_back(p.id);
+        L.switch_mod(ids, kSpanish.title, !strcmp(sw, "spanish:on"));
+        fprintf(stderr, "[launcher] %s\n", L.toast.c_str());
     }
     if (const char* r = getenv("DOD3_LAUNCHER_REMOVE")) {   /* spanish | undub */
         L.panel = Panel::Mods;

@@ -6,8 +6,8 @@ dod3-recomp includes or links the following. Each keeps its own licence.
 |---|---|---|
 | [ps3recomp](https://github.com/sp00nznet/ps3recomp) (the [soyjxck fork](https://github.com/soyjxck/ps3recomp), as the `ps3recomp` submodule), © 2026 Ned Heller / sp00nznet | The recompiler, the runtime and the PS3 library implementations | MIT, see `ps3recomp/LICENSE` |
 | [Dear ImGui](https://github.com/ocornut/imgui) 1.92.9b, © 2014-2026 Omar Cornut, in `third_party/imgui` | The installer's and the launcher's user interface | MIT, see `third_party/imgui/LICENSE.txt` |
-| [Inter](https://github.com/rsms/inter) 4.1, © 2016 The Inter Project Authors, in `third_party/fonts/inter` (Regular, Medium, SemiBold, Display Bold) | The launcher's typeface | SIL Open Font License 1.1, see `third_party/fonts/inter/LICENSE.txt` |
-| stb_image by Sean Barrett (the copy in `ps3recomp/libs/codec`) | Reading the key art the launcher shows | MIT or public domain |
+| [Inter](https://github.com/rsms/inter) 4.1, © 2016 The Inter Project Authors, in `third_party/fonts/inter` (Regular, Medium, SemiBold, Display Bold) | The launcher's and the setup's typeface | SIL Open Font License 1.1, see `third_party/fonts/inter/LICENSE.txt` |
+| stb_image by Sean Barrett (the copy in `ps3recomp/libs/codec`) | Reading the key art the launcher and the setup show | MIT or public domain |
 | stb_rectpack, stb_textedit, stb_truetype by Sean Barrett (`third_party/imgui/imstb_*.h`) | Part of Dear ImGui | MIT or public domain, see each file |
 | [zlib](https://zlib.net), © Jean-loup Gailly and Mark Adler | Decompression | zlib licence |
 | [SDL2](https://libsdl.org) | Controllers (and audio on macOS) | zlib licence |
