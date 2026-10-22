@@ -1,7 +1,9 @@
 /*
  * First-run setup, macOS: the installer (src/ui/wizard.cpp, in a Metal
  * window from src/ui/ui_mac.mm) when something the game needs is missing,
- * or when asked for (Option held at launch). The macOS counterpart of
+ * or when asked for (--setup); once the game is installed, the launcher
+ * (src/ui/launcher.cpp) at each start, unless dod3.ini turns it off (Option
+ * held at launch opens it anyway). The macOS counterpart of
  * os/win32/setup_win.cpp.
  *
  * The data folder is ~/Library/Application Support/Drakengard 3 Recompiled,
@@ -128,16 +130,7 @@ extern "C" int dod3_setup_mac(const char* base_dir, int force)
             no_window(base);
             return 1;
         }
-        if (!launcher_wanted(base, option)) return 0;
-        for (;;) {
-            const int r = run_launcher(base);
-            if (r != 2) return r < 0 ? 0 : r;   /* no window: the game starts as before */
-            /* Game Files: the installer, then back to the launcher (its Start
-             * Game starts the game) */
-            const int i = run_installer(base);
-            if (i == 0) return 0;
-            if (!installed(base).ready()) return 1;
-        }
+        return launcher_wanted(option) ? run_launcher_loop(base) : 0;
     }
 }
 

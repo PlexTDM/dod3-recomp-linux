@@ -4,8 +4,8 @@
  * widgets drawn over it -- buttons, cards, lights, pills, a panel -- each one
  * reachable by the mouse, the keyboard and a controller.
  *
- * Everything is drawn in units of the window's height (720 = 1), so a page
- * is the same at any size and on a Retina display. */
+ * Every size is in design units, 1/720 of the window's height (px()), so a
+ * page is the same at any size and on a Retina display. */
 #pragma once
 #ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -33,10 +33,18 @@ const ImU32 kPanel = IM_COL32(13, 13, 17, 232);
 const ImU32 kCard = IM_COL32(255, 255, 255, 9);
 const ImU32 kLine = IM_COL32(255, 255, 255, 20);
 
+const double kLongAgo = -10;   /* a time (ImGui's clock) for "never": an animation long finished */
+
 ImU32 alpha(ImU32 c, float a);
 ImU32 mix(ImU32 a, ImU32 b, float t);
 float ease_out(float t);
-std::string gb(uint64_t b);
+std::string size_text(uint64_t bytes);   /* "1.4 GB", "31 MB" */
+
+/* A button's look: quiet, the page's main one (in the accent), or one that removes */
+enum class ButtonKind { Quiet, Main, Danger };
+
+/* The mark at the start of a list's line */
+enum Mark { kNoMark, kTickMark, kDotMark, kRingMark };
 
 struct Fonts {
     ImFont *regular = nullptr, *medium = nullptr, *semibold = nullptr, *display = nullptr;
@@ -53,20 +61,6 @@ ImTextureData* art_texture(const std::vector<uint8_t>& rgba, int w, int h);
 /* The install's own copy, if it has one. Delete it after ui_shutdown. */
 ImTextureData* load_art(const std::filesystem::path& base);
 
-/* The mods the setup knows by name, as the player sees them. */
-struct ModPart {
-    const char* id;
-    const char* name;
-    const char* needs;   /* what it is for, if not the base game */
-};
-struct ModGroup {
-    const char* title;
-    const char* by;
-    const char* about;
-    std::vector<ModPart> parts;
-};
-extern const ModGroup kSpanish, kUndub;
-
 /* The widgets' state and the frame's measures; a page derives from it. */
 struct Kit {
     Fonts F;
@@ -76,7 +70,7 @@ struct Kit {
     int cooldown = 0;   /* frames during which activations are ignored */
     std::map<ImGuiID, float> anim;
     std::string toast;
-    double toast_at = -10;
+    double toast_at = kLongAgo;
     float wrap_right = 0;   /* inside a card: its padding's edge (screen x) */
     float card_x0 = 0, card_x1 = 0;
 
@@ -102,11 +96,17 @@ struct Kit {
     void path_line(ImFont* f, float size, ImU32 col, const char* prefix, const std::filesystem::path& p);
     void say(const std::string& t);
 
-    /* 0 a quiet button, 1 the accent, 2 a red outline; `w` 0 fits the label */
-    bool button(const char* label, float w, int kind = 0, bool enabled = true);
-    float button_width(const char* label, float w = 0) const;
-    void dot(ImDrawList* dl, ImVec2 c, ImU32 col, bool filled) const;
+    /* a button `w` design units wide (0: as wide as its label needs) */
+    bool button(const char* label, float w, ButtonKind kind = ButtonKind::Quiet, bool enabled = true);
+    float button_width(const char* label, float w = 0) const;   /* in pixels */
+    void dot(ImDrawList* dl, ImVec2 c, ImU32 col) const;    /* a filled light */
+    void ring(ImDrawList* dl, ImVec2 c, ImU32 col) const;   /* an empty one */
     void tick(ImDrawList* dl, ImVec2 c, ImU32 col) const;
+    /* a line of a list: a mark, a name, a note after it */
+    void list_row(Mark m, ImU32 mark_col, const char* name, ImU32 name_col, const char* after = nullptr,
+                  ImU32 after_col = kFaint, ImFont* font = nullptr, float size = 14);
+    /* ImGui text in a font, a size and a colour, on one line */
+    void label(ImFont* f, float size, ImU32 col, const char* t);
     /* a rounded label ending at `right_top` */
     void pill(ImDrawList* dl, ImVec2 right_top, const char* t, ImU32 col) const;
     /* an on/off switch at the cursor, showing `on`; true when flipped */
@@ -117,7 +117,18 @@ struct Kit {
     void card_end();
     /* a bar, `f` of it filled, as wide as the region */
     void progress(float f);
+    /* an install's progress: the step, the bar, "x of y" and `more` after it */
+    void install_progress(const std::string& what, uint64_t done, uint64_t total, const std::string& more = "");
+    /* "Checking 3 files...", while files are being recognised */
+    void checking(size_t files);
     void toast_draw();
+
+    /* Enter, or a pad's confirm button; Esc, or a pad's back button: pressed this frame */
+    static bool confirm_pressed();
+    static bool back_pressed();
+
+    /* the window-sized ImGui window a page is drawn in */
+    void begin_window(const char* id);
 
     /* the window's background: the art (faded in by `art_a`; a dark red
      * gradient without it), darkened on the left and at the foot for the text,
@@ -129,6 +140,11 @@ struct Kit {
      * the content's top-left and size come back. With `closable`, a close
      * button at its top right: true when pressed. */
     bool panel_frame(const char* heading, const char* sub, float e, bool closable, ImVec2* body, ImVec2* body_size);
+
+    /* Tests (DOD3_SETUP_GRAB=<prefix>): at frame `req_at` the platform is asked
+     * for the window (<prefix>.req -> <prefix>.ppm), at `save_at` it is kept as
+     * <prefix>_<index>.ppm. */
+    static void grab_step(const std::string& prefix, int frame, int req_at, int save_at, int index);
 };
 
 }  // namespace look

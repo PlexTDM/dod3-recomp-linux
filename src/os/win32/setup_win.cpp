@@ -28,14 +28,5 @@ extern "C" int dod3_setup_win(const wchar_t* base_dir, int force)
                     L"Drakengard 3 Recompiled", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         return 1;
     }
-    if (!launcher_wanted(base, shift)) return 0;
-    for (;;) {
-        const int r = run_launcher(base);
-        if (r != 2) return r < 0 ? 0 : r;   /* no window: the game starts as before */
-        /* Game Files: the installer, then back to the launcher (its Start
-         * Game starts the game) */
-        const int i = run_installer(base);
-        if (i == 0) return 0;
-        if (!installed(base).ready()) return 1;
-    }
+    return launcher_wanted(shift) ? run_launcher_loop(base) : 0;
 }

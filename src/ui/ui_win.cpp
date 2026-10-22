@@ -414,7 +414,9 @@ bool ui_init(const char* title, int width, int height, const std::string& font_p
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     const RECT& wa = mi.rcWork;
     /* the size asked for at the display's scale, made smaller (its shape
-     * kept) where the screen has no room for it */
+     * kept) where the screen has no room for it: at most 94% of the work
+     * area's width and 90% of its height, the height leaving the title bar
+     * room */
     float k = g_dpi;
     const float room_w = (float)(wa.right - wa.left) * 0.94f, room_h = (float)(wa.bottom - wa.top) * 0.90f;
     if (width * k > room_w || height * k > room_h) k = (std::min)(room_w / width, room_h / height);
@@ -634,19 +636,6 @@ std::filesystem::path ui_pick_folder(const char* title)
         ImGui::GetIO().ClearInputKeys();
         ImGui::GetIO().ClearInputMouse();
     }
-    return out;
-}
-
-std::string ui_default_font()
-{
-    PWSTR dir = nullptr;
-    std::string out;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Fonts, 0, nullptr, &dir))) {
-        const std::filesystem::path p = std::filesystem::path(dir) / L"segoeui.ttf";
-        std::error_code ec;
-        if (std::filesystem::exists(p, ec)) out = dod3::utf8(p);
-    }
-    CoTaskMemFree(dir);
     return out;
 }
 

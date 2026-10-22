@@ -188,7 +188,9 @@ bool ui_init(const char* title, int width, int height, const std::string& font_p
         }
 
         s_ui.delegate = [[Dod3SetupWindowDelegate alloc] init];
-        /* made smaller (its shape kept) where the screen has no room for it */
+        /* made smaller (its shape kept) where the screen has no room for it:
+         * at most 94% of the visible frame's width and 90% of its height, the
+         * height leaving the title bar room */
         const NSRect vf = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame : NSMakeRect(0, 0, width, height);
         const CGFloat k = MIN(1.0, MIN(vf.size.width * 0.94 / width, vf.size.height * 0.90 / height));
         width = (int)(width * k);
@@ -357,22 +359,6 @@ std::filesystem::path ui_pick_folder(const char* title)
         if (s_ui.live) after_panel();
     }
     return out;
-}
-
-/* The system's UI font where ImGui can read it: San Francisco (a variable
- * TrueType; stb_truetype draws its default, regular instance), else
- * Helvetica Neue's collection, else Arial. */
-std::string ui_default_font()
-{
-    static const char* const kFonts[] = {
-        "/System/Library/Fonts/SFNS.ttf",
-        "/System/Library/Fonts/HelveticaNeue.ttc",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-    };
-    struct stat st;
-    for (const char* f : kFonts)
-        if (stat(f, &st) == 0) return f;
-    return std::string();
 }
 
 }  // namespace dod3setup

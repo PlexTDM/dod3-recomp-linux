@@ -36,13 +36,13 @@ float ease_out(float t)
     return 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
 }
 
-std::string gb(uint64_t b)
+std::string size_text(uint64_t bytes)
 {
     char s[32];
-    if (b >= (1ull << 30))
-        snprintf(s, sizeof s, "%.1f GB", b / 1073741824.0);
+    if (bytes >= (1ull << 30))
+        snprintf(s, sizeof s, "%.1f GB", bytes / 1073741824.0);
     else
-        snprintf(s, sizeof s, "%.0f MB", b / 1048576.0 + 0.5);
+        snprintf(s, sizeof s, "%.0f MB", bytes / 1048576.0);
     return s;
 }
 
@@ -193,23 +193,6 @@ ImTextureData* load_art(const fs::path& base)
     return art_texture(rgba, w, h);
 }
 
-const ModGroup kSpanish = { "Spanish Translation",
-                            "Traducciones Vacuno \xC2\xB7 TraduSquare v1.1",
-                            "The whole game in Spanish: text, menus, the title screen and subtitled movies. "
-                            "Add the US release's downloads as they are: the two .pkg files and MOVIES.zip, "
-                            "and the DLC and voice packages if you have those.",
-                            { { "ES-GAME", "Story and mission text", nullptr },
-                              { "ES-DATA", "Title screen and menus", nullptr },
-                              { "ES-MOVIES", "Movies", nullptr },
-                              { "ES-DLC", "DLC chapters", "with the DLC" },
-                              { "ES-JPV", "Japanese voices' movies", "with the Japanese Voice Pack" } } };
-const ModGroup kUndub = { "DLC Undub",
-                          "Canzah and Slow \xC2\xB7 prototype 0.707",
-                          "Japanese voices for the six DLC chapters, retimed to match. Follows the game's own "
-                          "Voice setting (Change Outfits/Music > Voice). Add its folder, the one holding GAME "
-                          "and ISO, with Add Folder.",
-                          { { "UNDUB", "Japanese voices for the DLC chapters", nullptr } } };
-
 /* ---- the kit ------------------------------------------------------------------ */
 
 void Kit::begin_frame()
@@ -222,6 +205,9 @@ void Kit::begin_frame()
     dt = io.DeltaTime > 0 ? io.DeltaTime : 1.0f / 60;
     now = ImGui::GetTime();
     ImGuiStyle& st = ImGui::GetStyle();
+    /* ImGui's own text (PushFont sizes, as in para) is scaled here, so its
+     * sizes are design units too; draw-list text takes px(). The display's
+     * scale is divided out: the window's height in pixels has it already. */
     st.FontScaleMain = s / (st.FontScaleDpi > 0 ? st.FontScaleDpi : 1.0f);
     st.FrameRounding = px(10);
     st.FramePadding = ImVec2(px(14), px(10));
@@ -307,7 +293,7 @@ float Kit::button_width(const char* label, float w) const
     return w > 0 ? px(w) : text_size(F.semibold, 15, label).x + px(36);
 }
 
-bool Kit::button(const char* label, float w, int kind, bool enabled)
+bool Kit::button(const char* label, float w, ButtonKind kind, bool enabled)
 {
     ImGui::PushID(label);
     const float h = px(40);
@@ -324,14 +310,14 @@ bool Kit::button(const char* label, float w, int kind, bool enabled)
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float k = enabled ? 1.0f : 0.4f;
     ImU32 bg, fg = alpha(kText, k);
-    if (kind == 1)
+    if (kind == ButtonKind::Main)
         bg = alpha(mix(kAccent, kAccentHi, a + (held ? 0.4f : 0.0f)), k);
-    else if (kind == 2)
+    else if (kind == ButtonKind::Danger)
         bg = alpha(kErr, 0.10f + 0.18f * a);
     else
         bg = IM_COL32(255, 255, 255, (int)((14 + 18 * a + (held ? 10 : 0)) * k));
     dl->AddRectFilled(p, p + sz, bg, px(10));
-    if (kind == 2) {
+    if (kind == ButtonKind::Danger) {
         dl->AddRect(p, p + sz, alpha(kErr, 0.55f + 0.45f * a), px(10), 0, px(1.2f));
         fg = alpha(mix(kErr, kText, a), k);
     }
@@ -340,19 +326,50 @@ bool Kit::button(const char* label, float w, int kind, bool enabled)
     return pressed && enabled;
 }
 
-void Kit::dot(ImDrawList* dl, ImVec2 c, ImU32 col, bool filled) const
-{
-    if (filled)
-        dl->AddCircleFilled(c, px(4.5f), col);
-    else
-        dl->AddCircle(c, px(4.5f), col, 0, px(1.4f));
-}
+void Kit::dot(ImDrawList* dl, ImVec2 c, ImU32 col) const { dl->AddCircleFilled(c, px(4.5f), col); }
+
+void Kit::ring(ImDrawList* dl, ImVec2 c, ImU32 col) const { dl->AddCircle(c, px(4.5f), col, 0, px(1.4f)); }
 
 void Kit::tick(ImDrawList* dl, ImVec2 c, ImU32 col) const
 {
     const float r = px(5.5f);
     const ImVec2 pts[3] = { ImVec2(c.x - r, c.y), ImVec2(c.x - r * 0.3f, c.y + r * 0.7f), ImVec2(c.x + r, c.y - r * 0.8f) };
     dl->AddPolyline(pts, 3, col, 0, px(2.0f));
+}
+
+void Kit::list_row(Mark m, ImU32 mark_col, const char* name, ImU32 name_col, const char* after, ImU32 after_col,
+                   ImFont* font, float size)
+{
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 c = ImGui::GetCursorScreenPos();
+    ImGui::PushFont(font ? font : F.regular, size);
+    const ImVec2 mc(c.x + px(6), c.y + ImGui::GetTextLineHeight() / 2);
+    if (m == kTickMark)
+        tick(dl, mc, mark_col);
+    else if (m == kDotMark)
+        dot(dl, mc, mark_col);
+    else if (m == kRingMark)
+        ring(dl, mc, mark_col);
+    ImGui::SetCursorScreenPos(ImVec2(c.x + px(22), c.y));
+    ImGui::PushStyleColor(ImGuiCol_Text, name_col);
+    ImGui::TextUnformatted(name);
+    ImGui::PopStyleColor();
+    if (after && *after) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, after_col);
+        ImGui::TextUnformatted(after);
+        ImGui::PopStyleColor();
+    }
+    ImGui::PopFont();
+}
+
+void Kit::label(ImFont* f, float size, ImU32 col, const char* t)
+{
+    ImGui::PushFont(f, size);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextUnformatted(t);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
 }
 
 void Kit::pill(ImDrawList* dl, ImVec2 right_top, const char* t, ImU32 col) const
@@ -420,6 +437,57 @@ void Kit::progress(float f)
     ImGui::Dummy(sz);
     dl->AddRectFilled(p, p + sz, IM_COL32(255, 255, 255, 18), px(4));
     dl->AddRectFilled(p, ImVec2(p.x + sz.x * std::clamp(f, 0.0f, 1.0f), p.y + sz.y), kAccentHi, px(4));
+}
+
+void Kit::install_progress(const std::string& what, uint64_t done, uint64_t total, const std::string& more)
+{
+    label(F.semibold, 19, kText, what.empty() ? "Starting..." : what.c_str());
+    ImGui::Dummy(ImVec2(0, px(14)));
+    progress(total ? (float)((double)done / (double)total) : 0.0f);
+    ImGui::Dummy(ImVec2(0, px(8)));
+    if (!what.empty()) para(F.regular, 13, kDim, (size_text(done) + " of " + size_text(total) + more).c_str());
+}
+
+void Kit::checking(size_t files)
+{
+    if (!files) return;
+    static const char* const dots[] = { "", ".", "..", "..." };
+    char t[64];
+    snprintf(t, sizeof t, "Checking %zu file%s%s", files, files == 1 ? "" : "s", dots[(int)(now * 3) % 4]);
+    para(F.regular, 14, kDim, t);
+}
+
+bool Kit::confirm_pressed()
+{
+    return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
+           ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false);
+}
+
+bool Kit::back_pressed()
+{
+    return ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+}
+
+void Kit::begin_window(const char* id)
+{
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+    ImGui::Begin(id, nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoScrollWithMouse);
+}
+
+void Kit::grab_step(const std::string& prefix, int frame, int req_at, int save_at, int index)
+{
+    if (prefix.empty()) return;
+    if (frame == req_at)
+        if (FILE* f = fopen((prefix + ".req").c_str(), "wb")) fclose(f);
+    if (frame == save_at) {
+        const std::string to = prefix + "_" + std::to_string(index) + ".ppm";
+        remove(to.c_str());
+        rename((prefix + ".ppm").c_str(), to.c_str());
+    }
 }
 
 void Kit::toast_draw()

@@ -274,6 +274,7 @@ if(WIN32)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/setup_shared.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_win.cpp"
         ${IMGUI_SOURCES})
@@ -287,6 +288,7 @@ elseif(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/setup_shared.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
         ${IMGUI_SOURCES})
