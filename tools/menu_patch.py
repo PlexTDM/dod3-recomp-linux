@@ -59,6 +59,13 @@ Also: the title's boot chain (Sqex03GameHUDTitle's pages Install,
 VersionCheck, Rogo -- the company, middleware and UE3 logos -- Moive -- the
 opening movie -- then Top, "Press START") goes from VersionCheck straight to
 Top when the bridge says to skip (DOD3_SKIP_INTRO, on unless 0).
+
+Also (1.01): entering a DLC mission from the book, a player who chose
+Japanese voices is switched to English (Sqex03GameHUDBook.UpdateFadeOut;
+the official voice pack has no lines for the DLC chapters) and back to
+Japanese on the way out. With the DLC chapters' Japanese voices installed
+the port says so (bridge 18, 1) and the mission is entered as any other, the
+Japanese voices kept -- as 1.00 did.
 """
 import sys, os, hashlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -71,7 +78,7 @@ MAX_ROWS = 7     # the layout's
 PAGES = 3        # our root entries: Graphics, System, Advanced Graphics
 CMD_BEGIN, CMD_CHANGE, CMD_ISDEF, CMD_RESET, CMD_APPLY, CMD_CHANGED, CMD_SKIPINTRO, CMD_OPEN, CMD_ROWS, CMD_FOV, \
     CMD_GRAPHICS_SHOWN, CMD_CAM_DT, CMD_CAM_ACTIVE, CMD_CAM_AXIS, CMD_CAM_VIEW, \
-    CMD_ASPECT, CMD_ASPECT_FOV, CMD_HUD = range(18)
+    CMD_ASPECT, CMD_ASPECT_FOV, CMD_HUD, CMD_DLC_JPVOICE = range(19)
 
 GAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'game', 'disc')
 ROOT = os.path.join(GAME, 'PS3_GAME', 'USRDIR', 'SQEX03GAME')
@@ -401,6 +408,20 @@ def main():
     dt.mem = st[i].mem        # the jumps to the test land on this, before it
     st.insert(i, dt)
     new[f] = st
+
+    # ---- 1.01: the DLC chapters keep the Japanese voices when the port has
+    # them for the DLC (bridge 18): the test that sends a DLC mission down the
+    # switch to English reads false then, and the mission goes the way of any
+    # other (which switches back only if a switch was made) ----
+    if v101:
+        f = pk.func('Sqex03GameHUDBook', 'UpdateFadeOut'); st = pk.parse(f)
+        i = pk.find(st, 'if !(self.m_xGameInfo.self.m_xMissionMng.IsDLCMissionFromNo(self.m_iEntryMissionNo)) goto 0x014b')
+        gi_book = findnode(st[i], 'self.m_xGameInfo')
+        keep = bridge(CMD_DLC_JPVOICE)
+        subst(keep, lambda n: pk.text(n) == 'self.m_xGameInfo', lambda n: clone(gi_book))
+        dlc = st[i].parts[1][1]
+        st[i].parts[1] = ('e', pk.cond(pk.native('NotEqual_IntInt', keep, pk.int_(0)), Node(0x28, []), dlc))
+        new[f] = st
 
     if show:
         for f, st in new.items():

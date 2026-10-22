@@ -11,6 +11,11 @@
  *                   brought by the update (the disc release's, for either)
  *   the update      the 1.01 update package (a 1.01 build needs it)
  *   DLC             any of the 20 PSN packs (UP0082-NPUB31251_00-...), optional
+ *   mods            optional fan-made additions: homebrew packages and movie
+ *                   archives (the Spanish translation's, which it knows by
+ *                   name, or any laid out as the console installs them), and
+ *                   the folder of the DLC chapters' Japanese voices (the DLC
+ *                   Undub); see install_mod in install.cpp
  *   keys            what opens the game's executable (src/install/keys.h): the
  *                   setup makes it from the update's EBOOT.BIN (1.01) or the
  *                   disc's (1.00), and checks it by its hash
@@ -26,6 +31,22 @@
  *   keys.txt                                     the player's keys
  *   game/disc/game/NPUB31251/                    the DLC, as the console
  *                                                installs it
+ *   game/mods/                                   a mod's files, at the path
+ *                                                under game/disc each stands
+ *                                                in for (src/kernel/mods.cpp
+ *                                                serves them; the player's
+ *                                                own files stay as they
+ *                                                are), and installed.txt,
+ *                                                the mods installed
+ *   .../PATCH/                                   a mod's files for the
+ *                                                update's folder, which the
+ *                                                title lists: there, as the
+ *                                                console has them (the update
+ *                                                installed again puts its own
+ *                                                files back)
+ *   .../NPUB31251/USRDIR/DLC_JPV/UNDUB/          the DLC chapters' Japanese
+ *                                                voices, beside the voice
+ *                                                pack's (src/kernel/dlc.cpp)
  * Each part is unpacked into game/setup.partial/ and moved into place once it
  * is whole, so a failure, a cancel or a crash leaves no half-installed part
  * (the parts before it stay installed). A run that adds DLC to an install
@@ -45,7 +66,8 @@ namespace dod3setup {
 
 namespace fs = std::filesystem;
 
-enum class SourceKind { Unknown, Disc, Update, Eboot, Dlc };
+enum class SourceKind { Unknown, Disc, Update, Eboot, Dlc, Mod };
+enum class ModForm { Pkg, Zip, Undub };   /* what a mod came as */
 
 struct Source {
     SourceKind kind = SourceKind::Unknown;
@@ -54,6 +76,7 @@ struct Source {
     std::string name;        /* for the player: "Japanese Voice Pack" */
     uint64_t bytes = 0;      /* what installing it writes */
     bool psn = false;        /* the game: the US PSN release's package, not the disc */
+    ModForm form = ModForm::Pkg;   /* a mod */
     bool set() const { return kind != SourceKind::Unknown; }
 };
 
@@ -62,6 +85,7 @@ struct DlcInfo {
     const char* name;
 };
 const std::vector<DlcInfo>& known_dlc();            /* the 20 packs: voice, story, music, costumes */
+const std::vector<DlcInfo>& known_mods();           /* the mods the setup knows by name */
 
 /* Does this build need the update (1.01)? */
 bool update_required();
@@ -76,6 +100,7 @@ struct Status {
     bool disc = false, update = false, eboot = false;
     bool eboot_bin = false;                              /* what the executable is made from */
     std::set<std::string> dlc;                           /* ids */
+    std::vector<std::pair<std::string, std::string>> mods;   /* installed: id, name */
     bool ready() const { return disc && eboot && (update || !update_required()); }
 };
 Status installed(const fs::path& base);
@@ -84,13 +109,25 @@ Status installed(const fs::path& base);
 const char* eboot_path();
 
 /* An install: whatever is set is installed (replacing what was there), in
- * the order disc, EBOOT.ELF, update, DLC. */
+ * the order disc, EBOOT.ELF, update, DLC, mods. */
 struct Plan {
     Source disc, update, eboot;
-    std::vector<Source> dlc;
+    std::vector<Source> dlc, mods;
+    /* the installed mods removed first: game/mods and the DLC chapters'
+     * voices go; the files a mod put in the update's folder go with the
+     * update installed again, which the plan then needs (mods_need_update) */
+    bool remove_mods = false;
     Keys keys;                                           /* when the executable is to be made */
     uint64_t bytes() const;
 };
+
+/* The DLC Undub is in the plan, and the Japanese Voice Pack it joins neither
+ * installed nor in it. */
+bool needs_voice_pack(const Plan& plan, const Status& have);
+
+/* Removing the installed mods needs the update package: a mod put files in
+ * its folder. */
+bool mods_need_update(const fs::path& base);
 
 /* The encrypted executable: from the plan's update (1.01) or disc (1.00) if
  * set, else from the install. */
@@ -105,8 +142,9 @@ uint64_t free_bytes(const fs::path& base);
 bool install(const fs::path& base, const Plan& plan,
              const std::function<bool(uint64_t, uint64_t, const std::string&)>& progress, std::string* err);
 
-/* dod3 --install [--keys <file>] <file>...: identify each, install, report
- * on stdout. The keys come from `keys_path`, else <base>/keys.txt. */
+/* dod3 --install [--keys <file>] [--remove-mods] <file>...: identify each,
+ * install, report on stdout. The keys come from `keys_path`, else
+ * <base>/keys.txt. */
 int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, const fs::path& keys_path);
 
 /* The title's game-data install, laid out under the game tree's root

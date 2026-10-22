@@ -204,19 +204,59 @@ With the Japanese Voice Pack installed: on the title menu, Change
 Outfits/Music > Voice > Language: Japanese, then start or continue a game.
 Voices, lip-sync and the cutscene movies switch to Japanese.
 
+The official pack has no Japanese for the six DLC chapters (the prologues),
+and the 1.01 update switches the voices to English while one is played.
+With the DLC Undub installed (see Mods below), the DLC chapters follow the
+Language setting too: Japanese voices, lip-sync and movies there as well,
+and English when English is chosen.
+
 
 ## Mods
 
-Mods that replace some of the game's files in the update's folder
-(game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe), as fan
-translations do, are played as they are. If a mod replaces the game's
-script package (SQEX03GAME.XXX), the port's additions to the Settings menu
-are not there, because they are made to that package: the Graphics
-Settings, System Settings and Advanced Graphics pages, and what works
-through them (the wider field of view, the Aspect Ratio setting's wider
-view, skipping the intro). dod3.ini still sets the resolution, the display
-mode, the frame rate and the anti-aliasing. Running the setup again with
-the update package puts the update's own files back.
+The setup installs two fan-made mods by name, on its Mods page (run
+dod3.exe --setup, or on a Mac hold Option while opening the app). Unzip
+or unpack what you downloaded first, then add the files with Add Files or
+Add Folder. Your own game files stay as they are: a mod's files go to the
+game/mods folder (and the voice pack's folder, for the DLC Undub).
+
+- The Spanish translation by Traducciones Vacuno (TraduSquare, v1.1, for
+  the US release BLUS31197): from its downloads, the
+  Drakengard_ES_BLUS31197_V2.pkg and Drakengard_ES_BLUS31197DATA_V3.pkg
+  packages and MOVIES.zip (the US game's download), and if you have the
+  DLC, Drakengard_DLC_ES_BLUS31197_NPUB31251_V2.pkg and, with the Japanese
+  Voice Pack, Drakengard_ES_DLC_Voices_BLUS31197_NPUB31251_V2.pkg. Add
+  them as they are, the movies' .zip too; do not copy anything into the
+  game's folders by hand. The port's Settings pages are there with it, in
+  English.
+
+- The DLC Undub by Canzah and Slow (Japanese voices for the DLC chapters):
+  unpack its .7z and add the folder that holds GAME and ISO with Add
+  Folder. It needs the Japanese Voice Pack. It follows Change Outfits/Music
+  > Voice > Language, as the pack does; the 1.01 update's executable needs
+  no swapping here.
+
+With both, the DLC chapters' text is the translation's in Japanese too,
+where the translation has its own (the undub's is English text timed for
+the Japanese voices).
+
+Other mods made as homebrew packages for this release, laid out as the
+console installs them (in the update's folder, the game-data folder, or
+the DLC's), are taken too and listed by their file names.
+
+To take the mods out: the Mods page's Remove Mods, then Install. A mod with
+files in the update's folder (the translation's game package) needs the
+update package added as well, which puts the update's own files back.
+
+A mod copied into the update's folder by hand
+(game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe) is played as it
+is. If it replaces the game's script package (SQEX03GAME.XXX), the port's
+additions to the Settings menu are not there, because they are made to
+that package: the Graphics Settings, System Settings and Advanced Graphics
+pages, and what works through them (the wider field of view, the Aspect
+Ratio setting's wider view, skipping the intro). dod3.ini still sets the
+resolution, the display mode, the frame rate and the anti-aliasing.
+Running the setup again with the update package puts the update's own
+files back.
 
 
 ## Your saves, and updating

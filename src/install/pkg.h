@@ -8,6 +8,11 @@
  * everything before them, which is also the checksum Sony's update server
  * lists, so a package checks itself: extract() hashes the file as it reads
  * it and fails on a mismatch.
+ *
+ * A debug package -- what homebrew tools make: fan translations come as
+ * these -- is laid out the same, under a keystream of SHA-1s instead: each
+ * 16 bytes are XORed with the first 16 of SHA-1(QA digest's two halves, each
+ * twice, 24 zero bytes, the 16-byte block's index as a big-endian u64).
  */
 #pragma once
 #include <cstdint>
@@ -31,12 +36,18 @@ struct Pkg {
     uint64_t file_size = 0;
     uint64_t data_offset = 0, data_size = 0;
     uint8_t riv[16] = {};
+    bool debug = false;      /* a debug package: the QA digest's keystream */
+    uint8_t qa[16] = {};
+    /* The SHA-1 extract() checks: the footer's unless set here (homebrew
+     * packages may leave their footer zero; one left zero and unset is not
+     * checked). */
+    std::string expect_sha1;
     std::vector<PkgEntry> entries;
     uint64_t payload() const;        /* bytes of the files */
 };
 
-/* Read the header and the file table. False (with `err`) if it is not a
- * retail PS3 package. */
+/* Read the header and the file table. False (with `err`) if it is not a PS3
+ * package (retail or debug). */
 bool pkg_open(const std::filesystem::path& p, Pkg* pkg, std::string* err);
 
 /* Just the content ID, from the plain-text header (cheap). */

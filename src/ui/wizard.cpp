@@ -1,12 +1,13 @@
 /* The installer's pages, shared by every platform (ui/ui.h has the window;
  * install/install.h does the work). In the spirit of Unleashed Recompiled's
- * installer: the player adds files -- any mix of the disc, the update and
- * DLC packages, on any page -- each is recognised on its own, and a light
- * per item shows what is still needed. The keys for the game's executable
+ * installer: the player adds files -- any mix of the disc, the update, DLC
+ * packages and mods, on any page -- each is recognised on its own, and a
+ * light per item shows what is still needed. The keys for the game's executable
  * are checked as they are entered, by decrypting it.
  *
- *   Welcome -> Game files -> DLC (optional) -> Keys (while the executable is
- *   still to be made) -> Install (space check) -> Installing -> Done / Failed
+ *   Welcome -> Game files -> DLC (optional) -> Mods (optional) -> Keys (while
+ *   the executable is still to be made) -> Install (space check) ->
+ *   Installing -> Done / Failed
  *
  * Every size is in units of the font size and every position is relative to
  * the window, so the pages are the same on a 1x, 1.5x or Retina display. */
@@ -33,7 +34,7 @@ namespace dod3setup {
 
 namespace {
 
-enum class Page { Welcome, GameFiles, Dlc, Keys, Confirm, Installing, Done, Failed };
+enum class Page { Welcome, GameFiles, Dlc, Mods, Keys, Confirm, Installing, Done, Failed };
 
 const ImU32 kOk = IM_COL32(92, 184, 92, 255);
 const ImU32 kWarn = IM_COL32(217, 164, 65, 255);
@@ -250,6 +251,12 @@ struct Wizard {
                 d.push_back(s);
                 break;
             }
+            case SourceKind::Mod: {
+                auto& m = plan.mods;
+                m.erase(std::remove_if(m.begin(), m.end(), [&](const Source& o) { return o.id == s.id; }), m.end());
+                m.push_back(s);
+                break;
+            }
             default: notes.push_back(name + ": " + err); break;
             }
             checks.erase(checks.begin() + (long)i);
@@ -317,18 +324,26 @@ struct Wizard {
             return std::make_pair(0, std::string());
         });
     }
-    bool anything() const { return plan.disc.set() || plan.update.set() || plan.eboot.set() || !plan.dlc.empty(); }
+    bool anything() const
+    {
+        return plan.disc.set() || plan.update.set() || plan.eboot.set() || !plan.dlc.empty() || !plan.mods.empty() ||
+               plan.remove_mods;
+    }
+    /* removing the mods, one of which put files in the update's folder: the
+     * update package is needed */
+    bool remove_needs_update() const { return plan.remove_mods && !plan.update.set() && mods_need_update(base); }
 
     void add_buttons(bool folder)
     {
         const float bw = u() * 8;
         if (ImGui::Button("Add Files...", ImVec2(bw, 0)))
             add(ui_pick_files("Add Drakengard 3 files",
-                              { { "Drakengard 3 files (.iso, .pkg)", "*.iso;*.pkg" }, { "All files", "*.*" } }));
+                              { { "Drakengard 3 files (.iso, .pkg, .zip)", "*.iso;*.pkg;*.zip" },
+                                { "All files", "*.*" } }));
         if (folder) {
             ImGui::SameLine();
             if (ImGui::Button("Add Folder...", ImVec2(bw, 0))) {
-                const fs::path p = ui_pick_folder("The folder that holds PS3_GAME");
+                const fs::path p = ui_pick_folder("The folder that holds PS3_GAME, or a mod's folder");
                 if (!p.empty()) add({ p });
             }
         }
@@ -396,6 +411,7 @@ struct Wizard {
                                      : "the game disc: a decrypted .iso, or the folder holding PS3_GAME");
             if (update_required()) bullet("the 1.01 update package (.pkg)");
             bullet("any DLC packages (.pkg) you own (optional)");
+            if (update_required()) bullet("mods, such as a fan translation (optional)");
             if (need_keys())
                 bullet(update_required() ? "the keys that open the update's EBOOT.BIN, the game's executable (asked "
                                            "for on the Keys page)"
@@ -468,6 +484,70 @@ struct Wizard {
             ImGui::Spacing();
         }
         add_buttons(false);
+    }
+
+    void page_mods()
+    {
+        heading("Mods");
+        para("Optional. Fan-made additions: add their files with Add Files (packages, a movie .zip) or Add Folder "
+             "(the DLC Undub's folder). Your own game files stay as they are.");
+        std::vector<std::pair<std::string, std::string>> rows;   /* id, name: the known ones, then others */
+        for (const DlcInfo& m : known_mods()) rows.push_back({ m.id, m.name });
+        auto listed = [&](const std::string& id) {
+            for (const auto& r : rows)
+                if (r.first == id) return true;
+            return false;
+        };
+        for (const auto& m : have.mods)
+            if (!listed(m.first)) rows.push_back(m);
+        for (const Source& m : plan.mods)
+            if (!listed(m.id)) rows.push_back({ m.id, m.name });
+        uint64_t adding = 0;
+        for (const Source& x : plan.mods) adding += x.bytes;
+        for (const auto& r : rows) {
+            bool added = false, inst = false;
+            for (const Source& x : plan.mods) added |= x.id == r.first;
+            for (const auto& m : have.mods) inst |= m.first == r.first;
+            light(added || inst ? kOk : kOff, added || inst);
+            ImGui::TextUnformatted(r.second.c_str());
+            if (added || inst) {
+                ImGui::SameLine();
+                ImGui::TextDisabled(added ? "added" : "installed");
+            }
+        }
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0);
+        if (needs_voice_pack(plan, have)) {
+            ImGui::PushStyleColor(ImGuiCol_Text, kErrText);
+            ImGui::TextUnformatted("The Japanese voices for the DLC chapters need the Japanese Voice Pack: add its "
+                                   "package on the DLC page too.");
+            ImGui::PopStyleColor();
+        } else
+            ImGui::TextDisabled("The Japanese voices for the DLC chapters follow the Voice option in Change "
+                                "Outfits/Music, as the Japanese Voice Pack does; they need it installed.");
+        if (plan.remove_mods) {
+            ImGui::Spacing();
+            if (remove_needs_update()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, kErrText);
+                ImGui::TextUnformatted("To remove the mods, add the update package too: it puts back the files a "
+                                       "mod replaced in its folder.");
+                ImGui::PopStyleColor();
+            } else
+                ImGui::TextUnformatted("The installed mods are removed when you install (the mods added here are then "
+                                       "installed).");
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        if (adding) {
+            ImGui::TextDisabled("Adding %s", gb(adding).c_str());
+            ImGui::Spacing();
+        }
+        add_buttons(true);
+        if (!have.mods.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button(plan.remove_mods ? "Keep Mods" : "Remove Mods", ImVec2(u() * 8, 0)))
+                plan.remove_mods = !plan.remove_mods;
+        }
     }
 
     void page_keys()
@@ -555,7 +635,7 @@ struct Wizard {
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(a.c_str());
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", gb(b).c_str());
+                if (b) ImGui::TextDisabled("%s", gb(b).c_str());
             };
             if (plan.disc.set()) row(plan.disc.psn ? "Game (PSN package)" : "Game disc", plan.disc.bytes);
             if (plan.update.set()) row("Update 1.01", plan.update.bytes);
@@ -567,6 +647,8 @@ struct Wizard {
                                         : "The game's executable (made from the disc)",
                     update_required() ? 26872424u : 26872552u);
             for (const Source& d : plan.dlc) row(d.name, d.bytes);
+            if (plan.remove_mods) row("Removing the installed mods", 0);
+            for (const Source& m : plan.mods) row(m.name, m.bytes);
             ImGui::EndTable();
         }
         ImGui::Separator();
@@ -696,14 +778,16 @@ struct Wizard {
         ImGui::PopFont();
         ImGui::TextDisabled("Recompiled  -  Setup");
         ImGui::Dummy(ImVec2(0, U * 1.5f));
-        const char* steps[] = { "Welcome", "Game files", "DLC", "Keys", "Install" };
+        const char* steps[] = { "Welcome", "Game files", "DLC", "Mods", "Keys", "Install" };
         const int at = page == Page::Welcome     ? 0
                        : page == Page::GameFiles ? 1
                        : page == Page::Dlc       ? 2
-                       : page == Page::Keys      ? 3
-                                                 : 4;
-        for (int i = 0; i < 5; i++) {
-            if (i == 3 && !need_keys() && at != 3) continue;   /* the Keys step only when the player is asked */
+                       : page == Page::Mods      ? 3
+                       : page == Page::Keys      ? 4
+                                                 : 5;
+        for (int i = 0; i < 6; i++) {
+            if (i == 3 && !update_required()) continue;          /* mods are for the 1.01 build */
+            if (i == 4 && !need_keys() && at != 4) continue;   /* the Keys step only when the player is asked */
             const ImVec2 p = ImGui::GetCursorScreenPos();
             if (i == at)
                 dl->AddRectFilled(ImVec2(p.x - pad, p.y - 2),
@@ -727,6 +811,7 @@ struct Wizard {
         case Page::Welcome: page_welcome(); break;
         case Page::GameFiles: page_game_files(); break;
         case Page::Dlc: page_dlc(); break;
+        case Page::Mods: page_mods(); break;
         case Page::Keys: page_keys(); break;
         case Page::Confirm: page_confirm(); break;
         case Page::Installing: page_installing(); break;
@@ -769,11 +854,21 @@ struct Wizard {
             if (ImGui::Button("Back", ImVec2(bw, 0))) go(Page::GameFiles);
             ImGui::SameLine();
             if (focus) ImGui::SetKeyboardFocusHere();
-            if (primary(plan.dlc.empty() ? "Skip" : "Next", bw, !busy)) go(need_keys() ? Page::Keys : Page::Confirm);
+            if (primary(plan.dlc.empty() ? "Skip" : "Next", bw, !busy))
+                go(update_required() ? Page::Mods : need_keys() ? Page::Keys : Page::Confirm);
+            break;
+        case Page::Mods:
+            at_right(2);
+            if (ImGui::Button("Back", ImVec2(bw, 0))) go(Page::Dlc);
+            ImGui::SameLine();
+            if (focus) ImGui::SetKeyboardFocusHere();
+            if (primary(plan.mods.empty() && !plan.remove_mods ? "Skip" : "Next", bw,
+                        !busy && !needs_voice_pack(plan, have) && !remove_needs_update()))
+                go(need_keys() ? Page::Keys : Page::Confirm);
             break;
         case Page::Keys:
             at_right(2);
-            if (ImGui::Button("Back", ImVec2(bw, 0))) go(Page::Dlc);
+            if (ImGui::Button("Back", ImVec2(bw, 0))) go(update_required() ? Page::Mods : Page::Dlc);
             ImGui::SameLine();
             if (focus) ImGui::SetKeyboardFocusHere();
             if (primary("Next", bw, keys_ok())) go(Page::Confirm);
@@ -781,7 +876,8 @@ struct Wizard {
         case Page::Confirm: {
             const uint64_t need = plan.bytes(), space = free_bytes(base);
             at_right(2);
-            if (ImGui::Button("Back", ImVec2(bw, 0))) go(need_keys() ? Page::Keys : Page::Dlc);
+            if (ImGui::Button("Back", ImVec2(bw, 0)))
+                go(need_keys() ? Page::Keys : update_required() ? Page::Mods : Page::Dlc);
             ImGui::SameLine();
             if (focus) ImGui::SetKeyboardFocusHere();
             if (!anything() && !make_elf_needed()) {
@@ -804,7 +900,7 @@ struct Wizard {
             break;
         case Page::Done:
             at_right(3);
-            if (ImGui::Button("Add DLC", ImVec2(bw, 0))) go(Page::Dlc);
+            if (ImGui::Button("Add More", ImVec2(bw, 0))) go(Page::Dlc);
             ImGui::SameLine();
             if (ImGui::Button("Quit", ImVec2(bw, 0))) result = 1;
             ImGui::SameLine();

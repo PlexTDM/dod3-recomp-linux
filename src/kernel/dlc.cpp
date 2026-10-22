@@ -17,7 +17,14 @@
  * the .XXX packages in JPV_PKG_FILES.TXT, the rest (two TFCs) in
  * JPV_NON_PKG_FILES.TXT; movies are found by name. That is the lists' own
  * format: the EDATs' headers give their sizes, 453593 and 126 bytes, and
- * these come to exactly that. */
+ * these come to exactly that.
+ *
+ * The DLC chapters' Japanese voices (the DLC Undub, installed by the setup in
+ * DLC_JPV/UNDUB) join the lists: the packages in UNDUB/COOKEDPS3 by their
+ * paths, and the names UNDUB.TXT lists as served by chapter at
+ * /DLC_JPV/UNDUB/CHAPTER/<name>, a path src/kernel/mods.cpp resolves to the
+ * chapter's own copy. With them listed, the title's voice switch takes them
+ * up with the rest. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +76,21 @@ bool dod3setup::dlc_write_jpv_lists(const fs::path& game_root, bool force)
         if (ext == ".BIK" || ext == ".EDAT" || ext == ".TXT") continue;
         const auto rel = fs::relative(it->path(), jpv, ec).generic_u8string();
         (ext == ".XXX" ? pkgs : others).push_back("/DLC_JPV/" + std::string(rel.begin(), rel.end()));
+    }
+    const fs::path undub = jpv / "UNDUB";
+    if (fs::exists(undub / "UNDUB.TXT", ec)) {
+        for (fs::directory_iterator it(undub / "COOKEDPS3", ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_regular_file(ec) && upper_ext(it->path()) == ".XXX")
+                pkgs.push_back("/DLC_JPV/UNDUB/COOKEDPS3/" + dod3::utf8(it->path().filename()));
+        if (FILE* f = dod3::open_file(undub / "UNDUB.TXT", "rb")) {
+            char line[512];
+            while (fgets(line, sizeof line, f)) {
+                std::string l(line);
+                while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+                if (l.rfind("C ", 0) == 0) pkgs.push_back("/DLC_JPV/UNDUB/CHAPTER/" + l.substr(2));
+            }
+            fclose(f);
+        }
     }
     std::sort(pkgs.begin(), pkgs.end());
     std::sort(others.begin(), others.end());

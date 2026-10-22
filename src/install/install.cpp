@@ -3,12 +3,14 @@
 #include "install/iso.h"
 #include "install/pkg.h"
 #include "install/crypto.h"
+#include "install/zip.h"
 #include "cpu/eboot.h"
 #include "util.h"
 
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <map>
 #include <chrono>
 #include <thread>
 #ifdef _WIN32
@@ -48,6 +50,7 @@ using dod3::utf8;
 
 fs::path update_dir(const fs::path& base) { return base / "game/disc/game/BLES00000"; }
 fs::path dlc_dir(const fs::path& base) { return base / "game/disc/game/NPUB31251"; }
+fs::path mods_dir(const fs::path& base) { return base / "game/mods"; }
 fs::path staging(const fs::path& base) { return base / "game/setup.partial"; }
 
 /* a file's first four bytes, big-endian, and the next two in `rev` */
@@ -250,6 +253,174 @@ bool licence_only(const Pkg& pkg)
     return true;
 }
 
+/* ---- mods -------------------------------------------------------------------
+ * The ones known by name: the Spanish translation by Traducciones Vacuno
+ * (TraduSquare, v1.1, for BLUS31197 1.01), as its packages and its movie
+ * archive, and the DLC chapters' Japanese voices (the DLC Undub by Canzah and
+ * Slow). The packages are homebrew ones, most with no checksum in their
+ * footer: each is told by its size and QA digest and checked against its
+ * SHA-1 as it is installed. */
+struct KnownPkg {
+    const char* id;
+    uint64_t size;
+    const char* qa;      /* the header's QA digest */
+    const char* sha1;    /* of all but the last 32 bytes, as extract() hashes it */
+};
+const KnownPkg kKnownPkgs[] = {
+    { "ES-GAME", 537394384, "12034f397b199249954df576786cc78f", "99823fc1dcdfb442d16e07f38eeed48966da0910" },
+    { "ES-DATA", 1525988592, "0fbad69750dfe5c7c559a30cfbc89a61", "8ed55ecea67c554189294c5f646b95b11ec77df1" },
+    { "ES-DLC", 291400080, "e5f6b1e037ae01edf7ce89e307a02b2e", "5561c8e5e8c21ee041e7bbf81eacdf6146a69dcf" },
+    { "ES-JPV", 445111920, "d1b828cfd2c518489b631840cdbbe2df", "4e30202af512b485209cc2034ae7c3ff93461e40" },
+};
+/* MOVIES.zip: its five movies, by name and CRC-32 */
+const struct {
+    const char* name;
+    uint32_t crc;
+} kEsMovies[] = {
+    { "D3_OPN_TEST.BIK", 0xde105c0au }, { "M1040_E0900.BIK", 0x2f3f7de9u }, { "M2040_E0070.BIK", 0x9d2985a8u },
+    { "M5320_E0010.BIK", 0xc6c15805u }, { "STARTLOAD.BIK", 0x5f67cbc8u },
+};
+
+std::string upper(std::string s)
+{
+    for (char& c : s) c = (char)toupper((unsigned char)c);
+    return s;
+}
+
+std::string hex(const uint8_t* p, size_t n)
+{
+    static const char d[] = "0123456789abcdef";
+    std::string s;
+    for (size_t i = 0; i < n; i++) {
+        s += d[p[i] >> 4];
+        s += d[p[i] & 15];
+    }
+    return s;
+}
+
+const KnownPkg* known_pkg(const Pkg& pkg)
+{
+    for (const KnownPkg& k : kKnownPkgs)
+        if (pkg.file_size == k.size && hex(pkg.qa, 16) == k.qa) return &k;
+    return nullptr;
+}
+
+std::string mod_name(const std::string& id)
+{
+    for (const DlcInfo& m : known_mods())
+        if (id == m.id) return m.name;
+    return id;
+}
+
+/* Where a mod package's file goes, by its path in the package and the title
+ * it is for: "patch/..." into the update's PATCH folder (as the console has
+ * it), "tree/..." into game/mods at the path under game/disc it stands in for
+ * (the game-data install's files, the DLC's), "" left out (the package's own
+ * PARAM.SFO, icons, package.conf), "?" nowhere it could go. */
+std::string mod_layout(const std::string& title, const std::string& name)
+{
+    if (name.find('/') == std::string::npos) return "";
+    auto starts = [&](const char* p) { return name.rfind(p, 0) == 0; };
+    if (title == "BLUS31197") {
+        if (starts("USRDIR/PATCH/")) return "patch/" + name.substr(13);
+        if (starts("USRDIR/FIOS-UNREALENGINE3/")) return "tree/game/BLES00000DATA/" + name;
+    } else if (title == "NPUB31251") {
+        if (starts("USRDIR/DLC/") || starts("USRDIR/DLC_JPV/")) return "tree/game/NPUB31251/" + name;
+    }
+    return "?";
+}
+
+/* A movie archive's entries: every file a .BIK, in MOVIES/ or at the top. */
+bool movie_entries(const std::vector<ZipEntry>& es)
+{
+    size_t n = 0;
+    for (const ZipEntry& e : es) {
+        if (e.dir) continue;
+        const std::string u = upper(e.name);
+        const size_t sl = u.find('/');
+        if (u.size() < 5 || u.compare(u.size() - 4, 4, ".BIK") != 0) return false;
+        if (sl != std::string::npos && u.rfind("MOVIES/", 0) != 0) return false;
+        if (u.find('/', sl == std::string::npos ? 0 : sl + 1) != std::string::npos) return false;
+        n++;
+    }
+    return n > 0;
+}
+
+/* The DLC Undub's folder: the one holding GAME (or GAME itself), its
+ * GAME/NPUB31251/USRDIR/DLC holding ADDSCENARIO folders. "" if not. */
+fs::path undub_dlc_dir(const fs::path& p)
+{
+    std::error_code ec;
+    for (const fs::path& g : { p / "GAME", p }) {
+        const fs::path d = g / "NPUB31251/USRDIR/DLC";
+        for (int i = 0; i < 6; i++)
+            if (fs::is_directory(d / ("ADDSCENARIO0000" + std::to_string(i)), ec)) return d;
+    }
+    return {};
+}
+
+/* The release the DLC Undub's readme names in its first line ("Drakengard 3
+ * DLC Undub Prototype ver.... by ..."), else "". */
+std::string undub_release(const fs::path& folder)
+{
+    std::string l;
+    if (FILE* f = dod3::open_file(folder / "Readme.txt", "rb")) {
+        char line[256] = "";
+        if (fgets(line, sizeof line, f)) l = line;
+        fclose(f);
+    }
+    while (!l.empty() && (l.back() == '\n' || l.back() == '\r' || l.back() == ' ')) l.pop_back();
+    return l.find("Undub") != std::string::npos && l.size() < 160 ? l : std::string();
+}
+
+/* game/mods/installed.txt: one line a mod, "<id>\t<where>\t<name>"; where is
+ * "patch" (the update's folder), "tree" (game/mods), "jpv" (the voice pack's
+ * folder), or a comma-separated mix. */
+std::vector<std::vector<std::string>> mods_read(const fs::path& base)
+{
+    std::vector<std::vector<std::string>> out;
+    FILE* f = dod3::open_file(mods_dir(base) / "installed.txt", "rb");
+    if (!f) return out;
+    char line[1024];
+    while (fgets(line, sizeof line, f)) {
+        std::string l(line);
+        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+        std::vector<std::string> cols;
+        size_t at = 0;
+        for (int i = 0; i < 2; i++) {
+            const size_t t = l.find('\t', at);
+            if (t == std::string::npos) break;
+            cols.push_back(l.substr(at, t - at));
+            at = t + 1;
+        }
+        if (cols.size() == 2) {
+            cols.push_back(l.substr(at));
+            out.push_back(cols);
+        }
+    }
+    fclose(f);
+    return out;
+}
+
+bool mods_write(const fs::path& base, const std::vector<std::vector<std::string>>& rows)
+{
+    std::error_code ec;
+    fs::create_directories(mods_dir(base), ec);
+    FILE* f = dod3::open_file(mods_dir(base) / "installed.txt", "wb");
+    if (!f) return false;
+    for (const auto& r : rows) fprintf(f, "%s\t%s\t%s\n", r[0].c_str(), r[1].c_str(), r[2].c_str());
+    fclose(f);
+    return true;
+}
+
+void mods_record(const fs::path& base, const std::string& id, const std::string& where, const std::string& name)
+{
+    auto rows = mods_read(base);
+    rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const auto& r) { return r[0] == id; }), rows.end());
+    rows.push_back({ id, where, name });
+    mods_write(base, rows);
+}
+
 /* Where the PSN game package's files go: under PS3_GAME, as on the disc. Its
  * EBOOT.BIN and its one .EDAT (COALESCED_INT.BIN, under licence) are left
  * out; the update brings the executable and the plain file. */
@@ -286,7 +457,203 @@ bool psn_fix_toc(const fs::path& disc, std::string* err)
     return wrote;
 }
 
+/* The DLC Undub: the six chapters' voice, lip-sync and message packages and
+ * their movies with Japanese voices (the readme's GAME/NPUB31251), put
+ * beside the voice pack's own in DLC_JPV/UNDUB and added to its file lists
+ * (dlc_write_jpv_lists), so the voice option switches them with the rest:
+ * Japanese, they are read in place of the chapter's own; English, the
+ * chapter's own are. The title finds a voice-pack file by its name alone, so
+ * a name the undub has in more than one chapter, or one the main game has
+ * too, goes in a folder of its chapter's (UNDUB/ADDSCENARIO0000n) and is
+ * served by chapter (src/kernel/mods.cpp); the others in UNDUB/COOKEDPS3, the
+ * movies in UNDUB/MOVIES. The readme's GAME/BLUS31197DATA and ISO hold the
+ * 1.01 update's ten message packages unchanged (for a PS3 running 1.00):
+ * they are not needed. */
+bool install_undub(const fs::path& base, const Source& s, const fs::path& stage,
+                   const std::function<bool(uint64_t)>& progress, std::string* err)
+{
+    std::error_code ec;
+    const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
+    if (!fs::is_directory(jpv / "SQEX03GAME", ec)) {
+        *err = "the DLC chapters' Japanese voices need the Japanese Voice Pack: add its package too";
+        return false;
+    }
+    const fs::path src = undub_dlc_dir(s.path);
+    struct Item {
+        fs::path from;
+        int chapter;
+        bool movie;
+    };
+    std::vector<Item> items;
+    std::map<std::string, int> chapters_of;   /* a package name: in how many chapters */
+    for (int i = 0; i < 6; i++) {
+        const fs::path d = src / ("ADDSCENARIO0000" + std::to_string(i));
+        for (fs::recursive_directory_iterator it(d, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            const bool movie = upper(it->path().parent_path().filename().string()) == "MOVIES";
+            items.push_back({ it->path(), i, movie });
+            if (!movie) chapters_of[upper(it->path().filename().string())]++;
+        }
+    }
+    if (items.empty()) {
+        *err = "no DLC chapter files in " + utf8(src);
+        return false;
+    }
+    const fs::path cooked = base / "game/disc/PS3_GAME/USRDIR/SQEX03GAME/COOKEDPS3";
+    auto shared = [&](const fs::path& f) {
+        const std::string n = f.filename().string();
+        return chapters_of[upper(n)] > 1 || fs::exists(cooked / n, ec) || fs::exists(jpv / "SQEX03GAME/COOKEDPS3" / n, ec);
+    };
+    const fs::path part = stage / "UNDUB";
+    fs::remove_all(part, ec);
+    std::set<std::string> by_chapter;
+    uint64_t done = 0;
+    for (const Item& it : items) {
+        const std::string n = it.from.filename().string();
+        fs::path to;
+        if (it.movie)
+            to = part / "MOVIES" / n;
+        else if (shared(it.from)) {
+            to = part / ("ADDSCENARIO0000" + std::to_string(it.chapter)) / n;
+            by_chapter.insert(upper(n));
+        } else
+            to = part / "COOKEDPS3" / n;
+        fs::create_directories(to.parent_path(), ec);
+        fs::copy_file(it.from, to, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            *err = "could not copy " + utf8(it.from) + ": " + ec.message();
+            return false;
+        }
+        done += fs::file_size(to, ec);
+        if (!progress(done)) {
+            *err = "cancelled";
+            return false;
+        }
+    }
+    /* UNDUB.TXT: the release, then the names served by chapter */
+    const std::string release = undub_release(s.path);
+    std::string txt = (release.empty() ? s.name : release) + "\r\n";
+    for (const std::string& n : by_chapter) txt += "C " + n + "\r\n";
+    if (FILE* f = dod3::open_file(part / "UNDUB.TXT", "wb")) {
+        fwrite(txt.data(), 1, txt.size(), f);
+        fclose(f);
+    }
+    fs::remove_all(jpv / "UNDUB", ec);   /* a real folder (no links): the undub installed before */
+    move_patiently(part, jpv / "UNDUB", ec);
+    if (ec) {
+        *err = "could not move the DLC chapters' Japanese voices into place: " + ec.message();
+        return false;
+    }
+    if (!dlc_write_jpv_lists(base / "game/disc", true)) {
+        *err = "the DLC chapters' Japanese voices installed, but the voice pack's file lists could not be written";
+        return false;
+    }
+    mods_record(base, s.id, "jpv", s.name);
+    return true;
+}
+
+/* A mod: a package's files where mod_layout puts them, a movie archive's
+ * movies into game/mods (in place of the disc's), the DLC Undub (above). */
+bool install_mod(const fs::path& base, const Source& s, const fs::path& stage,
+                 const std::function<bool(uint64_t)>& progress, std::string* err)
+{
+    std::error_code ec;
+    if (s.form == ModForm::Undub) return install_undub(base, s, stage, progress, err);
+    const fs::path part = stage / "mod";
+    fs::remove_all(part, ec);
+    if (s.form == ModForm::Zip) {
+        std::vector<ZipEntry> es;
+        if (!zip_list(s.path, &es, err)) return false;
+        uint64_t before = 0;
+        for (const ZipEntry& e : es) {
+            if (e.dir) continue;
+            const std::string n = fs::path(e.name).filename().string();
+            if (!zip_extract(s.path, e, part / "tree/PS3_GAME/USRDIR/SQEX03GAME/MOVIES" / n,
+                             [&](uint64_t x) { return progress(before + x); }, err))
+                return false;
+            before += e.csize;
+        }
+    } else {
+        Pkg pkg;
+        if (!pkg_open(s.path, &pkg, err)) return false;
+        if (const KnownPkg* k = known_pkg(pkg)) pkg.expect_sha1 = k->sha1;
+        const std::string title = pkg.content_id.size() >= 16 ? pkg.content_id.substr(7, 9) : "";
+        if (!pkg_extract(pkg, part, [&](uint64_t x, uint64_t) { return progress(x); }, err,
+                         [&](const std::string& n) {
+                             const std::string to = mod_layout(title, n);
+                             return to == "?" ? std::string() : to;
+                         }))
+            return false;
+    }
+    std::string where;
+    if (fs::exists(part / "patch", ec)) {
+        if (!installed(base).update) {
+            *err = s.name + " goes into the 1.01 update's folder: add the update package too";
+            return false;
+        }
+        if (!merge_move(part / "patch", update_dir(base) / "USRDIR/PATCH", err)) return false;
+        where = "patch";
+    }
+    if (fs::exists(part / "tree", ec)) {
+        if (!merge_move(part / "tree", mods_dir(base), err)) return false;
+        where += where.empty() ? "tree" : ",tree";
+    }
+    fs::remove_all(part, ec);
+    mods_record(base, s.id, where, s.name);
+    return true;
+}
+
+/* The installed mods removed (Plan::remove_mods): game/mods' files (the
+ * setup's own, no links there) and the DLC chapters' voices, the voice
+ * pack's lists written again without them. A mod with files in the update's
+ * folder stays listed until the update is installed again. */
+bool remove_mods(const fs::path& base, std::string* err)
+{
+    std::error_code ec;
+    for (fs::directory_iterator it(mods_dir(base), ec), end; !ec && it != end; it.increment(ec))
+        if (it->path().filename() != "installed.txt") fs::remove_all(it->path(), ec);
+    const fs::path jpv = dlc_dir(base) / "USRDIR/DLC_JPV";
+    if (fs::exists(jpv / "UNDUB", ec)) {
+        fs::remove_all(jpv / "UNDUB", ec);
+        if (ec) {
+            *err = "could not remove " + utf8(jpv / "UNDUB") + ": " + ec.message();
+            return false;
+        }
+        if (fs::is_directory(jpv / "SQEX03GAME", ec) && !dlc_write_jpv_lists(base / "game/disc", true)) {
+            *err = "could not write the voice pack's file lists again";
+            return false;
+        }
+    }
+    auto rows = mods_read(base);
+    rows.erase(std::remove_if(rows.begin(), rows.end(),
+                              [](const auto& r) { return r[1].find("patch") == std::string::npos; }),
+               rows.end());
+    for (auto& r : rows) r[1] = "patch";
+    mods_write(base, rows);
+    return true;
+}
+
 }  // namespace
+
+bool mods_need_update(const fs::path& base)
+{
+    for (const auto& r : mods_read(base))
+        if (r[1].find("patch") != std::string::npos) return true;
+    return false;
+}
+
+const std::vector<DlcInfo>& known_mods()
+{
+    static const std::vector<DlcInfo> k = {
+        { "UNDUB", "Japanese voices for the DLC chapters (DLC Undub)" },
+        { "ES-GAME", "Spanish translation: the game" },
+        { "ES-DATA", "Spanish translation: title screen and menus" },
+        { "ES-MOVIES", "Spanish translation: movies" },
+        { "ES-DLC", "Spanish translation: the DLC" },
+        { "ES-JPV", "Spanish translation: the Japanese voices' movies" },
+    };
+    return k;
+}
 
 const std::vector<DlcInfo>& known_dlc()
 {
@@ -322,6 +689,7 @@ uint64_t Plan::bytes() const
 {
     uint64_t n = disc.bytes + update.bytes + eboot.bytes;
     for (const Source& d : dlc) n += d.bytes;
+    for (const Source& m : mods) n += m.bytes;
     return n;
 }
 
@@ -345,6 +713,10 @@ Status installed(const fs::path& base)
         update_required() ? update_dir(base) / "USRDIR/EBOOT.BIN" : base / "game/disc/PS3_GAME/USRDIR/EBOOT.BIN", ec);
     for (const DlcInfo& d : known_dlc())
         if (fs::is_directory(dlc_dir(base) / "USRDIR/DLC" / d.id, ec)) s.dlc.insert(d.id);
+    for (const auto& r : mods_read(base)) {
+        if (r[1] == "jpv" && !fs::exists(dlc_dir(base) / "USRDIR/DLC_JPV/UNDUB/UNDUB.TXT", ec)) continue;
+        s.mods.push_back({ r[0], r[2] });
+    }
     return s;
 }
 
@@ -403,6 +775,21 @@ bool identify(const fs::path& p, Source* s, std::string* err)
     std::error_code ec;
     *s = Source();
     if (fs::is_directory(p, ec)) {
+        const fs::path dlc = undub_dlc_dir(p);
+        if (!dlc.empty()) {
+            if (!update_required()) {
+                *err = "the DLC chapters' Japanese voices are for the 1.01 build";
+                return false;
+            }
+            s->kind = SourceKind::Mod;
+            s->form = ModForm::Undub;
+            s->path = p;
+            s->id = "UNDUB";
+            s->name = mod_name("UNDUB");
+            for (fs::recursive_directory_iterator it(dlc, ec), end; !ec && it != end; it.increment(ec))
+                if (it->is_regular_file(ec)) s->bytes += it->file_size(ec);
+            return true;
+        }
         Disc disc;
         if (!open_disc(p, &disc, err)) return false;
         s->kind = SourceKind::Disc;
@@ -420,11 +807,44 @@ bool identify(const fs::path& p, Source* s, std::string* err)
     if (m == 0x7F504B47u) {   /* a PS3 package */
         const std::string cid = pkg_content_id(p);
         if (!retail(p)) {
-            /* NoPayStation's "FIX" packages are debug packages */
-            *err = cid.rfind(kDlcPrefix, 0) == 0
-                       ? "this is a licence fix package, not the DLC itself. It is not needed: add the DLC packages"
-                       : "a debug package, not one from PSN";
-            return false;
+            Pkg pkg;
+            if (!pkg_open(p, &pkg, err)) return false;
+            /* NoPayStation's "FIX" packages are debug packages too */
+            if (licence_only(pkg)) {
+                *err = "this is a licence fix package, not the DLC itself. It is not needed: add the DLC packages";
+                return false;
+            }
+            /* a homebrew package: a mod, its files where mod_layout puts them */
+            const std::string title = cid.size() >= 16 ? cid.substr(7, 9) : "";
+            for (const PkgEntry& e : pkg.entries) {
+                if (e.dir) continue;
+                const std::string to = mod_layout(title, e.name);
+                if (to == "?") {
+                    *err = title == "BLUS31197" || title == "NPUB31251"
+                               ? "a homebrew package with files the setup has no place for (" + e.name + ")"
+                               : "a homebrew package for another game (" + cid + ")";
+                    return false;
+                }
+                if (!to.empty()) s->bytes += e.size;
+            }
+            if (!s->bytes) {
+                *err = "a homebrew package with nothing in it to install";
+                return false;
+            }
+            if (!update_required()) {
+                *err = "mods are for the 1.01 build";
+                return false;
+            }
+            s->kind = SourceKind::Mod;
+            s->form = ModForm::Pkg;
+            if (const KnownPkg* k = known_pkg(pkg)) {
+                s->id = k->id;
+                s->name = mod_name(k->id);
+            } else {
+                s->id = "PKG-" + hex(pkg.qa, 4);
+                s->name = "Mod package " + utf8(p.filename());
+            }
+            return true;
         }
         if (cid == kPsnGameId) {
             const std::string sha = pkg_footer_sha1(p);
@@ -496,6 +916,39 @@ bool identify(const fs::path& p, Source* s, std::string* err)
         }
         *err = cid.empty() ? "an unreadable PS3 package" : "a package for another game (" + cid + ")";
         return false;
+    }
+    if (m == 0x504B0304u) {   /* a .zip: a mod's movies */
+        std::vector<ZipEntry> es;
+        if (!zip_list(p, &es, err)) return false;
+        if (!movie_entries(es)) {
+            *err = "a .zip that is not a mod's movies: unpack it and add what is inside";
+            return false;
+        }
+        if (!update_required()) {
+            *err = "mods are for the 1.01 build";
+            return false;
+        }
+        bool es_movies = true;
+        size_t n = 0;
+        for (const ZipEntry& e : es) {
+            if (e.dir) continue;
+            bool hit = false;
+            for (const auto& k : kEsMovies)
+                hit |= upper(fs::path(e.name).filename().string()) == k.name && e.crc == k.crc;
+            es_movies &= hit;
+            n++;
+            s->bytes += e.usize;
+        }
+        s->kind = SourceKind::Mod;
+        s->form = ModForm::Zip;
+        if (es_movies && n == sizeof kEsMovies / sizeof kEsMovies[0]) {
+            s->id = "ES-MOVIES";
+            s->name = mod_name("ES-MOVIES");
+        } else {
+            s->id = "ZIP-" + upper(p.stem().string());
+            s->name = "Movies " + utf8(p.filename());
+        }
+        return true;
     }
     if (m == 0x7F454C46u) {   /* an ELF */
         const std::string sha = sha256_file(p);
@@ -592,6 +1045,7 @@ bool install(const fs::path& base, const Plan& plan,
     if (plan.eboot.set()) total += plan.eboot.bytes;
     if (plan.update.set()) total += fs::file_size(plan.update.path, ec);
     for (const Source& d : plan.dlc) total += fs::file_size(d.path, ec);
+    for (const Source& m : plan.mods) total += m.form == ModForm::Undub ? m.bytes : fs::file_size(m.path, ec);
     const fs::path stage = staging(base);
     /* staging is deleted only once nothing of the previous copy is in it */
     auto clean = [&](std::string* why) {
@@ -608,6 +1062,10 @@ bool install(const fs::path& base, const Plan& plan,
 
     fs::create_directories(base / "game", ec);
     if (!clean(err)) return false;   /* a run that was cut short */
+    if (plan.remove_mods) {
+        if (!progress(0, total, "Removing the mods")) return fail("cancelled");
+        if (!remove_mods(base, err)) return fail(*err);
+    }
 
     /* The executable, made first (in memory) so wrong keys stop the install
      * before anything is copied; written once the update is in place. */
@@ -675,6 +1133,14 @@ bool install(const fs::path& base, const Plan& plan,
          * the executable can be made again); the old PATCH folder goes whole,
          * so a file 1.01 dropped does not linger */
         fs::remove_all(update_dir(base) / "USRDIR/PATCH", ec);
+        {   /* the mods that had files there are gone with them */
+            auto rows = mods_read(base);
+            const size_t n = rows.size();
+            rows.erase(std::remove_if(rows.begin(), rows.end(),
+                                      [](const auto& r) { return r[1].find("patch") != std::string::npos; }),
+                       rows.end());
+            if (rows.size() != n) mods_write(base, rows);
+        }
         if (!merge_move(part, update_dir(base), err)) return fail(*err);
         done = start + pkg.file_size;
     }
@@ -708,9 +1174,25 @@ bool install(const fs::path& base, const Plan& plan,
             return fail("the Japanese Voice Pack installed, but its file lists could not be written");
         done = start + pkg.file_size;
     }
+
+    for (const Source& md : plan.mods) {
+        const uint64_t start = done;
+        const std::string what = "Installing " + md.name;
+        if (!install_mod(base, md, stage, [&](uint64_t x) { return progress(start + x, total, what); }, err))
+            return fail(*err);
+        done = start + (md.form == ModForm::Undub ? md.bytes : fs::file_size(md.path, ec));
+    }
     fs::remove_all(stage, ec);
     progress(total, total, "Done");
     return true;
+}
+
+bool needs_voice_pack(const Plan& plan, const Status& have)
+{
+    bool undub = false, pack = have.dlc.count("ADDJAPANESEVOICE") != 0;
+    for (const Source& m : plan.mods) undub |= m.form == ModForm::Undub;
+    for (const Source& d : plan.dlc) pack |= d.id == "ADDJAPANESEVOICE";
+    return undub && !pack;
 }
 
 int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, const fs::path& keys_path)
@@ -728,6 +1210,11 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
         }
     }
     for (const fs::path& f : files) {
+        if (f == "--remove-mods") {
+            plan.remove_mods = true;
+            printf("--remove-mods: the installed mods are removed\n");
+            continue;
+        }
         Source s;
         std::string err;
         if (!identify(f, &s, &err)) {
@@ -745,6 +1232,12 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
                 plan.dlc.end());
             plan.dlc.push_back(s);
             break;
+        case SourceKind::Mod:
+            plan.mods.erase(
+                std::remove_if(plan.mods.begin(), plan.mods.end(), [&](const Source& o) { return o.id == s.id; }),
+                plan.mods.end());
+            plan.mods.push_back(s);
+            break;
         default: break;
         }
     }
@@ -754,6 +1247,10 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
         missing += update_required() ? " the game (the disc as an .iso or its folder, or the US PSN package),"
                                      : " the game disc (an .iso or its folder),";
     if (update_required() && !plan.update.set() && !have.update) missing += " the 1.01 update package,";
+    if (plan.remove_mods && !plan.update.set() && mods_need_update(base))
+        missing += " the 1.01 update package (it puts back the files a mod replaced in its folder),";
+    if (needs_voice_pack(plan, have))
+        missing += " the Japanese Voice Pack's package (the DLC chapters' Japanese voices go with it),";
     if (!plan.eboot.set() && !have.eboot && !plan.keys.complete()) {
         missing += " the keys for the game's executable (--keys <file> with";
         for (const KeyField& k : needed_keys()) missing += std::string(" ") + k.id;

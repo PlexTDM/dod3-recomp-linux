@@ -71,6 +71,7 @@ const char* dod3_settings_path();   /* main.cpp: the dod3.ini read at boot, or t
 extern "C" void rsx_present_set_screen_aspect(float aspect);    /* rsx_draw_engine.h */
 extern "C" float rsx_present_window_aspect(void);
 void dod3_hud_aspect(int phase, uint32_t canvas, bool on);       /* src/patches/hud_aspect.cpp */
+bool dod3_dlc_jpvoice();                                          /* src/kernel/dlc.cpp */
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
@@ -624,6 +625,8 @@ int bridge(int cmd, int a, int b)
     case 17: /* the HUD's drawing: a phase, and for the begin its UCanvas */
         dod3_hud_aspect(a, (uint32_t)b, s_aspect_now > 0.0f);
         return 0;
+    case 18: /* entering a DLC mission (1.01): keep the Japanese voices? */
+        return dod3_dlc_jpvoice() ? 1 : 0;
     case 9: { /* the camera's field of view (float bits); b: the gameplay camera's */
         float fov;
         memcpy(&fov, &a, 4);

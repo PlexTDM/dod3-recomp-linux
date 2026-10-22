@@ -257,6 +257,7 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
 set(SETUP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/install.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/install/zip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/crypto.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/self.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/keys.cpp")
@@ -320,7 +321,8 @@ set(PORT_KERNEL_SOURCES              # the port's own HLE
     src/kernel/hle.cpp
     src/kernel/spurs_lfqueue.cpp
     src/kernel/spurs_queue.cpp
-    src/kernel/dlc.cpp)
+    src/kernel/dlc.cpp
+    src/kernel/mods.cpp)             # mods' files and the DLC chapters' voices, through the VFS's hook
 set(PORT_PATCH_SOURCES               # native replacements of the game's own code
     src/patches/edgezlib.cpp
     src/patches/gc.cpp

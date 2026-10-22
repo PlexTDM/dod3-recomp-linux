@@ -40,6 +40,9 @@ What you need:
   disc release's update; the PSN release takes it too.
 - Optionally, the DLC packages you own (`UP0082-NPUB31251_00-...`). No
   licence files are needed.
+- Optionally, mods: the Spanish fan translation and the DLC Undub
+  (Japanese voices for the DLC chapters), which the setup installs on its
+  Mods page; see [docs/PLAYING.md](docs/PLAYING.md#mods).
 
 Windows:
 

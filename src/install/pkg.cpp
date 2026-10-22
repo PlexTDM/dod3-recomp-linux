@@ -39,6 +39,30 @@ struct File {
     }
 };
 
+/* Decrypt (or encrypt: the same) bytes [off, off + n) of the data area. */
+void crypt(const Pkg& pkg, const Aes& aes, uint64_t off, uint8_t* buf, size_t n)
+{
+    if (!pkg.debug) {
+        aes_ctr(aes, pkg.riv, off, buf, n);
+        return;
+    }
+    uint8_t in[64] = {}, h[20];
+    memcpy(in, pkg.qa, 8);
+    memcpy(in + 8, pkg.qa, 8);
+    memcpy(in + 16, pkg.qa + 8, 8);
+    memcpy(in + 24, pkg.qa + 8, 8);
+    for (size_t i = 0; i < n;) {
+        const uint64_t blk = (off + i) / 16, at = (off + i) % 16;
+        for (int b = 0; b < 8; b++) in[56 + b] = (uint8_t)(blk >> (56 - 8 * b));
+        Sha1 s;
+        s.update(in, sizeof in);
+        s.digest(h);
+        const size_t take = std::min<size_t>(16 - (size_t)at, n - i);
+        for (size_t j = 0; j < take; j++) buf[i + j] ^= h[at + j];
+        i += take;
+    }
+}
+
 }  // namespace
 
 uint64_t Pkg::payload() const
@@ -84,10 +108,12 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
         *err = "not a PS3 package";
         return false;
     }
-    if (!(h[4] & 0x80) || (h[6] << 8 | h[7]) != 1) {
-        *err = "not a retail PS3 package";
+    if ((h[6] << 8 | h[7]) != 1) {
+        *err = "not a PS3 package";
         return false;
     }
+    pkg->debug = !(h[4] & 0x80);
+    memcpy(pkg->qa, h + 0x60, 16);
     const uint32_t items = dod3_be32(h + 0x14);
     pkg->data_offset = dod3_be64(h + 0x20);
     pkg->data_size = dod3_be64(h + 0x28);
@@ -104,7 +130,7 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
         *err = "cannot read the package";
         return false;
     }
-    aes_ctr(aes, pkg->riv, 0, tab.data(), tab.size());
+    crypt(*pkg, aes, 0, tab.data(), tab.size());
     pkg->entries.clear();
     for (uint32_t i = 0; i < items; i++) {
         const uint8_t* e = tab.data() + (size_t)i * 32;
@@ -124,7 +150,7 @@ bool pkg_open(const fs::path& p, Pkg* pkg, std::string* err)
             *err = "cannot read the package";
             return false;
         }
-        aes_ctr(aes, pkg->riv, name_off, nm.data(), nm.size());
+        crypt(*pkg, aes, name_off, nm.data(), nm.size());
         ent.name.assign((const char*)nm.data(), strnlen((const char*)nm.data(), nm.size()));
         if (ent.name.empty() || ent.name.find("..") != std::string::npos || ent.name[0] == '/' || ent.name[0] == '\\') {
             *err = "the package names a file outside its folder";
@@ -200,7 +226,7 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
             const uint64_t b = std::min(hi, pkg.data_offset + cur->offset + cur->size);
             if (a < b && out) {
                 work.assign(buf.begin() + (size_t)(a - lo), buf.begin() + (size_t)(b - lo));
-                aes_ctr(aes, pkg.riv, a - pkg.data_offset, work.data(), work.size());
+                crypt(pkg, aes, a - pkg.data_offset, work.data(), work.size());
                 if (fwrite(work.data(), 1, work.size(), out->f) != work.size()) {
                     *err = "disk full or not writable";
                     return false;
@@ -223,7 +249,8 @@ bool pkg_extract(const Pkg& pkg, const fs::path& dest, const std::function<bool(
         *err = "the package is cut short";
         return false;
     }
-    if (sha.hex() != pkg_footer_sha1(pkg.path)) {
+    const std::string want = pkg.expect_sha1.empty() ? pkg_footer_sha1(pkg.path) : pkg.expect_sha1;
+    if (want != std::string(40, '0') && sha.hex() != want) {
         *err = "the package is damaged (its checksum does not match): " + utf8(pkg.path.filename());
         return false;
     }
@@ -251,7 +278,7 @@ bool pkg_read_file(const Pkg& pkg, const std::string& name, std::vector<uint8_t>
     }
     Aes aes;
     aes.set_key(k_ps3recomp_pkg_key, 128);
-    aes_ctr(aes, pkg.riv, e->offset, out->data(), out->size());
+    crypt(pkg, aes, e->offset, out->data(), out->size());
     return true;
 }
 

@@ -86,6 +86,7 @@ int dod3_mac_option_held(void);
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
 void dod3_hud_aspect_install();     /* src/patches/hud_aspect.cpp */
 void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's file lists */
+void dod3_mods_prepare();           /* src/kernel/mods.cpp: the mods' files, the DLC chapters' voices */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
 
 #ifdef _WIN32
@@ -2073,6 +2074,7 @@ int main(int argc, char** argv)
         if (*root) dod3setup::gamedata_layout(std::filesystem::u8path(root));
     dod3_menu_patch_prepare();
     dod3_dlc_prepare();
+    dod3_mods_prepare();
 #ifdef _WIN32
     /* DOD3_PROF / DOD3_STALL_MS / DOD3_STALL_SAMPLE: src/os/win32/prof.cpp. */
     win_prof_start();
