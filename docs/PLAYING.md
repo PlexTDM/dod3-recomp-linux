@@ -17,7 +17,8 @@ or Sony. Drakengard 3 and its assets belong to their owners.
    - Or a Mac with Apple silicon (M1 or newer) on macOS 13 Ventura or newer.
 
    About 16 GB of free disk space for the game, plus 10 GB more if you
-   install the Japanese voice pack. The install folder should be on a
+   install the Japanese voice pack and about 3 GB for the Spanish
+   translation. The install folder should be on a
    drive that takes links between folders (NTFS or APFS, not exFAT).
 
 2. Your copy of Drakengard 3, US release, as one of:
@@ -65,9 +66,9 @@ Windows:
    Files / Add Folder; each one is
    recognised by itself, in any order. Then Install. The game's files are
    copied next to dod3.exe into the "game" folder (a few minutes).
-4. Start Game. The first minutes of the first launch stutter while graphics
+4. Play. The first minutes of the first launch stutter while graphics
    shaders are compiled; they are kept in the "cache" folder, so later
-   launches are smooth.
+   launches are smooth. From then on dod3.exe opens the launcher (below).
 
 macOS:
 
@@ -115,6 +116,10 @@ without installing anything.
 
 ## Settings
 
+In the launcher: Settings, in four tabs (Display, Graphics, Controls,
+System), sets the settings below and saves them to dod3.ini as you change
+them; the game uses them from its next start.
+
 In the game: Settings > Graphics Settings (on the title menu, next to
 Audio Settings) sets the resolution, display mode, frame rate, v-sync,
 anti-aliasing (FXAA, or MSAA 2x/4x/8x), texture filtering and field of
@@ -152,6 +157,7 @@ folder above). It explains each setting:
 | DOD3_DRAW_DISTANCE | 2, 3, 5 or 10: props, bushes and small trees are drawn from that many times as far away; unset is the original |
 | DOD3_TREE_LOD | 2, 3, 5 or 10: the large trees are drawn, and stay their full models, that many times as far away; unset is the original. From the next area loaded |
 | DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
+| DOD3_LAUNCHER | 0 starts the game straight away, without the launcher; holding Shift (Option on a Mac) while it starts opens the launcher anyway. Unset opens it at every start |
 | DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
 | DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
 | DOD3_MOUSE_SENS | How far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
@@ -293,10 +299,12 @@ Saves and the game's own data are in the "gamedata" folder next to
 dod3.exe (on a Mac, in the Application Support folder). Back that folder up
 to keep your progress.
 
-To update to a new release, unzip it over the old one, or copy these from
-the old folder: game (the installed game), gamedata (saves), dod3.ini (your
-settings) and cache (compiled shaders; optional). To uninstall, delete the
-folder.
+To update to a new release, unzip it into a new folder and move these into
+it from the old one: game (the installed game), gamedata (saves), dod3.ini
+(your settings) and cache (compiled shaders; optional). Unzipping it over
+the old folder works too, but the release's dod3.ini (the default
+settings) then replaces yours: keep a copy and put it back. To uninstall,
+delete the folder.
 
 
 ## If something goes wrong

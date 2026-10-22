@@ -165,7 +165,14 @@ and writes the patched hash into the EBOOT's own table (the engine checks
 loaded packages against it). The pages reach the port through two natives
 the script already had (`GetString`, `UpdateDisplayParam`), whose exec
 thunks `src/ui/settings_menu.cpp` replaces; it owns the rows, the values
-and the `dod3.ini` writer.
+and the `dod3.ini` writer. With the Spanish translation installed and
+switched on (`dod3_menus_spanish`, `src/kernel/mods.cpp`), the pages'
+names, rows and values are given in Spanish, in the translation's own
+words for the game's menus.
+
+A script package that is not the update's -- a mod copied over the update
+by hand -- is not patched: its own hash goes into the table instead, so it
+plays as it is, without the pages.
 
 ## Button prompts
 
@@ -248,19 +255,41 @@ boot. Their content is plain UE3 packages; the few licence-bound files are
 not read, except the Japanese voice pack's two file lists, which the port
 writes itself from the installed files (`src/kernel/dlc.cpp`).
 
-## The installer
+## The setup, the launcher and mods
 
-`src/setup_*.cpp`, one Dear ImGui wizard for both platforms over a small
-platform layer (`ui/ui.h`: Win32 + Direct3D 12, or Cocoa + Metal). Each
-file the player adds is recognised by itself: the disc by its PARAM.SFO and
-the hash of its EBOOT.BIN (`install/iso.cpp`, an ISO 9660 reader), the update
-and the DLC by their package content IDs and footer checksums
-(`install/pkg.cpp`). Each part is unpacked into a staging folder and moved
-into place whole, so a failure leaves nothing half-installed. The game's
-executable is made from the update's EBOOT.BIN (`install/self.cpp`) and
-checked by its hash. The title's own first-boot copy of 5 GB of game data
-is laid out as links onto the disc instead (`gamedata_layout`), at install
-and at every boot.
+`src/ui/wizard.cpp` is the first-run setup and `src/ui/launcher.cpp` the
+launcher every later start opens (Play, Mods, DLC, Settings): Dear ImGui
+over a small platform layer (`ui/ui.h`: Win32 + Direct3D 12, or Cocoa +
+Metal). Both are drawn with the same pieces (`ui/look.*`: the Inter fonts,
+the colours, the game's key art from the player's own disc or package,
+buttons, cards) and share the file checks and the install job
+(`ui/setup_shared.*`). The launcher's Settings read and write `dod3.ini`
+with `ui/ini.*`, which reads it as the game does (the first of a key set
+twice counts).
+
+Each file the player adds is recognised by itself (`install/install.cpp`):
+the disc by its PARAM.SFO and the hash of its EBOOT.BIN (`install/iso.cpp`,
+an ISO 9660 reader), the update, the DLC and the PSN release's game by their
+package content IDs and footer checksums (`install/pkg.cpp`), a mod by its
+packages' names or its folder's layout (a `.zip` through `install/zip.cpp`).
+Each part is unpacked into a staging folder and moved into place whole, so
+a failure leaves nothing half-installed. The game's executable is made from
+the update's EBOOT.BIN (`install/self.cpp`) and checked by its hash. The
+title's own first-boot copy of 5 GB of game data is laid out as links onto
+the disc instead (`gamedata_layout`), at install and at every boot.
+
+A mod leaves the player's game files as they are. Its files go to
+`game/mods`, at the path each stands in for under `game/disc`, and
+`src/kernel/mods.cpp` serves them from there through the file system's path
+hook. Only the files for the update's own folder, which the title lists, go
+into that folder, with the update's files they replace kept in
+`game/modfiles/<id>/orig/`. `game/modfiles/<id>.txt` lists every file a mod
+put in place, so Remove takes that mod alone out and puts the originals
+back without the update package. The launcher's switch moves the listed
+files to `game/modfiles/<id>/off/`, puts the originals back meanwhile and
+marks the mod off (`<id>.off`); on moves them back. The DLC Undub's voices
+go beside the voice pack's (`DLC_JPV/UNDUB`), and the game's own Voice
+option switches them.
 
 ## Audio
 

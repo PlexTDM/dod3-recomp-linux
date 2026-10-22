@@ -216,7 +216,20 @@ runtime's function from then on.
 - `DOD3_INSTALL_BASE=<dir>`: install into and run from another folder.
 - `DOD3_SETUP_ADD=<file>|<file>...`, `DOD3_SETUP_AUTO=<n>` (press the
   primary button of the next n pages), `DOD3_SETUP_GRAB=<prefix>` (save every
-  page as `<prefix>_<n>.ppm`): the wizard driven without a hand on it.
+  page as `<prefix>_<n>.ppm`, at the page's 40th frame or
+  `DOD3_SETUP_GRAB_AT=<frame>`): the setup driven without a hand on it.
+- The launcher's: `DOD3_LAUNCHER_OPEN=mods|dlc|settings[:<tab>]` (open on
+  that page), `DOD3_LAUNCHER_ADD=<file>|<file>...` (add those files, as Add
+  Files does), `DOD3_LAUNCHER_KEYS=<key>,<key>...` (press them one by one: Up,
+  Down, Left, Right, Space, Enter, Esc, Tab, Q, L1, R1),
+  `DOD3_LAUNCHER_SWITCH=spanish:on|spanish:off`,
+  `DOD3_LAUNCHER_REMOVE=spanish|undub`, `DOD3_LAUNCHER_AUTO=quit|install`
+  (close once settled, or once the install ends, printing `[launcher]
+  done` or `failed`); `DOD3_SETUP_GRAB=<prefix>` saves its picture as
+  `<prefix>_0.ppm`. `DOD3_LAUNCHER=0|1` overrides the setting.
+- `DOD3_MENU_LANGUAGE=es|en`: the Settings pages in Spanish or English
+  whatever is installed. `DOD3_MODS_LOG=1`: every path the mods serve, not
+  only the first 48.
 - `PS3_VFS_OVERLAY=<dir>` with `DOD3_SHA_OVERRIDE=<package>=<sha1>`: run with
   a menu patch made by `tools/menu_patch.py <dir>` without rebuilding its
   header. `python tools/ue3 dis <package> <Class> [Function]` disassembles

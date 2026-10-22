@@ -24,7 +24,7 @@ What you need:
 - A PC with Windows 10 or 11 (64-bit), a GPU with Direct3D 12 and a CPU with
   AVX2 (Intel Haswell / AMD Zen or newer), or a Mac with Apple silicon on
   macOS 13 or newer. About 16 GB of free disk space, 10 GB more for the
-  Japanese voice pack.
+  Japanese voice pack and about 3 GB for the Spanish translation.
 - Your copy of the game, US release, as either:
   - the disc (BLUS31197), dumped to a folder or a **decrypted** `.iso`
     ([PS3 Disc Dumper](https://github.com/13xforever/ps3-disc-dumper) writes
@@ -56,8 +56,8 @@ Windows:
    Add Folder, in any
    order, then Install. The game's files are copied into the `game` folder
    next to `dod3.exe` (a few minutes).
-4. Start Game. From then on `dod3.exe` opens the launcher: Play, and the
-   game's mods, DLC and settings.
+4. Play. From then on `dod3.exe` opens the launcher: Play, and the game's
+   mods, DLC and settings.
 
 macOS:
 
@@ -169,15 +169,20 @@ and the conventions.
 | DLC | All 20 packs, including the Japanese voice pack |
 
 What the port adds over the original: any internal resolution (supersampling
-included), windowed, borderless or full-screen display, a frame-rate cap of
-your choice (60 and 120 tested) or one that follows the scene, with the
-frames shown at even intervals, FXAA or MSAA, anisotropic filtering, a wider
-field of view, sharper shadows, a longer draw distance for scenery and for
-trees, skipping the intro logos and movie, and pausing or muting when the
-window is in the background -- all from a Graphics Settings, a System
-Settings and an Advanced Graphics page added to the game's own Settings menu.
+included), windowed, borderless or full-screen display, wider screens (16:10,
+21:9, 32:9), a frame-rate cap of your choice (60 and 120 tested) or one that
+follows the scene, with the frames shown at even intervals, FXAA or MSAA,
+anisotropic filtering, a wider field of view, sharper shadows, a longer draw
+distance for scenery and for trees, skipping the intro logos and movie,
+pausing or muting when the window is in the background, keyboard and mouse,
+and the button prompts of the pad you hold -- set in the launcher, or in a
+Graphics Settings, a System Settings and an Advanced Graphics page added to
+the game's own Settings menu. The launcher also installs your DLC and two
+fan-made mods: the Spanish translation (the added pages are in Spanish with
+it) and the DLC Undub.
 
-Known issues: the game has been tested on few machines.
+Known issues: the game has been tested on few machines, and at 16:10, 21:9
+and 32:9 some of the HUD is still out of place.
 
 ## How it fits together
 
@@ -189,7 +194,8 @@ ps3recomp/         --------------------------->  runtime, HLE libraries, the RSX
 ```
 
 The executable `dod3` installs the game from your files (a Dear ImGui
-installer, `src/install/` and `src/ui/`) and runs it.
+setup, `src/install/` and `src/ui/`), then opens a launcher for its mods,
+DLC and settings, and runs it.
 
 ## Legal
 
@@ -199,8 +205,8 @@ to their owners; none are included, and the port only runs from a copy of the
 game you own.
 
 The code in this repository is under the [MIT License](LICENSE). It builds on
-ps3recomp (MIT) and includes Dear ImGui (MIT); see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+ps3recomp (MIT) and includes Dear ImGui (MIT) and the Inter typeface (SIL
+Open Font License 1.1); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Credits
 
@@ -215,4 +221,9 @@ ps3recomp (MIT) and includes Dear ImGui (MIT); see
   [Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp): the
   model for a recompiled port, and for its installer.
 - [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut: the
-  installer's user interface.
+  setup's and the launcher's user interface.
+- [Inter](https://github.com/rsms/inter) by Rasmus Andersson: their
+  typeface.
+- The mods the launcher installs are their authors' work: the Spanish
+  translation by Traducciones Vacuno ([TraduSquare](https://tradusquare.es)),
+  the DLC Undub by Canzah and Slow.
