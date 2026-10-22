@@ -24,7 +24,8 @@ cp "$build/dod3.exe" "$build/zlib1.dll" "$build/SDL2.dll" "$out/"
 crt=$(ls -d /c/Program\ Files*/Microsoft\ Visual\ Studio/*/*/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT 2>/dev/null | sort | tail -1)
 [ -n "$crt" ] || { echo "package_win: the Visual C++ redistributable folder was not found"; exit 1; }
 for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do cp "$crt/$dll" "$out/"; done
-cp dod3.ini "$out/"
+# the default settings as committed (a local dod3.ini may hold your own)
+git show HEAD:dod3.ini > "$out/dod3.ini"
 # The shader cache of a playthrough (cache/dxbc, bytecode keyed on the shader
 # text this build generates): most pipelines are never compiled on a player's
 # machine. The game reads it from cache/dxbc beside the executable.
@@ -35,6 +36,7 @@ sed 's/$/\r/' LICENSE > "$out/LICENSE.txt"
 sed 's/$/\r/' THIRD_PARTY_NOTICES.md > "$out/THIRD_PARTY_NOTICES.txt"
 sed 's/$/\r/' ps3recomp/LICENSE > "$out/LICENSE-ps3recomp.txt"
 sed 's/$/\r/' third_party/imgui/LICENSE.txt > "$out/LICENSE-imgui.txt"
+sed 's/$/\r/' third_party/fonts/inter/LICENSE.txt > "$out/LICENSE-inter.txt"
 
 # Nothing the player supplies, and no build leftovers.
 for bad in EBOOT.ELF EBOOT_101.ELF EBOOT.BIN flashMP3.pic PARAM.SFO keys.txt; do

@@ -64,7 +64,7 @@ fi
 if grep -q -e "/Users/" -e "$HOME" "$app/Contents/MacOS/dod3"; then
     echo "package_mac: a home directory path is in the binary"; exit 1
 fi
-cp dod3.ini "$app/Contents/Resources/dod3.ini"
+git show HEAD:dod3.ini > "$app/Contents/Resources/dod3.ini"   # as committed (a local one may hold your own)
 # The shader cache of a playthrough (cache/msl: translated shaders keyed on
 # their source; cache/pipelines.list: every pipeline built; the compiled
 # archive is per machine and not shipped). At first launch the game warms
@@ -133,6 +133,7 @@ cp LICENSE "$out/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$out/THIRD_PARTY_NOTICES.txt"
 cp ps3recomp/LICENSE "$out/LICENSE-ps3recomp.txt"
 cp third_party/imgui/LICENSE.txt "$out/LICENSE-imgui.txt"
+cp third_party/fonts/inter/LICENSE.txt "$out/LICENSE-inter.txt"
 {
   printf 'The libraries built into the app (tools/build_mac_deps.sh):\n'
   printf '\n\nSDL 2 (libSDL2-2.0.0.dylib, controllers and audio): zlib License\n\n'
