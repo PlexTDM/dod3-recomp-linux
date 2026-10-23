@@ -84,6 +84,10 @@ The port is built in three steps: the game's PPU code is lifted to C++, its
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
+On Linux, only the native installer can be built for now; see
+[docs/BUILDING-LINUX.md](docs/BUILDING-LINUX.md). The game itself still runs
+under Proton or Wine.
+
 1. **Toolchain.** Windows: Visual Studio 2022 or newer (the Build Tools are
    enough, with "Desktop development with C++" and the Windows SDK), LLVM
    with clang-cl, CMake 3.20 or later, Ninja, Python 3.11 or later, Git for
