@@ -6,6 +6,7 @@
  *   dod3_setenv, dod3_unsetenv       POSIX setenv/unsetenv, also on Windows
  * and, from C++:
  *   dod3::utf8(path)                 a path as UTF-8
+ *   dod3::path_from_utf8(s)          a path from UTF-8
  *   dod3::open_file(path, mode)      fopen that takes any path on Windows too
  *                                    (path::string() throws there for names
  *                                    outside the ANSI code page)
@@ -39,6 +40,7 @@ int dod3_unsetenv(const char* name);
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace dod3 {
 
@@ -46,6 +48,13 @@ inline std::string utf8(const std::filesystem::path& p)
 {
     const auto s = p.u8string();
     return std::string(s.begin(), s.end());
+}
+
+inline std::filesystem::path path_from_utf8(std::string_view s)
+{
+    if (s.empty()) return {};
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
 FILE* open_file(const std::filesystem::path& p, const char* mode);

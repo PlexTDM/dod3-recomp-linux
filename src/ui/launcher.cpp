@@ -1093,7 +1093,7 @@ struct Launcher : Kit {
             if (const char* c = strchr(o, ':')) tab = std::clamp(atoi(c + 1), 0, kTabs - 1);
         }
         std::vector<fs::path> paths;
-        for (const std::string& f : env_list("DOD3_LAUNCHER_ADD", '|')) paths.push_back(fs::u8path(f));
+        for (const std::string& f : env_list("DOD3_LAUNCHER_ADD", '|')) paths.push_back(dod3::path_from_utf8(f));
         add(paths);
         static const struct {
             const char* name;

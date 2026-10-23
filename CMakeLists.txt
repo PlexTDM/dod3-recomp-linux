@@ -117,6 +117,7 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 
     add_executable(dod3-setup
         src/os/linux/setup_linux.cpp
+        src/os/linux/proton.cpp
         ${SETUP_CORE}
         ${SETUP_UI}
         ${IMGUI_SOURCES})
@@ -132,7 +133,6 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
         -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
     set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
     set_source_files_properties(src/ui/png.cpp PROPERTIES COMPILE_OPTIONS "-w")
-    set_source_files_properties(src/install/iso.cpp PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
     target_link_libraries(dod3-setup PRIVATE
         ${DOD3_SDL2}
         OpenGL::GL
@@ -143,7 +143,7 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
     install(TARGETS dod3-setup RUNTIME DESTINATION bin)
 
     message(STATUS "dod3-setup:      Linux installer only (no lifted game code)")
-    message(STATUS "Install folder:  --base DIR, DOD3_INSTALL_BASE, or ~/.local/share/Drakengard 3 Recompiled")
+    message(STATUS "Install folder:  --base DIR, DOD3_INSTALL_BASE, the source tree's game/, or ~/.local/share/Drakengard 3 Recompiled")
     return()
 endif()
 

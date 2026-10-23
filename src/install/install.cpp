@@ -620,7 +620,7 @@ bool mod_files(const fs::path& base, const std::string& id, std::vector<ModFile>
         const size_t sl = l.find('/');
         if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
         m.kind = l.substr(0, sl);
-        m.rel = fs::u8path(l.substr(sl + 1));
+        m.rel = dod3::path_from_utf8(l.substr(sl + 1));
         if ((m.kind != "patch" && m.kind != "tree") || m.rel.empty() || m.rel.is_absolute()) continue;
         out->push_back(m);
     }
@@ -1188,7 +1188,7 @@ bool identify_zip(const fs::path& p, Source* s, std::string* err)
     size_t n = 0;
     for (const ZipEntry& e : es) {
         if (e.dir) continue;
-        const std::string name = upper(utf8(fs::u8path(e.name).filename()));
+        const std::string name = upper(utf8(dod3::path_from_utf8(e.name).filename()));
         es_movies &= std::any_of(std::begin(kEsMovies), std::end(kEsMovies),
                                  [&](const auto& k) { return name == k.name && e.crc == k.crc; });
         n++;

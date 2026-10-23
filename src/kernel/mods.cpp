@@ -168,7 +168,7 @@ void dod3_mods_prepare()
     const char* r = getenv("PS3_VFS_ROOT");
     if (!r || !*r) return;
     std::error_code ec;
-    const fs::path root = fs::u8path(r);
+    const fs::path root = dod3::path_from_utf8(r);
     s_root = upper_slash(r);
     while (!s_root.empty() && s_root.back() == '/') s_root.pop_back();
 

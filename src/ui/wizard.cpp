@@ -6,8 +6,9 @@
  * are checked as they are entered, by decrypting it.
  *
  *   Welcome -> Game files -> DLC (optional) -> Mods (optional; the 1.01 build)
- *   -> Keys (only while the executable is still to be made and no keys are
- *   built in) -> Install (space check) -> Installing -> Done / Failed
+ *   -> Proton (Linux only) -> Keys (only while the executable is still to be
+ *   made and no keys are built in) -> Install (space check) -> Installing
+ *   -> Done / Failed
  *
  * It looks as the launcher does (ui/look.h): the title and the steps on the
  * left, the page in a panel on the right, over the game's key art -- the
@@ -26,6 +27,9 @@
 #include "install/crypto.h"    /* to_hex */
 #include "util.h"
 #include "app_version.h"       /* generated: the port's version label */
+#if defined(__linux__)
+#include "os/linux/proton.h"   /* the Proton builds the game can start with */
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -41,7 +45,20 @@ namespace {
 using dod3::utf8;
 using namespace look;
 
-enum class Page { Welcome, GameFiles, Dlc, Mods, Keys, Confirm, Installing, Done, Failed };
+enum class Page {
+    Welcome,
+    GameFiles,
+    Dlc,
+    Mods,
+#if defined(__linux__)
+    Proton,
+#endif
+    Keys,
+    Confirm,
+    Installing,
+    Done,
+    Failed
+};
 
 /* the Keys page's check of the keys: not yet, they open the executable, they
  * do not, or something else went wrong (key_msg) */
@@ -65,6 +82,13 @@ struct Wizard : Kit {
     FileChecks checks;
     std::vector<std::string> notes;   /* what the last files added came to */
     InstallJob job;
+
+#if defined(__linux__)
+    /* the Proton page: the builds found, and the one Play starts */
+    std::vector<ProtonVersion> protons;
+    fs::path proton_path;
+    bool proton_saved = false;
+#endif
 
     /* the Keys page: a field per key; a check (decrypting the executable)
      * runs whenever all of them are well-formed and have changed since */
@@ -101,6 +125,9 @@ struct Wizard : Kit {
         page = p;
         page_new = true;
         page_frames = 0;
+#if defined(__linux__)
+        if (p == Page::Proton) refresh_protons();
+#endif
     }
 
     /* ---- the files added ---- */
@@ -121,6 +148,37 @@ struct Wizard : Kit {
         const fs::path p = ui_pick_folder("The folder that holds PS3_GAME, or a mod's folder");
         if (!p.empty()) add({ p });
     }
+
+#if defined(__linux__)
+    void refresh_protons()
+    {
+        protons = proton_versions();
+        proton_path = proton_selected(base);
+        proton_saved = proton_chosen(base);
+        if (!proton_usable(proton_path)) return;
+        const bool listed = std::any_of(protons.begin(), protons.end(), [&](const ProtonVersion& v) {
+            if (v.path == proton_path) return true;
+            std::error_code ec;
+            return fs::equivalent(v.path, proton_path, ec) && !ec;
+        });
+        if (!listed) protons.insert(protons.begin(), { proton_path, {} });
+    }
+
+    void select_proton(const fs::path& dir)
+    {
+        if (!proton_select(base, dir)) {
+            say("The Proton choice could not be saved.");
+            refresh_protons();
+            return;
+        }
+        refresh_protons();
+    }
+
+    std::string proton_label() const
+    {
+        return proton_usable(proton_path) ? proton_name(proton_path) : "Not found";
+    }
+#endif
 
     void poll_checks()
     {
@@ -302,6 +360,12 @@ struct Wizard : Kit {
                             "in the files you add.");
         ImGui::Dummy(ImVec2(0, px(2)));
         path_line(F.regular, 13, kFaint, have.ready() ? "Installed in " : "Installing to ", base);
+#if defined(__linux__)
+        const bool proton = proton_usable(proton_path);
+        para(F.regular, 13, proton ? kDim : kWarn,
+             proton ? ("Proton: " + proton_label() + (proton_saved ? "" : " (found automatically)")).c_str()
+                    : "Proton: not found; Play falls back to Wine.");
+#endif
     }
 
     void game_card(const char* title, const char* id_line, const char* need, const Source& src, bool installed,
@@ -459,6 +523,72 @@ struct Wizard : Kit {
             para(F.regular, 13, kFaint, "Installed mods are taken out with Remove, in the launcher's Mods page.");
     }
 
+#if defined(__linux__)
+    void page_proton()
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        para(F.regular, 14, alpha(kText, 0.82f),
+             "The game is the Windows dod3.exe: on Linux it runs through Proton. Pick the build Play starts with; "
+             "the choice is saved beside the game and used by the setup's Play button.");
+        ImGui::Dummy(ImVec2(0, px(8)));
+        if (protons.empty()) {
+            card_begin();
+            card_title("Proton", "Not found", kWarn);
+            para(F.regular, 14, alpha(kText, 0.82f),
+                 "Install GE-Proton into Steam's compatibilitytools.d folder, or set DOD3_PROTON to a Proton folder, "
+                 "then press Rescan.");
+            card_end();
+        } else {
+            auto is_selected = [&](const fs::path& p) {
+                if (p == proton_path) return true;
+                std::error_code ec;
+                return fs::equivalent(p, proton_path, ec) && !ec;
+            };
+            for (size_t i = 0; i < protons.size(); i++) {
+                const ProtonVersion& v = protons[i];
+                const bool selected = is_selected(v.path);
+                ImGui::PushID((int)i);
+                const float w = ImGui::GetContentRegionAvail().x;
+                const ImVec2 p = ImGui::GetCursorScreenPos(), sz(w, px(48));
+                const bool pressed = hit("##proton", sz);
+                const bool hot = hot_item();
+                const ImGuiID row_id = ImGui::GetItemID();
+                ImGui::PopID();
+                float& a = anim_of(row_id);
+                approach(a, hot ? 1.0f : 0.0f, 16.0f);
+                dl->AddRectFilled(p, p + sz,
+                                  selected ? alpha(kAccent, 0.12f + 0.06f * a) : IM_COL32(255, 255, 255, (int)(8 + 8 * a)),
+                                  px(10));
+                if (selected) dl->AddRect(p, p + sz, alpha(kAccentHi, 0.7f), px(10), 0, px(1.2f));
+                const ImVec2 c(p.x + px(18), p.y + sz.y / 2);
+                if (selected)
+                    tick(dl, c, kOk);
+                else
+                    ring(dl, c, hot ? kText : kFaint);
+                const std::string name = proton_name(v.path);
+                const ImVec2 ts = text_size(F.medium, 15, name.c_str());
+                dl->AddText(F.medium, px(15), ImVec2(p.x + px(38), p.y + (sz.y - ts.y) / 2), selected ? kText : kDim,
+                            name.c_str());
+                if (selected) {
+                    const ImVec2 ss = text_size(F.semibold, 12, "Selected");
+                    dl->AddText(F.semibold, px(12), ImVec2(p.x + sz.x - ss.x - px(16), p.y + (sz.y - ss.y) / 2), kOk,
+                                "Selected");
+                }
+                if (pressed && !selected) select_proton(v.path);
+                ImGui::Dummy(ImVec2(0, px(2)));
+            }
+        }
+        ImGui::Dummy(ImVec2(0, px(6)));
+        if (proton_usable(proton_path)) {
+            path_line(F.regular, 13, kFaint, "Using ", proton_path);
+        } else {
+            para(F.regular, 13, kWarn, "No Proton found: Play falls back to Wine.");
+        }
+        ImGui::Dummy(ImVec2(0, px(8)));
+        if (button("Rescan Proton Versions", 0)) refresh_protons();
+    }
+#endif
+
     void page_keys()
     {
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -486,11 +616,10 @@ struct Wizard : Kit {
                 else
                     dot(dl, ImVec2(right, mid), kWarn);
             }
-            char id[16];
-            snprintf(id, sizeof id, "##key%zu", i);
+            const std::string id = "##key" + std::to_string(i);
             ImGui::PushFont(F.medium, 15);
             ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::InputText(id, boxes[i].text, sizeof boxes[i].text)) key_gen++;
+            if (ImGui::InputText(id.c_str(), boxes[i].text, sizeof boxes[i].text)) key_gen++;
             ImGui::PopFont();
             if (!problem.empty()) para(F.regular, 13, kErr, problem.c_str());
             ImGui::Dummy(ImVec2(0, px(8)));
@@ -607,6 +736,9 @@ struct Wizard : Kit {
                 ImGui::Unindent(px(22));
             }
         }
+#if defined(__linux__)
+        row(proton_usable(proton_path), "Proton", proton_label().c_str());
+#endif
         card_end();
         para(F.regular, 14, alpha(kText, 0.82f),
              "From now on the game opens on its launcher: Play, and the mods, the DLC and the settings.");
@@ -632,6 +764,23 @@ struct Wizard : Kit {
     /* ---- the steps, on the left ---- */
 
     bool locked() const { return page == Page::Installing || page == Page::Done || page == Page::Failed; }
+
+    Page after_mods() const
+    {
+#if defined(__linux__)
+        return Page::Proton;
+#else
+        return need_keys() ? Page::Keys : Page::Confirm;
+#endif
+    }
+    Page before_keys() const
+    {
+#if defined(__linux__)
+        return Page::Proton;
+#else
+        return update_required() ? Page::Mods : Page::Dlc;
+#endif
+    }
 
     std::string step_note(Page p) const
     {
@@ -661,6 +810,9 @@ struct Wizard : Kit {
                 return t;
             }
             return "Optional";
+#if defined(__linux__)
+        case Page::Proton: return proton_label();
+#endif
         case Page::Keys: return keys_ok() ? "Checked" : "Needed for the executable";
         case Page::Confirm:
             if (page == Page::Installing) {
@@ -680,6 +832,9 @@ struct Wizard : Kit {
         };
         std::vector<Step> list = { { "Welcome", Page::Welcome }, { "Game Files", Page::GameFiles }, { "DLC", Page::Dlc } };
         if (update_required()) list.push_back({ "Mods", Page::Mods });   /* mods are for the 1.01 build */
+#if defined(__linux__)
+        list.push_back({ "Proton", Page::Proton });
+#endif
         if (need_keys() || page == Page::Keys) list.push_back({ "Keys", Page::Keys });
         list.push_back({ "Install", Page::Confirm });
         const Page shown = locked() ? Page::Confirm : page;
@@ -708,18 +863,17 @@ struct Wizard : Kit {
             if (i + 1 < (int)list.size())   /* the line down to the next step */
                 dl->AddLine(ImVec2(c.x, c.y + r + px(5)), ImVec2(c.x, c.y + step - r - px(5)),
                             past && i + 1 <= at ? alpha(kOk, 0.35f) : kLine, px(1.5f));
-            char num[8];
-            snprintf(num, sizeof num, "%d", i + 1);
-            const ImVec2 ns = text_size(F.semibold, 12, num);
+            const std::string num = std::to_string(i + 1);
+            const ImVec2 ns = text_size(F.semibold, 12, num.c_str());
             if (cur && page != Page::Done) {
                 dl->AddCircleFilled(c, r, page == Page::Failed ? kErr : kAccent);
-                dl->AddText(F.semibold, px(12), ImVec2(c.x - ns.x / 2, c.y - ns.y / 2), kText, num);
+                dl->AddText(F.semibold, px(12), ImVec2(c.x - ns.x / 2, c.y - ns.y / 2), kText, num.c_str());
             } else if (past) {
                 dl->AddCircleFilled(c, r, alpha(kOk, 0.14f + 0.10f * a));
                 tick(dl, c, kOk);
             } else {
                 dl->AddCircle(c, r, alpha(kText, 0.22f), 0, px(1.4f));
-                dl->AddText(F.semibold, px(12), ImVec2(c.x - ns.x / 2, c.y - ns.y / 2), kFaint, num);
+                dl->AddText(F.semibold, px(12), ImVec2(c.x - ns.x / 2, c.y - ns.y / 2), kFaint, num.c_str());
             }
             const ImU32 col = cur ? kText : past ? mix(alpha(kText, 0.72f), kText, a) : alpha(kText, 0.42f);
             const float lx = x + r * 2 + px(16) + px(6) * a;
@@ -820,7 +974,7 @@ struct Wizard : Kit {
             switch (nav(y, right, { { .label = "Back", .back = true },
                                     { .label = plan.dlc.empty() ? "Skip" : "Next", .primary = true, .enabled = !busy } })) {
             case 0: go(Page::GameFiles); break;
-            case 1: go(update_required() ? Page::Mods : need_keys() ? Page::Keys : Page::Confirm); break;
+            case 1: go(update_required() ? Page::Mods : after_mods()); break;
             }
             break;
         case Page::Mods:
@@ -829,17 +983,25 @@ struct Wizard : Kit {
                                       .primary = true,
                                       .enabled = !busy && !needs_voice_pack(plan, have) } })) {
             case 0: go(Page::Dlc); break;
+            case 1: go(after_mods()); break;
+            }
+            break;
+#if defined(__linux__)
+        case Page::Proton:
+            switch (nav(y, right, { { .label = "Back", .back = true }, { .label = "Next", .primary = true } })) {
+            case 0: go(update_required() ? Page::Mods : Page::Dlc); break;
             case 1: go(need_keys() ? Page::Keys : Page::Confirm); break;
             }
             break;
+#endif
         case Page::Keys:
             switch (nav(y, right, { { .label = "Back", .back = true }, { .label = "Next", .primary = true, .enabled = keys_ok() } })) {
-            case 0: go(update_required() ? Page::Mods : Page::Dlc); break;
+            case 0: go(before_keys()); break;
             case 1: go(Page::Confirm); break;
             }
             break;
         case Page::Confirm: {
-            const Page prev = need_keys() ? Page::Keys : update_required() ? Page::Mods : Page::Dlc;
+            const Page prev = need_keys() ? Page::Keys : before_keys();
             if (!anything() && !make_elf_needed()) {
                 switch (nav(y, right, { { .label = "Back", .back = true },
                                         { .label = have.ready() ? "Play" : "Game Files", .primary = true } })) {
@@ -894,6 +1056,9 @@ struct Wizard : Kit {
             return { "Game Files", update_required() ? "The game and its 1.01 update." : "The game disc." };
         case Page::Dlc: return { "DLC", "Optional: the packs you own. More can be added later, from the launcher." };
         case Page::Mods: return { "Mods", "Optional: fan-made additions, installed beside your own game files." };
+#if defined(__linux__)
+        case Page::Proton: return { "Proton", "The build that starts the Windows game on Linux." };
+#endif
         case Page::Keys: return { "Keys", "The keys that open the game's executable, EBOOT.BIN." };
         case Page::Confirm:
             return { "Install", anything() || make_elf_needed() ? "Ready to install." : "Nothing new to install." };
@@ -942,6 +1107,9 @@ struct Wizard : Kit {
         case Page::GameFiles: page_game_files(); break;
         case Page::Dlc: page_dlc(); break;
         case Page::Mods: page_mods(); break;
+#if defined(__linux__)
+        case Page::Proton: page_proton(); break;
+#endif
         case Page::Keys: page_keys(); break;
         case Page::Confirm: page_confirm(); break;
         case Page::Installing: page_installing(); break;
@@ -968,11 +1136,14 @@ int run_installer(const fs::path& base)
     look::load_fonts(w.F);
     w.base = base;
     w.art = look::load_art(base);
+#if defined(__linux__)
+    w.refresh_protons();
+#endif
     if (const char* a = getenv("DOD3_SETUP_AUTO")) w.tests.auto_left = atoi(a);
     if (const char* g = getenv("DOD3_SETUP_GRAB")) w.tests.grab = g;
     if (const char* g = getenv("DOD3_SETUP_GRAB_AT")) w.tests.grab_at = std::max(21, atoi(g));   /* the request goes 20 frames before */
     std::vector<fs::path> paths;
-    for (const std::string& f : env_list("DOD3_SETUP_ADD", '|')) paths.push_back(fs::u8path(f));
+    for (const std::string& f : env_list("DOD3_SETUP_ADD", '|')) paths.push_back(dod3::path_from_utf8(f));
     w.add(paths);
     w.have = installed(base);
     {   /* the keys this install was made with, if any */

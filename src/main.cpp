@@ -1805,7 +1805,7 @@ static std::vector<std::filesystem::path> cli_paths(int argc, char** argv, int f
         LocalFree(w);
     }
 #else
-    for (int i = from; i < argc; i++) out.push_back(std::filesystem::u8path(argv[i]));
+    for (int i = from; i < argc; i++) out.push_back(dod3::path_from_utf8(argv[i]));
 #endif
     return out;
 }
@@ -1876,7 +1876,7 @@ int main(int argc, char** argv)
         }
         /* DOD3_INSTALL_BASE: somewhere else (tests) */
         const char* tb = getenv("DOD3_INSTALL_BASE");
-        return dod3setup::install_files_cli(tb && *tb ? std::filesystem::u8path(tb) : base, install_files, keys);
+        return dod3setup::install_files_cli(tb && *tb ? dod3::path_from_utf8(tb) : base, install_files, keys);
     }
     const bool force_setup = argc >= 2 && !strcmp(argv[1], "--setup");
     if (argv[0]) s_exe_path = argv[0];   /* dod3.ini is found beside it, the launcher's before the game's */
@@ -2060,7 +2060,7 @@ int main(int argc, char** argv)
     apply_sha_overrides();
     /* the title's game-data install as links onto the disc (install/install.h) */
     if (const char* root = getenv("PS3_VFS_ROOT"))
-        if (*root) dod3setup::gamedata_layout(std::filesystem::u8path(root));
+        if (*root) dod3setup::gamedata_layout(dod3::path_from_utf8(root));
     dod3_menu_patch_prepare();
     dod3_dlc_prepare();
     dod3_mods_prepare();

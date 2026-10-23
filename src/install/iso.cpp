@@ -234,7 +234,7 @@ bool read_disc_file(const Disc& disc, const std::string& path, std::vector<uint8
         in.read((char*)out->data(), (std::streamsize)f->size);
         return (uint64_t)in.gcount() == f->size;
     }
-    std::ifstream in(disc.source / fs::u8path(f->path), std::ios::binary);
+    std::ifstream in(disc.source / dod3::path_from_utf8(f->path), std::ios::binary);
     in.read((char*)out->data(), (std::streamsize)f->size);
     return (uint64_t)in.gcount() == f->size;
 }
@@ -321,7 +321,7 @@ bool copy_disc(const Disc& disc, const fs::path& dest, const std::function<bool(
     std::unique_ptr<char[]> buf(new char[4 << 20]);
     uint64_t done = 0;
     for (const auto& f : disc.files) {
-        const fs::path to = dest / fs::u8path(f.path);
+        const fs::path to = dest / dod3::path_from_utf8(f.path);
         fs::create_directories(to.parent_path(), ec);
         std::ofstream out(to, std::ios::binary | std::ios::trunc);
         if (!out) {
@@ -332,7 +332,7 @@ bool copy_disc(const Disc& disc, const fs::path& dest, const std::function<bool(
         if (disc.is_iso)
             iso.seekg((std::streamoff)f.offset);
         else {
-            in.open(disc.source / fs::u8path(f.path), std::ios::binary);
+            in.open(disc.source / dod3::path_from_utf8(f.path), std::ios::binary);
             if (!in) {
                 *err = "could not read " + f.path;
                 return false;

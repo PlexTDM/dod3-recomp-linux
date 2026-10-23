@@ -2,10 +2,11 @@
  * The Linux side of the setup: where the game is installed, the command
  * line (--install, --check, --base), and the wizard from src/ui/wizard.cpp
  * in an SDL2 + OpenGL window (src/ui/ui_linux.cpp). The Windows release's
- * dod3.exe can run this install from Wine; Play starts it under Wine when
- * dod3.exe is in the install folder.
+ * dod3.exe can run this install under Proton, or Wine when no Proton is
+ * installed; Play starts it when dod3.exe is in the install folder.
  */
 #include "install/install.h"
+#include "os/linux/proton.h"
 #include "ui/setup_shared.h"
 #include "ui/ui.h"
 #include "util.h"
@@ -15,6 +16,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -26,17 +28,32 @@
 
 namespace fs = std::filesystem;
 using dod3::utf8;
+using namespace dod3setup;
 
 namespace {
+
+fs::path source_root(const fs::path& exe)
+{
+    std::error_code ec;
+    fs::path dir = exe.parent_path();
+    for (int i = 0; i < 3 && !dir.empty(); i++) {
+        if (fs::exists(dir / "CMakeLists.txt", ec) && fs::exists(dir / "src", ec)) return dir;
+        const fs::path up = dir.parent_path();
+        if (up == dir) break;
+        dir = up;
+    }
+    return {};
+}
 
 fs::path install_base(const fs::path& exe)
 {
     if (const char* e = getenv("DOD3_INSTALL_BASE"))
-        if (*e) return fs::absolute(fs::path(e));
+        if (*e) return fs::absolute(fs::path(e)).lexically_normal();
     const fs::path beside = exe.parent_path();
     if (fs::exists(beside / "dod3.exe") || fs::exists(beside / "game")) return beside;
     std::error_code ec;
     if (fs::exists(fs::current_path(ec) / "dod3.exe")) return fs::current_path(ec);
+    if (const fs::path src = source_root(exe); !src.empty()) return (src / "game").lexically_normal();
     if (const char* x = getenv("XDG_DATA_HOME"))
         if (*x) return fs::path(x) / "Drakengard 3 Recompiled";
     if (const char* h = getenv("HOME"))
@@ -47,7 +64,7 @@ fs::path install_base(const fs::path& exe)
 fs::path executable(const char* argv0)
 {
     std::error_code ec;
-    const fs::path p = fs::absolute(fs::path(argv0 ? argv0 : "dod3-setup"), ec);
+    const fs::path p = fs::absolute(fs::path(argv0 ? argv0 : "dod3-setup"), ec).lexically_normal();
     return ec ? fs::path(argv0 ? argv0 : "dod3-setup") : p;
 }
 
@@ -58,23 +75,82 @@ std::string wine_path(const fs::path& p)
     return out;
 }
 
+fs::path proton_steam_root(const fs::path& proton)
+{
+    for (const ProtonVersion& v : proton_versions()) {
+        if (v.steam_root.empty()) continue;
+        std::error_code ec;
+        if (v.path == proton || (fs::equivalent(v.path, proton, ec) && !ec)) return v.steam_root;
+    }
+    return {};
+}
+
+bool launch_play(const fs::path& play, const fs::path& base, const fs::path& proton)
+{
+    if (access(play.c_str(), X_OK) != 0) return false;
+    const bool have_proton = proton_usable(proton);
+    const std::string chosen = have_proton ? utf8(proton) : std::string();
+    const fs::path root = have_proton ? proton_steam_root(proton) : fs::path();
+    const std::string root_text = utf8(root);
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        if (chdir(base.c_str()) != 0) _exit(127);
+        if (!chosen.empty()) setenv("DOD3_PROTON", chosen.c_str(), 1);
+        if (!root.empty()) setenv("STEAM_ROOT", root_text.c_str(), 1);
+        execl(play.c_str(), play.c_str(), (char*)nullptr);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return false;
+    return !(WIFEXITED(status) && WEXITSTATUS(status) == 127);
+}
+
+bool launch_proton(const fs::path& base, const fs::path& proton)
+{
+    if (!proton_usable(proton)) return false;
+    fs::path steam_root = proton_steam_root(proton);
+    if (steam_root.empty())
+        for (const ProtonVersion& v : proton_versions())
+            if (!v.steam_root.empty()) {
+                steam_root = v.steam_root;
+                break;
+            }
+    if (steam_root.empty()) return false;
+    fs::path prefix;
+    if (const char* p = getenv("DOD3_PROTON_PREFIX"))
+        if (*p) prefix = fs::path(p);
+    if (prefix.empty()) {
+        const char* home = getenv("HOME");
+        if (!home || !*home) return false;
+        prefix = fs::path(home) / ".local/share/dod3-recomp/proton";
+    }
+    std::error_code ec;
+    fs::create_directories(prefix, ec);
+    if (ec) return false;
+    const fs::path exe = proton / "proton";
+    const std::string root_text = utf8(steam_root), prefix_text = utf8(prefix);
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        if (chdir(base.c_str()) != 0) _exit(127);
+        setenv("STEAM_COMPAT_CLIENT_INSTALL_PATH", root_text.c_str(), 1);
+        setenv("STEAM_COMPAT_DATA_PATH", prefix_text.c_str(), 1);
+        execl(exe.c_str(), exe.c_str(), "run", "dod3.exe", (char*)nullptr);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return false;
+    return !(WIFEXITED(status) && WEXITSTATUS(status) == 127);
+}
+
 bool launch_game(const fs::path& base)
 {
     const fs::path exe = base / "dod3.exe";
     if (!fs::exists(exe)) return false;
-    const fs::path play = base / "play.sh";
-    if (access(play.c_str(), X_OK) == 0) {
-        const pid_t pid = fork();
-        if (pid < 0) return false;
-        if (pid == 0) {
-            if (chdir(base.c_str()) != 0) _exit(127);
-            execl(play.c_str(), play.c_str(), (char*)nullptr);
-            _exit(127);
-        }
-        int status = 0;
-        if (waitpid(pid, &status, 0) < 0) return false;
-        if (!(WIFEXITED(status) && WEXITSTATUS(status) == 127)) return true;
-    }
+    const fs::path proton = proton_selected(base);
+    if (launch_play(base / "play.sh", base, proton)) return true;
+    if (launch_proton(base, proton)) return true;
     for (const char* wine : { "wine", "wine64" }) {
         const pid_t pid = fork();
         if (pid < 0) return false;
@@ -93,18 +169,24 @@ bool launch_game(const fs::path& base)
 
 void usage(const char* argv0)
 {
+    const fs::path def = install_base(executable(argv0));
     printf("Drakengard 3 Recompiled %s -- Linux setup\n\n", DOD3_VERSION_STRING);
-    printf("usage: %s [--base DIR] [--setup]\n", argv0);
-    printf("       %s --install [--base DIR] [--keys FILE] <disc .iso|folder|pkg> [update .pkg] [DLC .pkg ...]\n", argv0);
-    printf("       %s --check <file>...\n\n", argv0);
+    printf("usage: %s [--base DIR] [--proton DIR|auto] [--setup]\n", argv0);
+    printf("       %s --install [--base DIR] [--proton DIR|auto] [--keys FILE] <disc .iso|folder|pkg> [update .pkg] [DLC .pkg ...]\n",
+           argv0);
+    printf("       %s --check <file>...\n", argv0);
+    printf("       %s --proton-list\n\n", argv0);
     printf("  --base DIR   install here instead of the default\n");
-    printf("               (%s, or beside dod3.exe)\n", "~/.local/share/Drakengard 3 Recompiled");
+    printf("               (%s)\n", utf8(def).c_str());
     printf("  --install    install without a window\n");
     printf("  --check      say what each file is, installing nothing\n");
     printf("  --keys FILE  the game executable's keys (install/keys.h)\n");
+    printf("  --proton DIR   the Proton build Play starts (auto: find one)\n");
+    printf("  --proton-list  show the Proton builds found\n");
     printf("  --setup      open the installer even when the game is installed\n");
-    printf("\nThe game's files install beside the Windows dod3.exe, or into --base;\n");
-    printf("dod3.exe then runs them from Wine. DOD3_INSTALL_BASE sets the default folder.\n");
+    printf("\nThe game's files install beside the Windows dod3.exe, in the source\n");
+    printf("tree's game folder, or into --base; dod3.exe then runs under Proton\n");
+    printf("or Wine. DOD3_INSTALL_BASE sets the default folder.\n");
 }
 
 int check_files(const std::vector<fs::path>& files)
@@ -123,12 +205,36 @@ int check_files(const std::vector<fs::path>& files)
     return bad;
 }
 
+int list_protons(const fs::path& base)
+{
+    std::vector<ProtonVersion> all = proton_versions();
+    const fs::path selected = proton_selected(base);
+    if (proton_usable(selected)) {
+        const bool listed = std::any_of(all.begin(), all.end(), [&](const ProtonVersion& v) {
+            if (v.path == selected) return true;
+            std::error_code ec;
+            return fs::equivalent(v.path, selected, ec) && !ec;
+        });
+        if (!listed) all.insert(all.begin(), { selected, {} });
+    }
+    if (all.empty()) {
+        printf("no Proton found (set DOD3_PROTON or install GE-Proton in Steam)\n");
+        return 1;
+    }
+    for (const ProtonVersion& v : all) {
+        std::error_code ec;
+        const bool is = v.path == selected || (fs::equivalent(v.path, selected, ec) && !ec);
+        printf("%c %s (%s)\n", is ? '*' : ' ', proton_name(v.path).c_str(), utf8(v.path).c_str());
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
-    fs::path base;
-    bool have_base = false;
+    fs::path base, proton;
+    bool have_base = false, have_proton = false, proton_auto = false, proton_list = false;
     bool install = false, check = false;
     fs::path keys;
     std::vector<fs::path> files;
@@ -152,6 +258,19 @@ int main(int argc, char** argv)
                 return 2;
             }
             keys = fs::path(argv[i]);
+        } else if (a == "--proton") {
+            if (++i >= argc) {
+                fprintf(stderr, "--proton needs a folder or auto\n");
+                return 2;
+            }
+            if (!strcmp(argv[i], "auto"))
+                proton_auto = true;
+            else {
+                proton = fs::path(argv[i]);
+                have_proton = true;
+            }
+        } else if (a == "--proton-list") {
+            proton_list = true;
         } else if (a == "--setup") {
             /* the default */
         } else if (a == "--help" || a == "-h") {
@@ -194,6 +313,19 @@ int main(int argc, char** argv)
         }
     }
 
+    if (proton_list) return list_protons(base);
+    if (have_proton || proton_auto) {
+        if (have_proton && !proton_usable(proton)) {
+            fprintf(stderr, "%s is not a Proton build (no executable proton in it)\n", utf8(proton).c_str());
+            return 2;
+        }
+        fs::create_directories(base, ec);
+        if (ec || !proton_select(base, have_proton ? proton : fs::path())) {
+            fprintf(stderr, "cannot save the Proton choice in %s\n", utf8(base).c_str());
+            return 1;
+        }
+    }
+
     if (install) {
         if (files.empty()) {
             fprintf(stderr, "--install needs the game's files (or --remove-mods)\n");
@@ -204,6 +336,11 @@ int main(int argc, char** argv)
 
     printf("Drakengard 3 Recompiled %s -- Linux setup\n", DOD3_VERSION_STRING);
     printf("install folder: %s\n", utf8(base).c_str());
+    const fs::path chosen = proton_selected(base);
+    if (proton_usable(chosen))
+        printf("proton: %s (%s)\n", proton_name(chosen).c_str(), utf8(chosen).c_str());
+    else
+        printf("proton: none found; Play falls back to Wine\n");
     fflush(stdout);
 
     const int r = dod3setup::run_installer(base);
