@@ -20,6 +20,133 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ---------------------------------------------------------------------------
+# The Linux installer alone (dod3-setup)
+# ---------------------------------------------------------------------------
+# The setup is useful on Linux before the game itself is ported: it installs
+# the disc/update/DLC and the mods for a dod3.exe running under Wine, and it
+# needs neither the lifter's output nor the runtime. This block stops after
+# the installer target, so the rest of this file's game build is untouched.
+option(DOD3_SETUP_ONLY "Build only the Linux installer (dod3-setup)" OFF)
+if(DOD3_SETUP_ONLY)
+    if(WIN32 OR APPLE)
+        message(FATAL_ERROR "DOD3_SETUP_ONLY builds the Linux installer; use the normal build on Windows or macOS")
+    endif()
+    if(NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    endif()
+    if(NOT DEFINED PS3RECOMP_DIR)
+        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
+    endif()
+    get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
+    if(NOT EXISTS "${PS3RECOMP_DIR}/tools/pkg_extract.py")
+        message(FATAL_ERROR "ps3recomp is not checked out. Run: git submodule update --init")
+    endif()
+
+    set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+
+    # The retail PKG key, from the submodule's tools/pkg_extract.py.
+    set(_pkg_py "${PS3RECOMP_DIR}/tools/pkg_extract.py")
+    file(STRINGS "${_pkg_py}" _pkgkey_line REGEX "^PS3_GPKG_KEY *= *bytes\\.fromhex")
+    string(REGEX MATCH "\"([0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])\"" _m "${_pkgkey_line}")
+    if(NOT CMAKE_MATCH_1)
+        message(FATAL_ERROR "${_pkg_py}: no PS3_GPKG_KEY")
+    endif()
+    string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _pkgkey_c "${CMAKE_MATCH_1}")
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/ps3recomp_pkg_key.h" CONTENT
+"/* Generated from ps3recomp/tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
+static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
+")
+
+    # The launcher's and the installer's typeface, as arrays in gen/launcher_fonts.h
+    set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
+    foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
+        set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
+        file(READ "${_ttf}" _hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+        string(MAKE_C_IDENTIFIER "${_font}" _id)
+        string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
+    endforeach()
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/launcher_fonts.h" CONTENT "${_font_h}" @ONLY)
+
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/app_version.h" CONTENT
+"/* Generated from CMakeLists.txt: the port's own version. */
+#define DOD3_VER_MAJOR ${PROJECT_VERSION_MAJOR}
+#define DOD3_VER_MINOR ${PROJECT_VERSION_MINOR}
+#define DOD3_VER_PATCH ${PROJECT_VERSION_PATCH}
+#define DOD3_VERSION_STRING \"${DOD3_VERSION_LABEL}\"
+")
+
+    find_package(ZLIB REQUIRED)
+    find_package(Threads REQUIRED)
+    find_package(OpenGL REQUIRED)
+    find_package(SDL2 CONFIG QUIET)
+    if(TARGET SDL2::SDL2)
+        set(DOD3_SDL2 SDL2::SDL2)
+    elseif(TARGET SDL2::SDL2-static)
+        set(DOD3_SDL2 SDL2::SDL2-static)
+    else()
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+        set(DOD3_SDL2 PkgConfig::SDL2)
+    endif()
+
+    set(SETUP_CORE
+        src/install/install.cpp
+        src/install/iso.cpp
+        src/install/pkg.cpp
+        src/install/zip.cpp
+        src/install/crypto.cpp
+        src/install/self.cpp
+        src/install/keys.cpp
+        src/kernel/dlc.cpp
+        src/util.cpp)
+    set(SETUP_UI
+        src/ui/wizard.cpp
+        src/ui/look.cpp
+        src/ui/setup_shared.cpp
+        src/ui/png.cpp
+        src/ui/ui_linux.cpp)
+    set(IMGUI_SOURCES
+        "${IMGUI_DIR}/imgui.cpp"
+        "${IMGUI_DIR}/imgui_draw.cpp"
+        "${IMGUI_DIR}/imgui_tables.cpp"
+        "${IMGUI_DIR}/imgui_widgets.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
+
+    add_executable(dod3-setup
+        src/os/linux/setup_linux.cpp
+        ${SETUP_CORE}
+        ${SETUP_UI}
+        ${IMGUI_SOURCES})
+
+    target_include_directories(dod3-setup PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${IMGUI_DIR}"
+        "${CMAKE_BINARY_DIR}/gen"
+        "${PS3RECOMP_DIR}/libs/codec")
+    target_compile_features(dod3-setup PRIVATE cxx_std_20)
+    target_compile_definitions(dod3-setup PRIVATE DOD3_EBOOT=101)
+    target_compile_options(dod3-setup PRIVATE
+        -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
+    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(src/ui/png.cpp PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(src/install/iso.cpp PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
+    target_link_libraries(dod3-setup PRIVATE
+        ${DOD3_SDL2}
+        OpenGL::GL
+        ZLIB::ZLIB
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+        m)
+    install(TARGETS dod3-setup RUNTIME DESTINATION bin)
+
+    message(STATUS "dod3-setup:      Linux installer only (no lifted game code)")
+    message(STATUS "Install folder:  --base DIR, DOD3_INSTALL_BASE, or ~/.local/share/Drakengard 3 Recompiled")
+    return()
+endif()
+
 # Prefer Ninja if available
 if(NOT CMAKE_GENERATOR MATCHES "Ninja" AND NOT DEFINED ENV{CMAKE_GENERATOR})
     message(STATUS "Tip: use -G Ninja for faster builds")

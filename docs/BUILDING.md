@@ -4,6 +4,9 @@ The port is built in three steps: the game's PPU code is lifted to C++, the
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
+The Linux installer-only target does not need the lift; see
+[BUILDING-LINUX.md](BUILDING-LINUX.md).
+
 ## Prerequisites
 
 Windows:
