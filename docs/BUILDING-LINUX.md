@@ -58,9 +58,6 @@ sudo dnf install gcc-c++ cmake ninja-build pkgconf-pkg-config \
     SDL2-devel mesa-libGL-devel zlib-devel
 ```
 
-The file pickers use `zenity`, `kdialog` or `yad` if one is installed. The
-installer does not need Wine or Proton
-
 ## Get the source
 
 From the branch this page is on:

@@ -35,6 +35,7 @@
 #include <string.h>
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <vector>
 #include <zlib.h>
 #include "cpu/eboot.h"   /* the EBOOT version's addresses */
@@ -46,7 +47,8 @@ namespace {
 
 constexpr uint32_t kAddInflateQueueElementPush = DOD3_A_INFLATE_PUSH_LR;   /* lr of its LFQueue push */
 
-std::atomic<unsigned long long> s_native, s_to_task, s_bad, s_bytes_in, s_bytes_out, s_ns;
+std::atomic<unsigned long long> s_native, s_to_task, s_bad, s_bytes_in, s_bytes_out, s_ns, s_completed;
+std::mutex s_complete_lock;
 
 bool enabled()
 {
@@ -63,9 +65,9 @@ void report()
     const double ms = (double)s_ns.load() / 1e6;
     fprintf(stderr,
             "[edgezlib] %llu chunks inflated natively (%.1f MB -> %.1f MB in %.0f ms), "
-            "%llu left to the SPU task, %llu that failed to inflate or check\n",
+            "%llu completed without the SPU task, %llu left to the task, %llu that failed to inflate or check\n",
             s_native.load(), (double)s_bytes_in.load() / 1048576.0, (double)s_bytes_out.load() / 1048576.0, ms,
-            s_to_task.load(), s_bad.load());
+            s_completed.load(), s_to_task.load(), s_bad.load());
 }
 
 /* Inflate the raw deflate stream at `in` into `out` (exactly `total` bytes);
@@ -90,6 +92,52 @@ bool inflate_exact(const uint8_t* in, uint32_t in_size, uint8_t* out, uint32_t t
 }
 
 }  // namespace
+
+extern "C" int cellSpursEventFlagSet(void* eventFlag, uint16_t bits);
+
+/* Finish a request that dod3_edgezlib_push() inflated here, without waking the
+ * SPU task: the task's completion code at 0x3280-0x3354 decrements the work
+ * counter at req[4] & ~1 and, when that was the last unit, sets the event flag
+ * at req[5] with the bits in req[6] & 0xFFFF. Doing both from the PPU is the
+ * same observable completion; the task stays parked and the queue stays empty.
+ * Returns 1 when the request is complete, 0 to fall back to the queue. */
+extern "C" int dod3_edgezlib_complete(uint32_t req[8])
+{
+    const char* e = getenv("DOD3_ZLIB_NATIVE_COMPLETE");
+    if (e && e[0] == '0') return 0;
+
+    const uint32_t ctr_ea = req[4] & ~1u;
+    const uint32_t flag_ea = req[5];
+    /* The task's rotqbyi(req[4..7], 6) feeds the low half of the event-flag
+     * bits from req[6]'s high halfword; the low halfword is not used here. */
+    const uint16_t bits = (uint16_t)(req[6] >> 16);
+    if (!flag_ea) return 0;
+
+    uint32_t old = 0;
+    if (ctr_ea) {
+        std::lock_guard<std::mutex> lock(s_complete_lock);
+        old = dod3_be32(vm_base + ctr_ea);
+        if (!old) {
+            if (s_bad++ < 8)
+                fprintf(stderr, "[edgezlib] work counter 0x%08X is already zero\n", ctr_ea);
+            return 0;
+        }
+        dod3_put_be32(vm_base + ctr_ea, old - 1);
+    }
+
+    if ((!ctr_ea || (old & 0x7FFFFFFFu) == 1u)) {
+        const int rc = cellSpursEventFlagSet((void*)(uintptr_t)flag_ea, bits);
+        if (rc && s_bad++ < 8)
+            fprintf(stderr, "[edgezlib] event flag 0x%08X set 0x%04X failed 0x%08X\n", flag_ea, bits,
+                    (unsigned)rc);
+    }
+
+    const unsigned long long n = ++s_completed;
+    if (n <= 8 || n % 1000 == 0)
+        fprintf(stderr, "[edgezlib] completed natively n=%llu counter=0x%08X old=%u flag=0x%08X bits=0x%04X\n", n,
+                ctr_ea, old, flag_ea, bits);
+    return 1;
+}
 
 /* Called by the LFQueue push with the request about to be queued (8 words,
  * host order). Returns 1 when the chunk was inflated here and req now holds

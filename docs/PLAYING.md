@@ -7,6 +7,27 @@ the setup takes the game's files from it.
 This project is not affiliated with or endorsed by Square Enix, Access Games
 or Sony. Drakengard 3 and its assets belong to their owners.
 
+# Playing on Linux
+
+1. run
+
+```sh
+./tools/build_linux_setup.sh
+```
+
+2. download latest windows build from github releases, and extract them to ./game folder.
+3. run
+
+```sh
+./build-installer/dod3-setup
+```
+
+4. select downloaded game files on 2nd screen and continue with the installation.
+5. run
+
+```sh
+./game/play.sh
+```
 
 ## What you need
 
@@ -52,7 +73,6 @@ or Sony. Drakengard 3 and its assets belong to their owners.
 
 You do not need a PlayStation 3 emulator, firmware, or any other tool: the
 setup unpacks the packages and prepares the game's executable itself.
-
 
 ## Installing
 
@@ -113,7 +133,6 @@ If the setup cannot open its window, it can run from a command prompt:
 and `dod3.exe --check <file>...` says what the setup makes of each file
 without installing anything.
 
-
 ## Settings
 
 In the launcher: Settings, in four tabs (Display, Graphics, Controls,
@@ -140,31 +159,30 @@ two. The game's own files are not changed.
 Or edit dod3.ini (next to dod3.exe; on a Mac, in the Application Support
 folder above). It explains each setting:
 
-| Setting | What it does |
-|---|---|
-| RSX_SCALE | Internal resolution as a multiple of 1280x720: 1.5 = 1080p, 2 = 1440p, 3 = 4K. Above the window's size it is averaged down: supersampling |
-| RSX_DISPLAY | windowed, borderless (recommended for full screen) or fullscreen |
-| RSX_WINDOW | Window size in windowed mode, e.g. 1920x1080 |
-| RSX_VSYNC | 1 to sync to the display; 0 lets the frame rate exceed its refresh |
-| DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30 |
-| DOD3_FOV | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original |
-| DOD3_ASPECT | Aspect ratio, your screen's shape: 16:10, 21:9, 32:9, a ratio such as 2.39, or auto (the window's). Wider shows more at the sides in play and cutscenes, 16:10 more above and below; the HUD keeps its 16:9 layout in the middle, and the title, menus and movies are 16:9 in the middle of the screen. A screen of another shape shows it with bars (a 16:9 screen set to 21:9 shows what a 21:9 one would). A wider view is 1280 game pixels wide, so raise RSX_SCALE to keep it sharp. Unset is 16:9 |
-| RSX_ANISO | Texture filtering: 1 (original) to 16 (16x anisotropic, the default) |
-| RSX_AA | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off |
-| DOD3_SHADOWS | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start |
-| DOD3_MOTION_BLUR | 0 turns motion blur off |
-| DOD3_POSTFX | 0 turns off depth of field, bloom and the colour grading |
-| DOD3_DRAW_DISTANCE | 2, 3, 5 or 10: props, bushes and small trees are drawn from that many times as far away; unset is the original |
-| DOD3_TREE_LOD | 2, 3, 5 or 10: the large trees are drawn, and stay their full models, that many times as far away; unset is the original. From the next area loaded |
-| DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
-| DOD3_LAUNCHER | 0 starts the game straight away, without the launcher; holding Shift (Option on a Mac) while it starts opens the launcher anyway. Unset opens it at every start |
-| DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
-| DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
-| DOD3_MOUSE_SENS | How far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
-| KEY_CROSS, KEY_MOVE_UP, ... | Windows: the keys for each pad button and stick direction (the file lists them all) |
-| DOD3_CAMERA_SPEED | original gives the camera stick the game's own speed, which falls as the frame rate rises; unset keeps it at the console's |
-| RSX_BACKEND | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12 |
-
+| Setting                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RSX_SCALE                   | Internal resolution as a multiple of 1280x720: 1.5 = 1080p, 2 = 1440p, 3 = 4K. Above the window's size it is averaged down: supersampling                                                                                                                                                                                                                                                                                                                                                               |
+| RSX_DISPLAY                 | windowed, borderless (recommended for full screen) or fullscreen                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| RSX_WINDOW                  | Window size in windowed mode, e.g. 1920x1080                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| RSX_VSYNC                   | 1 to sync to the display; 0 lets the frame rate exceed its refresh                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| DOD3_FPS                    | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30                                                                                                                                                                                                                                                                                                                                  |
+| DOD3_FOV                    | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original                                                                                                                                                                                                                                                                                                                                                                                   |
+| DOD3_ASPECT                 | Aspect ratio, your screen's shape: 16:10, 21:9, 32:9, a ratio such as 2.39, or auto (the window's). Wider shows more at the sides in play and cutscenes, 16:10 more above and below; the HUD keeps its 16:9 layout in the middle, and the title, menus and movies are 16:9 in the middle of the screen. A screen of another shape shows it with bars (a 16:9 screen set to 21:9 shows what a 21:9 one would). A wider view is 1280 game pixels wide, so raise RSX_SCALE to keep it sharp. Unset is 16:9 |
+| RSX_ANISO                   | Texture filtering: 1 (original) to 16 (16x anisotropic, the default)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| RSX_AA                      | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| DOD3_SHADOWS                | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start                                                                                                                                                                                                                                                                                                                                                                                    |
+| DOD3_MOTION_BLUR            | 0 turns motion blur off                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| DOD3_POSTFX                 | 0 turns off depth of field, bloom and the colour grading                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| DOD3_DRAW_DISTANCE          | 2, 3, 5 or 10: props, bushes and small trees are drawn from that many times as far away; unset is the original                                                                                                                                                                                                                                                                                                                                                                                          |
+| DOD3_TREE_LOD               | 2, 3, 5 or 10: the large trees are drawn, and stay their full models, that many times as far away; unset is the original. From the next area loaded                                                                                                                                                                                                                                                                                                                                                     |
+| DOD3_SKIP_INTRO             | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| DOD3_LAUNCHER               | 0 starts the game straight away, without the launcher; holding Shift (Option on a Mac) while it starts opens the launcher anyway. Unset opens it at every start                                                                                                                                                                                                                                                                                                                                         |
+| DOD3_UNFOCUSED              | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back                                                                                                                                                                                                                                                                                                                                                                           |
+| DOD3_PROMPTS                | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard                                                                                                                                                                                                                                                                                                                                                                                             |
+| DOD3_MOUSE_SENS             | How far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off                                                                                                                                                                                                                                                                                                                                                                                                                |
+| KEY_CROSS, KEY_MOVE_UP, ... | Windows: the keys for each pad button and stick direction (the file lists them all)                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| DOD3_CAMERA_SPEED           | original gives the camera stick the game's own speed, which falls as the frame rate rises; unset keeps it at the console's                                                                                                                                                                                                                                                                                                                                                                              |
+| RSX_BACKEND                 | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## Controls
 
@@ -195,22 +213,22 @@ The mouse turns the camera and the keys are the pad's buttons, with or
 without a controller plugged in: use either at any moment, and the prompts
 on screen follow the one you touched last.
 
-| Key | Button | In play |
-|---|---|---|
-| W A S D | Left stick | Move |
-| Mouse | Right stick | Camera |
-| Left mouse button | Square | Attack |
-| Right mouse button | Triangle | Strong attack |
-| Space | Cross | Jump; confirm in menus |
-| E, Backspace | Circle | Guard; back in menus |
-| Shift | R1 | Evade |
-| Q, middle mouse button | L1 | Lock on |
-| Mouse wheel | Right stick left and right | Switch target |
-| R, F | L2, R2 | Weapon menus |
-| V | L3 and R3 together | Intoner Mode (C and X press one each) |
-| Arrow keys, 1 2 3 4 | D-pad | Menus; items |
-| Esc, Enter | Start | Pause |
-| Tab | Select | The select menu |
+| Key                    | Button                     | In play                               |
+| ---------------------- | -------------------------- | ------------------------------------- |
+| W A S D                | Left stick                 | Move                                  |
+| Mouse                  | Right stick                | Camera                                |
+| Left mouse button      | Square                     | Attack                                |
+| Right mouse button     | Triangle                   | Strong attack                         |
+| Space                  | Cross                      | Jump; confirm in menus                |
+| E, Backspace           | Circle                     | Guard; back in menus                  |
+| Shift                  | R1                         | Evade                                 |
+| Q, middle mouse button | L1                         | Lock on                               |
+| Mouse wheel            | Right stick left and right | Switch target                         |
+| R, F                   | L2, R2                     | Weapon menus                          |
+| V                      | L3 and R3 together         | Intoner Mode (C and X press one each) |
+| Arrow keys, 1 2 3 4    | D-pad                      | Menus; items                          |
+| Esc, Enter             | Start                      | Pause                                 |
+| Tab                    | Select                     | The select menu                       |
 
 Every key can be changed in dod3.ini, which lists them, and the prompts
 show the keys you chose. Settings > System Settings > Mouse Sensitivity
@@ -223,7 +241,6 @@ game's; switch to another application (Alt+Tab, Cmd+Tab on a Mac) and it
 is yours again. On a Mac the keys are places on the keyboard, the same on
 every layout; Alt is the Option key, and CapsLock cannot be used.
 
-
 ## Japanese voices
 
 With the Japanese Voice Pack installed: on the title menu, Change
@@ -235,7 +252,6 @@ and the 1.01 update switches the voices to English while one is played.
 With the DLC Undub installed (see Mods below), the DLC chapters follow the
 Language setting too: Japanese voices, lip-sync and movies there as well,
 and English when English is chosen.
-
 
 ## Mods
 
@@ -259,7 +275,7 @@ game/mods folder (and the voice pack's folder, for the DLC Undub).
   unpack its .7z and add the folder that holds GAME and ISO with Add
   Folder. It needs the Japanese Voice Pack. It follows Change Outfits/Music
   > Voice > Language, as the pack does; the 1.01 update's executable needs
-  no swapping here.
+  > no swapping here.
 
 With both, the DLC chapters' text is the translation's in Japanese too,
 where the translation has its own (the undub's is English text timed for
@@ -292,7 +308,6 @@ resolution, the display mode, the frame rate and the anti-aliasing.
 Running the setup again with the update package puts the update's own
 files back.
 
-
 ## Your saves, and updating
 
 Saves and the game's own data are in the "gamedata" folder next to
@@ -306,7 +321,6 @@ the old folder works too, but the release's dod3.ini (the default
 settings) then replaces yours: keep a copy and put it back. To uninstall,
 delete the folder.
 
-
 ## If something goes wrong
 
 - Each run writes dod3.log next to dod3.exe (the run before is kept as
@@ -317,7 +331,6 @@ delete the folder.
   package (its checksum fails). `dod3.exe --check <file>` shows the same.
 - "The game's executable could not be loaded": run dod3.exe --setup and add
   the update package again.
-
 
 ## Known issues
 

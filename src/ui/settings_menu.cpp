@@ -375,11 +375,20 @@ void read_current(Row& r, int& idx)
 
 /* The renderer applies RSX_DISPLAY / RSX_VSYNC / RSX_SCALE changes at its
  * next window pump (g_rsx_display_reload); the Direct3D 12, Vulkan and
- * Metal engines do. */
+ * Metal engines do. The Linux Vulkan backend applies display mode and
+ * V-Sync live, but its internal-resolution targets are built at start. */
 #if defined(_WIN32) || defined(__APPLE__)
 #define LIVE_DISPLAY true
+#define LIVE_SCALE  true
+#define LIVE_AA     true
+#elif defined(__linux__)
+#define LIVE_DISPLAY true
+#define LIVE_SCALE  false
+#define LIVE_AA     false
 #else
 #define LIVE_DISPLAY false
+#define LIVE_SCALE  false
+#define LIVE_AA     false
 #endif
 
 /* Every page's rows, in order: what each is, not what it is set to. The
@@ -395,7 +404,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                        { "3", "3840x2160" },
                        { "4", "5120x2880" } },
                      0,
-                     LIVE_DISPLAY,
+                     LIVE_SCALE,
                      nullptr,
                      PAGE_GRAPHICS });
     rows.push_back({ "RSX_DISPLAY",
@@ -435,7 +444,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                        { "msaa4", "MSAA 4x" },
                        { "msaa8", "MSAA 8x" } },
                      0,
-                     LIVE_DISPLAY,
+                     LIVE_AA,
                      nullptr,
                      PAGE_GRAPHICS });
     rows.push_back({ "RSX_ANISO",

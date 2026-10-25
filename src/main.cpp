@@ -50,6 +50,10 @@
 #include "install/crypto.h"
 #include "install/install.h"           /* the release layout (the installer) */
 #include "ui/ini.h"                    /* dod3.ini */
+#if defined(__linux__)
+#include "ui/setup_shared.h"           /* kPlay / kQuit for the launcher loop */
+#include "ui/ui.h"                     /* run_installer, run_launcher_loop */
+#endif
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
  * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
@@ -171,6 +175,14 @@ extern "C" int rsx_metal_backend_pump_messages(void);
 #define rsx_backend_present rsx_metal_backend_present
 #define rsx_backend_pump    rsx_metal_backend_pump_messages
 #define RSX_BACKEND_NAME    "Metal"
+#elif defined(DOD3_RSX_VULKAN)
+extern "C" int rsx_vulkan_backend_init(uint32_t w, uint32_t h, const char* title);
+extern "C" void rsx_vulkan_backend_present(void);
+extern "C" int rsx_vulkan_backend_pump_messages(void);
+#define rsx_backend_init    rsx_vulkan_backend_init
+#define rsx_backend_present rsx_vulkan_backend_present
+#define rsx_backend_pump    rsx_vulkan_backend_pump_messages
+#define RSX_BACKEND_NAME    "Vulkan"
 #else
 extern "C" int rsx_null_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" void rsx_null_backend_present(void);
@@ -205,6 +217,7 @@ extern "C" int rsx_null_backend_pump_messages(void);
  * took. A hidden or occluded window makes present block hard, and pacing the
  * ticks behind it paces the whole game behind it. */
 extern "C" uint32_t ppu_hle_inject_base;   /* cellGcmSys.c: the GCM window's home */
+extern "C" void ppu_gcm_pump(void);        /* cellGcmSys.c: deliver pending handlers */
 static volatile LONG g_frames_presented = 0;
 
 /* Frames handed to the backend at a guest FLIP boundary -- one per frame the
@@ -1428,6 +1441,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         while ((long long)(now - next_tick) >= 0 && fired < 240) {
             cellGcmTickVBlank();
             cellGcmTickFlip();
+            ppu_gcm_pump();
             /* Present a pending flip BEFORE draining any further. The flip
              * fires at a get==put frame boundary on the guest thread, so the
              * batch held right now is exactly the completed frame; presenting
@@ -1810,6 +1824,50 @@ static std::vector<std::filesystem::path> cli_paths(int argc, char** argv, int f
     return out;
 }
 
+#if defined(__linux__)
+/* The source tree this executable was built from, if it is still beside it:
+ * a developer tree has game/ at the top, and the native binary lives in
+ * build-native/. */
+static std::filesystem::path linux_source_root(const std::filesystem::path& exe)
+{
+    std::error_code ec;
+    std::filesystem::path dir = exe.parent_path();
+    for (int i = 0; i < 4 && !dir.empty(); i++) {
+        if (std::filesystem::exists(dir / "CMakeLists.txt", ec) &&
+            std::filesystem::exists(dir / "src", ec))
+            return dir;
+        const std::filesystem::path up = dir.parent_path();
+        if (up == dir) break;
+        dir = up;
+    }
+    return {};
+}
+
+/* Where the native build reads the game from: DOD3_INSTALL_BASE, the
+ * executable's folder, the current folder, the source tree's game/, or the
+ * per-user install the Linux setup uses. */
+static std::filesystem::path linux_install_base(const char* argv0)
+{
+    std::error_code ec;
+    if (const char* e = getenv("DOD3_INSTALL_BASE"))
+        if (*e) return std::filesystem::absolute(e, ec).lexically_normal();
+    const std::filesystem::path exe =
+        std::filesystem::absolute(argv0 ? argv0 : "dod3", ec).lexically_normal();
+    const std::filesystem::path beside = exe.parent_path();
+    if (std::filesystem::exists(beside / "game", ec) || std::filesystem::exists(beside / "elf", ec))
+        return beside;
+    const std::filesystem::path cwd = std::filesystem::current_path(ec);
+    if (std::filesystem::exists(cwd / "game", ec)) return cwd;
+    if (const std::filesystem::path src = linux_source_root(exe); !src.empty())
+        return (src / "game").lexically_normal();
+    if (const char* x = getenv("XDG_DATA_HOME"))
+        if (*x) return std::filesystem::path(x) / "Drakengard 3 Recompiled";
+    if (const char* h = getenv("HOME"))
+        if (*h) return std::filesystem::path(h) / ".local/share/Drakengard 3 Recompiled";
+    return cwd;
+}
+#endif
+
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
@@ -1906,11 +1964,33 @@ int main(int argc, char** argv)
         dod3_mac_log_to_file();
         if (dod3_setup_mac(data, force_setup ? 1 : 0) != 0) return 1;
 #else
-        if (!dod3setup::installed(".").ready()) {
-            printf("usage: %s <PPU ELF>\n(or run it from a folder the installer has set up: %s --install <file>...; "
-                   "see src/install/install.h)\n",
-                   argv[0], argv[0]);
-            return 2;
+        const std::filesystem::path base = linux_install_base(argv[0]);
+        std::error_code ec;
+        if (argv[0]) s_exe_path = std::filesystem::absolute(argv[0], ec).string();
+        std::filesystem::create_directories(base, ec);
+        if (ec) {
+            fprintf(stderr, "cannot make the install folder %s: %s\n", dod3::utf8(base).c_str(),
+                    ec.message().c_str());
+            return 1;
+        }
+        if (force_setup || !dod3setup::installed(base).ready()) {
+            const int r = dod3setup::run_installer(base);
+            if (r < 0) {
+                fprintf(stderr,
+                        "the setup window could not open (SDL2 + OpenGL).\n"
+                        "Install from a terminal with dod3-setup --install, or use an existing game/ folder.\n");
+                return 1;
+            }
+            if (!dod3setup::installed(base).ready()) return r == dod3setup::kQuit ? 0 : 1;
+        }
+        if (!force_setup && dod3setup::launcher_wanted(false)) {
+            const int r = dod3setup::run_launcher_loop(base);
+            if (r != dod3setup::kPlay) return 0;
+        }
+        if (!dod3setup::installed(base).ready()) return 1;
+        if (chdir(base.c_str()) != 0) {
+            fprintf(stderr, "cannot enter the install folder %s\n", dod3::utf8(base).c_str());
+            return 1;
         }
 #endif
         dod3_setenv("PS3_TITLE", "Drakengard 3", 0);
@@ -2030,6 +2110,12 @@ int main(int argc, char** argv)
      * 4-minute battle, against 2 boosted (AUDIO_GAPS=1 counts them). */
     dod3_setenv("PPU_QOS_INTERACTIVE", "CDevSd", 0);
     dod3_setenv("SPU_QOS_INTERACTIVE", "1", 0);
+#if defined(DOD3_RSX_VULKAN)
+    /* The backend is headless unless asked; the game needs the window and the
+     * guest programs (its shaders), not the fixed-function fallback. */
+    dod3_setenv("PS3RECOMP_VK_WINDOW", "1", 0);
+    dod3_setenv("PS3RECOMP_VK_GUEST_PROGRAMS", "1", 0);
+#endif
 
     if (!alloc_guest_vm()) {
         fprintf(stderr, "ERROR: could not allocate the guest address space\n");

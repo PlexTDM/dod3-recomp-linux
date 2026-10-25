@@ -135,7 +135,7 @@ CMake options:
 | `DOD3_INLINE_VM` | ON | inline the guest-memory fast path into the lifted code |
 | `DOD3_SYMBOLS` | ON | Windows: `/Z7` on the port's and the runtime's sources, `/DEBUG` at link, for the profiler and the crash handler |
 | `DOD3_CONSOLE` | OFF | Windows: link as a console program |
-| `LIBSRE_PRX` | the submodule's | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`) |
+| `LIBSRE_PRX` | the submodule's | the module the SPURS LFQueue push helpers are lifted from at build time (`tools/gen_libsre.py`) |
 | `DOD3_PGO` | empty | profile-guided optimisation of the lifted code alone, in a build folder of its own: `generate` instruments it (the game then writes the profile named by `LLVM_PROFILE_FILE` every 30 s and on exit), `use:<profdata>` compiles it on a merged profile (`llvm-profdata merge -o lifted.profdata *.profraw`) |
 
 The replay tool (`rsx_replay`, for the rendering regression) is not part of

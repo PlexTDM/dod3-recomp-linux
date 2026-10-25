@@ -35,9 +35,10 @@ AlignConsecutiveAssignments: None
 AlignConsecutiveDeclarations: None
 AlignConsecutiveMacros: Consecutive
 BinPackArguments: true
-BinPackParameters: true
+BinPackParameters: BinPack
 Cpp11BracedListStyle: false
 FixNamespaceComments: true
 IndentPPDirectives: None
-ReflowComments: false
-SortIncludes: Never
+ReflowComments: Never
+SortIncludes:
+  Enabled: false

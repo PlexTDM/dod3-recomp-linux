@@ -38,6 +38,7 @@ int dod3_libsre_call(uint32_t addr, ppu_context* ctx);   /* generated */
 void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId);
 int spurs_tasksets_on(uint32_t spurs_ea, uint32_t* out, int max);
 int dod3_edgezlib_push(uint32_t lr, uint32_t req[8]);
+int dod3_edgezlib_complete(uint32_t req[8]);
 }
 
 /* libsre entry points (see tools/gen_libsre.py) */
@@ -161,6 +162,13 @@ static void lfq_push_body(ppu_context* ctx)
     if (vm_read32(q + LFQ_M_SIZE) == sizeof zreq) {
         for (int i = 0; i < 8; i++) zreq[i] = vm_read32(src + 4u * i);
         zlib_native = dod3_edgezlib_push((uint32_t)ctx->lr, zreq) != 0;
+    }
+
+    /* The native inflate already wrote the output; finish the request's work
+     * counter and event flag here instead of queueing the token copy. */
+    if (zlib_native && dod3_edgezlib_complete(zreq)) {
+        ctx->gpr[3] = 0;
+        return;
     }
 
     const bool any2any = vm_read32(q + LFQ_M_DIRECTION) == LFQ_DIR_ANY2ANY;

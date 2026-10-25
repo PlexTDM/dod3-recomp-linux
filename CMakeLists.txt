@@ -338,13 +338,14 @@ if(PORT_ENABLE_SPU)
 endif()
 
 # ---------------------------------------------------------------------------
-# Parts of libsre (SPURS LFQueue push, SPURS queue), lifted at build time
+# SPURS LFQueue push helpers, lifted from libsre at build time
 # ---------------------------------------------------------------------------
-# src/kernel/spurs_lfqueue.cpp and src/kernel/spurs_queue.cpp drive Sony's own code out of
+# src/kernel/spurs_lfqueue.cpp drives Sony's LFQueue push code out of
 # libsre.prx; tools/gen_libsre.py lifts it into the build tree. The result is
-# firmware-derived, so it is generated, never committed.
+# firmware-derived, so it is generated, never committed. The SPURS queue side
+# (src/kernel/spurs_queue.cpp) is native and does not use this.
 set(LIBSRE_PRX "${PS3RECOMP_DIR}/fw_spu/libsre.prx" CACHE FILEPATH
-    "Decrypted libsre.prx the SPURS queue paths are lifted from")
+    "Decrypted libsre.prx the SPURS LFQueue push helpers are lifted from")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
     set(DOD3_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")   # a Windows venv
@@ -354,16 +355,34 @@ else()
     set(DOD3_PYTHON "${Python3_EXECUTABLE}")
 endif()
 set(LIBSRE_LIFTED_CPP "${CMAKE_CURRENT_BINARY_DIR}/gen/libsre_lifted.cpp")
-add_custom_command(
-    OUTPUT "${LIBSRE_LIFTED_CPP}"
-    COMMAND "${DOD3_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_libsre.py"
-            "${PS3RECOMP_DIR}" "${LIBSRE_PRX}"
-            "${CMAKE_CURRENT_BINARY_DIR}/libsre" "${LIBSRE_LIFTED_CPP}"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_libsre.py"
-            "${LIBSRE_PRX}"
-            "${PS3RECOMP_DIR}/tools/ppu_lifter.py"
-            "${PS3RECOMP_DIR}/tools/lift_prx.py"
-    COMMENT "Lifting libsre's SPURS queue paths")
+option(DOD3_LIBSRE_STUB
+    "Build without libsre.prx: non-zlib LFQueue pushes fail (compile-only; SPURS queues and native Edge zlib do not need it)" OFF)
+if(DOD3_LIBSRE_STUB)
+    file(WRITE "${LIBSRE_LIFTED_CPP}"
+"/* DOD3_LIBSRE_STUB: no libsre.prx was supplied. The non-zlib LFQueue push
+ * paths call this and fail cleanly instead of linking. The SPURS queue and
+ * native Edge zlib paths do not use it. */
+#include \"ppu_recomp.h\"
+extern \"C\" int dod3_libsre_call(uint32_t addr, ppu_context* ctx)
+{
+    (void)addr;
+    ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)0x80410101u;   /* CELL_SYNC_ERROR_AGAIN */
+    return 0;
+}
+")
+    message(STATUS "libsre:          STUB (compile-only; non-zlib LFQueue pushes will fail at run time)")
+else()
+    add_custom_command(
+        OUTPUT "${LIBSRE_LIFTED_CPP}"
+        COMMAND "${DOD3_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_libsre.py"
+                "${PS3RECOMP_DIR}" "${LIBSRE_PRX}"
+                "${CMAKE_CURRENT_BINARY_DIR}/libsre" "${LIBSRE_LIFTED_CPP}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_libsre.py"
+                "${LIBSRE_PRX}"
+                "${PS3RECOMP_DIR}/tools/ppu_lifter.py"
+                "${PS3RECOMP_DIR}/tools/lift_prx.py"
+        COMMENT "Lifting libsre's SPURS LFQueue push helpers")
+endif()
 set_source_files_properties("${LIBSRE_LIFTED_CPP}" PROPERTIES COMPILE_OPTIONS "-w;-ffp-contract=off")
 
 if(WIN32)
@@ -375,6 +394,10 @@ elseif(APPLE)
     list(APPEND PORT_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm")
     set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm"
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+elseif(UNIX)
+    # The launcher's Proton page and the setup's fallback launch path still use
+    # this; the native game itself does not.
+    list(APPEND PORT_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os/linux/proton.cpp")
 endif()
 
 # The installer (src/install/install.h): the core on every platform; the pages
@@ -423,6 +446,34 @@ elseif(APPLE)
                         "${IMGUI_DIR}/backends/imgui_impl_osx.mm"
                         "${IMGUI_DIR}/backends/imgui_impl_metal.mm"
                  APPEND PROPERTY COMPILE_OPTIONS "-fobjc-arc")
+elseif(UNIX)
+    # The Linux window layer (src/ui/ui_linux.cpp): SDL2 + OpenGL 3 and
+    # ImGui's SDL2/OpenGL3 backends. The game's own Vulkan window is opened
+    # later by the RSX backend, after this UI is shut down.
+    find_package(OpenGL REQUIRED)
+    find_package(ZLIB REQUIRED)
+    find_package(Threads REQUIRED)
+    find_package(SDL2 CONFIG QUIET)
+    if(TARGET SDL2::SDL2)
+        set(DOD3_SDL2 SDL2::SDL2)
+    elseif(TARGET SDL2::SDL2-static)
+        set(DOD3_SDL2 SDL2::SDL2-static)
+    else()
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+        set(DOD3_SDL2 PkgConfig::SDL2)
+    endif()
+    list(APPEND IMGUI_SOURCES
+        "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
+    list(APPEND SETUP_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/setup_shared.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_linux.cpp"
+        ${IMGUI_SOURCES})
 endif()
 # The retail PKG key, read from the submodule's tools/pkg_extract.py
 # (PS3_GPKG_KEY) into a header in the build tree: this repository carries no
@@ -443,7 +494,7 @@ set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp" APPEND PRO
 set_property(SOURCE ${SETUP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGUI_DIR}")
 # third-party code: its warnings are not ours to act on
 set_property(SOURCE ${IMGUI_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "-w")
-if(WIN32 OR APPLE)
+if(WIN32 OR APPLE OR UNIX)
     # the key art's PNG decoder: stb_image, the copy in the runtime's codec
     # library, compiled privately (src/ui/png.cpp)
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY
@@ -604,6 +655,9 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/res/app.rc")
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE DOD3_EBOOT=${DOD3_EBOOT})
+if(PS3RECOMP_RSX_VULKAN)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE DOD3_RSX_VULKAN=1)
+endif()
 message(STATUS "EBOOT:           BLUS31197 ${DOD3_EBOOT}")
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -626,6 +680,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 if(APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         "-framework MetalKit" "-framework GameController" "-framework UniformTypeIdentifiers")
+elseif(UNIX)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        ${DOD3_SDL2}
+        OpenGL::GL
+        ZLIB::ZLIB
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+        m)
 endif()
 
 # The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
@@ -702,14 +764,16 @@ endif()
 #     whether the module's dynamic TLS initialisers have run on this thread,
 #     which an executable's always have. The check and its call were 20 of
 #     the 43 instructions of a call-and-drain.
+# DOD3_RECOMP_OPT: extra options for the lifted TUs alone (a compile
+# experiment: -DDOD3_RECOMP_OPT=/clang:-O3 in a build folder of its own).
+# GCC builds default to -O1 because a 600k-line lifted TU needs about 5 GB
+# at -O1 and more at -O3; raise this only in a build folder of its own.
+set(DOD3_RECOMP_OPT "" CACHE STRING "Extra compile options for the lifted PPU code")
 if(MSVC)
     set(_recomp_opts "/w;/bigobj")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         list(APPEND _recomp_opts "/Zc:tlsGuards-")
     endif()
-    # DOD3_RECOMP_OPT: extra options for the lifted TUs alone (a compile
-    # experiment: -DDOD3_RECOMP_OPT=/clang:-O3 in a build folder of its own).
-    set(DOD3_RECOMP_OPT "" CACHE STRING "Extra compile options for the lifted PPU code")
     if(DOD3_RECOMP_OPT)
         list(APPEND _recomp_opts ${DOD3_RECOMP_OPT})
     endif()
@@ -758,8 +822,20 @@ if(MSVC)
     set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
         COMPILE_OPTIONS "${_recomp_opts}")
 else()
+    # The lifted AltiVec helpers use SSSE3/SSE4.1 intrinsics directly in the
+    # VSLDOI macro, so GCC needs the ISA enabled on the command line too.
+    set(_recomp_opts "-w;-ffp-contract=off")
+    if(DOD3_RECOMP_OPT)
+        separate_arguments(_recomp_extra UNIX_COMMAND "${DOD3_RECOMP_OPT}")
+        list(APPEND _recomp_opts ${_recomp_extra})
+    else()
+        list(APPEND _recomp_opts "-O1")
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        list(APPEND _recomp_opts "-mssse3" "-msse4.1")
+    endif()
     set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "-w;-ffp-contract=off")
+        COMPILE_OPTIONS "${_recomp_opts}")
 endif()
 # The native collision test (src/patches/collision_native.cpp, generated from
 # the lifted body) must round exactly as the lifted code does: the same
@@ -772,6 +848,9 @@ if(MSVC)
     endif()
 else()
     set(_native_fp_opts "-ffp-contract=off")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        list(APPEND _native_fp_opts "-mssse3" "-msse4.1")
+    endif()
 endif()
 if(_native_fp_opts)
     set_property(SOURCE src/patches/collision_native.cpp APPEND PROPERTY COMPILE_OPTIONS "${_native_fp_opts}")

@@ -97,11 +97,16 @@ polls=
 # nearest thing to a deterministic benchmark of the game's main thread
 # (bench_summary from FROM=120 or so, once the streaming settles).
 if [ -n "$AUTOPLAY_CUTSCENE" ]; then
-  sleep 8
-  for i in 1 2 3; do
-    press $START "skip opening movie #$i"; sleep 0.8
-    press $CROSS "confirm skip #$i"; sleep 2.5
-  done
+  # Wait for the chapter's opening movie itself before pressing anything:
+  # blind timed presses start landing in gameplay once the port is fast
+  # enough to get there early, and START then opens the pause menu.
+  if wait_for "MOVIES/M0010_E0010.BIK" 120; then
+    sleep 2
+    press $START "skip opening movie"; sleep 1
+    press $CROSS "confirm skip"; sleep 3
+  else
+    echo "[autoplay] opening movie not seen; leaving the game alone"
+  fi
   sleep 6; press $CROSS "dismiss the tutorial"
   echo "$(date +%H:%M:%S) [autoplay] idle benchmark: no more input"
   exit 0

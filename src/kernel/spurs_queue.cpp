@@ -1,22 +1,25 @@
 /*
- * SPURS queue (cellSpursQueue), PPU side, on Sony's own code.
+ * SPURS queue (cellSpursQueue), PPU side, natively.
  *
- * Drakengard 3 pairs SPU tasks with SPURS queues the task end of which is the
- * game's lifted SPU code, reading the queue out of guest memory. The toolkit's
- * HLE has no cellSpursQueuePopBody at all -- the game read an uninitialised
- * stack slot as the popped item and asked malloc for 3.8 GB -- and its
- * initializer writes a layout of its own. So all three run libsre's code,
- * lifted at build time by tools/gen_libsre.py:
+ * Drakengard 3 pairs SPU tasks with SPURS queues whose consumer is the game's
+ * lifted SPU code, reading the queue straight out of guest memory. The
+ * toolkit's HLE has no cellSpursQueuePopBody at all -- the game read an
+ * uninitialised stack slot as the popped item and asked malloc for 3.8 GB --
+ * and its initializer writes a layout of its own. This file implements the
+ * three PPU-side entry points against the queue line the SPU code expects:
  *
- *   _cellSpursQueueInitialize  0x010164C0  (spurs, taskset, queue, buffer, size, depth, dir)
- *   cellSpursQueuePushBody     0x010169D0  (queue, buffer, isBlocking)
- *   cellSpursQueuePopBody      0x01016CFC  (queue, buffer, isPeek, isBlocking)
+ *   _cellSpursQueueInitialize  (spurs, taskset, queue, buffer, size, depth, dir)
+ *   cellSpursQueuePushBody     (queue, buffer, isBlocking)
+ *   cellSpursQueuePopBody      (queue, buffer, isPeek, isBlocking)
  *
- * As with the LFQueue push, a blocking call is run as a non-blocking one, retried
- * while the queue is full/empty (ERROR_AGAIN) or contended (ERROR_BUSY). The real blocking
- * path parks on the lv2 event queue cellSpursQueueAttachLv2EventQueue would have
- * created -- and refuses with ERROR_STAT when there is none, which is what the
- * HLE's stub attach leaves.
+ * The queue line keeps the head and tail at +0x00/+0x04, modulus/depth at
+ * +0x0C, item size at +0x10, depth at +0x14, buffer EA at +0x18 and the
+ * taskset at +0x70. Indices use libsre's complemented encoding when bit 31 is
+ * set; the ring is 2*mod and holds at most mod items.
+ *
+ * A blocking call retries while the queue is full/empty (ERROR_AGAIN) or
+ * contended (ERROR_BUSY) instead of parking on an lv2 event queue that the HLE
+ * attach stub never creates.
  */
 #include "ppu_recomp.h"
 #include "ps3emu/nid.h"
@@ -28,136 +31,162 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
 
 extern "C" {
 typedef void (*hle_ctx_fn)(ppu_context*);
 void ps3_hle_register_ctx(uint32_t nid, const char* name, hle_ctx_fn fn);
-int dod3_libsre_call(uint32_t addr, ppu_context* ctx);   /* generated */
 void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId);
 int spurs_tasksets_on(uint32_t spurs_ea, uint32_t* out, int max);
 extern uint8_t* vm_base;
-extern void (*g_spu_line_commit_hook2)(uint32_t);   /* runtime/spu/spu_channels.c */
 }
 
 enum : uint32_t {
-    LIBSRE_QUEUE_INITIALIZE = 0x010164C0,
-    LIBSRE_QUEUE_PUSH_BODY = 0x010169D0,
-    LIBSRE_QUEUE_POP_BODY = 0x01016CFC,
+    CELL_SPURS_TASK_ERROR_AGAIN = 0x80410901,
+    CELL_SPURS_TASK_ERROR_BUSY = 0x8041090A,
+    CELL_SPURS_TASK_ERROR_INVAL = 0x80410902,
+    CELL_SPURS_TASK_ERROR_STAT = 0x8041090F,
+    CELL_SPURS_TASK_ERROR_ALIGN = 0x80410910,
+    CELL_SPURS_TASK_ERROR_NULL_POINTER = 0x80410911,
 };
 
-enum : uint32_t {
-    CELL_SPURS_TASK_ERROR_AGAIN = 0x80410901,   /* non-blocking: nothing to pop */
-    CELL_SPURS_TASK_ERROR_BUSY = 0x8041090A,   /* non-blocking: lost a race    */
-};
-
-/* Run a lifted libsre function on the caller's own arguments: r3..r10 as the
- * guest passed them, LR and TOC put back afterwards. */
-static uint32_t run_libsre(ppu_context* ctx, uint32_t fn, const uint64_t args[4])
+static inline uint32_t q_index(uint32_t v)
 {
-    const uint64_t lr = ctx->lr, r2 = ctx->gpr[2];
-    for (int i = 0; i < 4; i++) ctx->gpr[3 + i] = args[i];
-    dod3_libsre_call(fn, ctx);
-    ctx->lr = lr;
-    ctx->gpr[2] = r2;
-    return (uint32_t)ctx->gpr[3];
+    return (v & 0x80000000u) ? ~v : v;
 }
 
-/* ---- waking a blocked push/pop -----------------------------------------
- *
- * A blocking call retries until the queue has an item/room. Between tries a
- * waiter sleeps until the queue's line changes -- an SPU task pushing or
- * popping commits it with PUTLLC, which the SPU runtime reports through
- * g_spu_line_commit_hook2, and the PPU side reports its own calls -- with a
- * 1 ms timeout in case a change arrives some other way. (PhysX pops 20-30
- * SPU task results a frame on the thread the game thread then waits on;
- * retrying on a timer held the game thread up for a sixth of every frame.) */
-static std::mutex s_wait_mu;
-static std::condition_variable s_wait_cv;
-static std::atomic<unsigned> s_wait_gen{ 0 };
-static std::atomic<int> s_waiters{ 0 };
-static uint32_t s_lines[64];
-static std::atomic<int> s_nlines{ 0 };
-
-static void queue_changed()
+static uint32_t queue_params(uint32_t q, uint32_t* head, uint32_t* tail, uint32_t* mod, uint32_t* size, uint32_t* buf)
 {
-    s_wait_gen.fetch_add(1, std::memory_order_release);
-    if (s_waiters.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lk(s_wait_mu);
-        s_wait_cv.notify_all();
-    }
+    *size = vm_read32(q + 0x10);
+    *mod = vm_read32(q + 0x0C);
+    if (!*mod) *mod = vm_read32(q + 0x14);
+    *buf = (uint32_t)vm_read64(q + 0x18);
+    *head = q_index(vm_read32(q + 0x00));
+    *tail = q_index(vm_read32(q + 0x04));
+    if (!*size || !*mod || !*buf) return CELL_SPURS_TASK_ERROR_INVAL;
+    return 0;
 }
 
-static void queue_line_committed(uint32_t line)
+static uint32_t queue_count(uint32_t head, uint32_t tail, uint32_t mod)
 {
-    const int n = s_nlines.load(std::memory_order_acquire);
-    for (int i = 0; i < n; i++)
-        if (s_lines[i] == line) {
-            queue_changed();
-            return;
-        }
-}
-
-static void watch_queue(uint32_t q)
-{
-    std::lock_guard<std::mutex> lk(s_wait_mu);
-    const int n = s_nlines.load();
-    for (int i = 0; i < n; i++)
-        if (s_lines[i] == (q & ~127u)) return;
-    if (n >= 64) return;
-    s_lines[n] = q & ~127u;
-    s_nlines.store(n + 1, std::memory_order_release);
-    g_spu_line_commit_hook2 = queue_line_committed;
-}
-
-/* Run non-blocking, and retry until the queue has room/an item if the caller
- * asked to block. args[block_arg] is the call's isBlocking flag. */
-static uint32_t run_blocking(ppu_context* ctx, uint32_t fn, uint64_t args[4], int block_arg)
-{
-    const bool blocking = (uint8_t)args[block_arg] != 0;
-    args[block_arg] = 0;
-    uint32_t rc;
-    for (unsigned spins = 0;; spins++) {
-        const unsigned gen = s_wait_gen.load(std::memory_order_acquire);
-        rc = run_libsre(ctx, fn, args);
-        if (!blocking || (rc != CELL_SPURS_TASK_ERROR_AGAIN && rc != CELL_SPURS_TASK_ERROR_BUSY)) {
-            if (rc == 0) queue_changed();   /* a PPU push/pop: room or an item for someone */
-            return rc;
-        }
-        if (rc == CELL_SPURS_TASK_ERROR_BUSY || spins < 8) {
-            std::this_thread::yield();
-            continue;
-        }
-        std::unique_lock<std::mutex> lk(s_wait_mu);
-        s_waiters.fetch_add(1);
-        s_wait_cv.wait_for(lk, std::chrono::milliseconds(1),
-                           [&] { return s_wait_gen.load(std::memory_order_acquire) != gen; });
-        s_waiters.fetch_sub(1);
-    }
+    const uint32_t ring = mod * 2u;
+    return (tail + ring - head) % ring;
 }
 
 static void queue_initialize(ppu_context* ctx)
 {
-    /* size and depth ride in r7/r8, which run_libsre leaves alone. */
-    uint64_t args[4] = { ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], ctx->gpr[6] };
-    const uint64_t r7 = ctx->gpr[7], r8 = ctx->gpr[8];
-    const uint32_t rc = run_libsre(ctx, LIBSRE_QUEUE_INITIALIZE, args);
-    if (rc == 0) watch_queue((uint32_t)args[2]);
-    fprintf(stderr, "[spurs-queue] init taskset=0x%08X q=0x%08X buf=0x%08X size=%u depth=%u -> 0x%08X\n",
-            (uint32_t)args[1], (uint32_t)args[2], (uint32_t)args[3], (uint32_t)r7, (uint32_t)r8, rc);
+    const uint32_t spurs = (uint32_t)ctx->gpr[3];
+    const uint32_t taskset = (uint32_t)ctx->gpr[4];
+    const uint32_t q = (uint32_t)ctx->gpr[5];
+    const uint32_t buf = (uint32_t)ctx->gpr[6];
+    const uint32_t size = (uint32_t)ctx->gpr[7];
+    const uint32_t depth = (uint32_t)ctx->gpr[8];
+    const uint32_t dir = (uint32_t)ctx->gpr[9];
+
+    uint32_t rc = 0;
+    if (!q || !buf)
+        rc = CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    else if ((q & 0x7F) || (buf & 0xF))
+        rc = CELL_SPURS_TASK_ERROR_ALIGN;
+    else if (!size || size > 0x4000 || (size & 0xF) || !depth || depth > 0x7FFF)
+        rc = CELL_SPURS_TASK_ERROR_INVAL;
+    if (rc) {
+        ctx->gpr[3] = (int64_t)(int32_t)rc;
+        fprintf(stderr, "[spurs-queue] init invalid q=0x%08X buf=0x%08X size=%u depth=%u -> 0x%08X\n",
+                q, buf, size, depth, rc);
+        return;
+    }
+
+    for (uint32_t o = 0; o < 128; o += 8) vm_write64(q + o, 0);
+    vm_write32(q + 0x0C, depth);
+    vm_write32(q + 0x10, size);
+    vm_write32(q + 0x14, depth);
+    vm_write64(q + 0x18, buf);
+    vm_write64(q + 0x70, taskset ? taskset : spurs);
+    memset(vm_base + buf, 0, (size_t)size * depth);
+
+    fprintf(stderr, "[spurs-queue] init taskset=0x%08X q=0x%08X buf=0x%08X size=%u depth=%u dir=%u -> 0\n",
+            taskset, q, buf, size, depth, dir);
+    ctx->gpr[3] = 0;
+}
+
+static uint32_t queue_push(ppu_context* ctx, bool blocking)
+{
+    const uint32_t q = (uint32_t)ctx->gpr[3];
+    const uint32_t data = (uint32_t)ctx->gpr[4];
+    if (!q || !data) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    if (q & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10000);
+    for (unsigned spins = 0;; spins++) {
+        uint32_t head, tail, mod, size, buf;
+        uint32_t rc = queue_params(q, &head, &tail, &mod, &size, &buf);
+        if (rc) return rc;
+        if (queue_count(head, tail, mod) < mod) {
+            const uint32_t slot = tail % mod;
+            memcpy(vm_base + buf + (size_t)slot * size, vm_base + data, size);
+            const uint32_t next = (tail + 1u) % (mod * 2u);
+            vm_write32(q + 0x04, next);
+            static std::atomic<unsigned> n{0};
+            const unsigned k = n.fetch_add(1, std::memory_order_relaxed);
+            if (k < 16 || (k % 1000) == 0)
+                fprintf(stderr, "[spurs-queue] push q=0x%08X slot=%u size=%u head=%u tail=%u -> 0\n",
+                        q, slot, size, head, next);
+            return 0;
+        }
+        if (!blocking) return CELL_SPURS_TASK_ERROR_AGAIN;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            fprintf(stderr, "[spurs-queue] push q=0x%08X timed out head=%u tail=%u mod=%u\n", q, head, tail, mod);
+            return CELL_SPURS_TASK_ERROR_AGAIN;
+        }
+        if (spins < 8) std::this_thread::yield();
+        else std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+}
+
+static uint32_t queue_pop(ppu_context* ctx, bool peek, bool blocking)
+{
+    const uint32_t q = (uint32_t)ctx->gpr[3];
+    const uint32_t data = (uint32_t)ctx->gpr[4];
+    if (!q || !data) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    if (q & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10000);
+    for (unsigned spins = 0;; spins++) {
+        uint32_t head, tail, mod, size, buf;
+        uint32_t rc = queue_params(q, &head, &tail, &mod, &size, &buf);
+        if (rc) return rc;
+        if (queue_count(head, tail, mod) != 0) {
+            const uint32_t slot = head % mod;
+            memcpy(vm_base + data, vm_base + buf + (size_t)slot * size, size);
+            const uint32_t next = peek ? head : (head + 1u) % (mod * 2u);
+            if (!peek) vm_write32(q + 0x00, next);
+            static std::atomic<unsigned> n{0};
+            const unsigned k = n.fetch_add(1, std::memory_order_relaxed);
+            if (k < 16 || (k % 1000) == 0)
+                fprintf(stderr, "[spurs-queue] pop q=0x%08X slot=%u size=%u head=%u tail=%u peek=%u -> 0\n",
+                        q, slot, size, next, tail, peek ? 1u : 0u);
+            return 0;
+        }
+        if (!blocking) return CELL_SPURS_TASK_ERROR_AGAIN;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            fprintf(stderr, "[spurs-queue] pop q=0x%08X timed out head=%u tail=%u mod=%u\n", q, head, tail, mod);
+            return CELL_SPURS_TASK_ERROR_AGAIN;
+        }
+        if (spins < 8) std::this_thread::yield();
+        else std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
 }
 
 static void queue_push_body(ppu_context* ctx)
 {
-    uint64_t args[4] = { ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], 0 };
-    run_blocking(ctx, LIBSRE_QUEUE_PUSH_BODY, args, 2);   /* isBlocking = r5 */
+    const uint32_t rc = queue_push(ctx, (uint32_t)ctx->gpr[5] != 0);
+    ctx->gpr[3] = (int64_t)(int32_t)rc;
 }
 
 static void queue_pop_body(ppu_context* ctx)
 {
-    uint64_t args[4] = { ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], ctx->gpr[6] };
-    run_blocking(ctx, LIBSRE_QUEUE_POP_BODY, args, 3);    /* isBlocking = r6 */
+    const uint32_t rc = queue_pop(ctx, (uint32_t)ctx->gpr[5] != 0, (uint32_t)ctx->gpr[6] != 0);
+    ctx->gpr[3] = (int64_t)(int32_t)rc;
 }
 
 /* ---- hooks the lifted libsre calls (see tools/gen_libsre.py) ------------- */
