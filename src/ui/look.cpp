@@ -1,7 +1,7 @@
 /* The look the launcher and the installer share (ui/look.h). */
 #include "ui/look.h"
 #include "util.h"
-#include "launcher_fonts.h"   /* generated: kFont_* */
+#include "setup_fonts.h"   /* generated: kFont_* */
 
 #include "imgui_internal.h"   /* RegisterUserTexture */
 

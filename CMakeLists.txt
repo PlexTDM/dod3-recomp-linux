@@ -2,14 +2,12 @@ cmake_minimum_required(VERSION 3.20)
 project(dod3
     VERSION 0.4.0
     LANGUAGES C CXX
-    DESCRIPTION "Drakengard 3 (PS3) recompiled for Windows, macOS and Linux"
+    DESCRIPTION "Drakengard 3 (PS3) recompiled for Linux"
 )
-# The port's own version, apart from the game's (the 1.01 update): the
-# numbers above go into the Windows version block, and this label is what
-# people see -- the installer, the log's first line, the release name.
+# The port's own version, apart from the game's (the 1.01 update).
 set(DOD3_VERSION_LABEL "0.4.0 alpha")
-if(APPLE)
-    enable_language(OBJCXX)   # src/os/macos/setup_mac.mm
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "dod3-recomp currently supports Linux builds only")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -23,15 +21,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---------------------------------------------------------------------------
 # The Linux installer alone (dod3-setup)
 # ---------------------------------------------------------------------------
-# The setup is useful on Linux before the game itself is ported: it installs
-# the disc/update/DLC and the mods for a dod3.exe running under Wine, and it
-# needs neither the lifter's output nor the runtime. This block stops after
-# the installer target, so the rest of this file's game build is untouched.
+# Optional Linux installer-only target; the native game target is the default.
 option(DOD3_SETUP_ONLY "Build only the Linux installer (dod3-setup)" OFF)
 if(DOD3_SETUP_ONLY)
-    if(WIN32 OR APPLE)
-        message(FATAL_ERROR "DOD3_SETUP_ONLY builds the Linux installer; use the normal build on Windows or macOS")
-    endif()
     if(NOT CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     endif()
@@ -58,7 +50,7 @@ if(DOD3_SETUP_ONLY)
 static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 ")
 
-    # The launcher's and the installer's typeface, as arrays in gen/launcher_fonts.h
+    # The installer's typeface, as arrays in gen/setup_fonts.h
     set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
     foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
         set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
@@ -67,7 +59,7 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
         string(MAKE_C_IDENTIFIER "${_font}" _id)
         string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
     endforeach()
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/launcher_fonts.h" CONTENT "${_font_h}" @ONLY)
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/setup_fonts.h" CONTENT "${_font_h}" @ONLY)
 
     file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/app_version.h" CONTENT
 "/* Generated from CMakeLists.txt: the port's own version. */
@@ -165,13 +157,7 @@ endif()
 #         -DRECOMP_DIR=/path/to/my_game/recompiled
 #
 if(NOT DEFINED PS3RECOMP_DIR)
-    # Linux uses sp00nznet's current renderer/runtime; other platforms keep
-    # the soyjxck runtime this port was developed against.
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
-    else()
-        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp-soyjxck")
-    endif()
+    set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
 endif()
 get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
 
@@ -199,11 +185,7 @@ if(NOT _spurs_tasksets_on)
     endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer on Linux" ON)
-else()
-    option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer on Linux" OFF)
-endif()
+option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer" ON)
 
 # The EBOOT the lift is from: 101 (the 1.01 update, lifted into
 # recompiled_101/; the default, and the version the port is built and tested
@@ -266,40 +248,20 @@ message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
-# Built from source as a subdirectory rather than imported as a prebuilt
-# archive. A static library carries none of its own link requirements, so an
-# imported one arrives without SDL2, pthreads, the Metal frameworks or the
-# Winsock/XInput imports -- the link then fails on every platform for a
-# different reason. add_subdirectory hands all of that over with the target.
-# Symbols for the host code on Windows (DOD3_PROF, DOD3_STALL_MS in
-# src/os/win32/prof.cpp, and crash backtraces). The runtime's own option has to be
-# in the cache before its CMakeLists reads it, hence here; the port's sources
-# get /Z7 further down and the link gets /DEBUG.
-option(DOD3_SYMBOLS "Debug info for the host code (Windows: /Z7 + /DEBUG)" ON)
-if(WIN32 AND DOD3_SYMBOLS)
-    set(PS3RECOMP_DEBUG_INFO ON CACHE BOOL "Compile the runtime with debug info" FORCE)
-endif()
-# Controllers through SDL2 on Windows as well. The runtime's default there is
-# XInput, which sees Xbox-type pads only; SDL2 adds DualShock 4, DualSense,
-# Switch Pro and the rest, wired or over Bluetooth, on the code path macOS
-# already uses. SDL2.dll comes from vcpkg (sdl2:x64-windows).
-if(WIN32)
-    set(PS3RECOMP_PAD_SDL2 ON CACHE BOOL "Windows: read controllers through SDL2 instead of XInput" FORCE)
-endif()
+# Build the Linux runtime in-tree so its SDL2, Vulkan and threading dependencies
+# propagate to the game target.
 add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
                  EXCLUDE_FROM_ALL)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_package(SDL2 REQUIRED)
-    if(PS3RECOMP_RSX_VULKAN)
-        find_package(glslang CONFIG QUIET)
-    endif()
-    if(PS3RECOMP_RSX_VULKAN AND
-       (NOT TARGET glslang::glslang OR NOT TARGET glslang::SPIRV))
-        message(FATAL_ERROR
-            "The Linux game renderer needs glslang to translate the game's shaders. "
-            "Install the glslang development package or configure with "
-            "-DPS3RECOMP_RSX_VULKAN=OFF for a headless build.")
-    endif()
+find_package(SDL2 REQUIRED)
+if(PS3RECOMP_RSX_VULKAN)
+    find_package(glslang CONFIG QUIET)
+endif()
+if(PS3RECOMP_RSX_VULKAN AND
+   (NOT TARGET glslang::glslang OR NOT TARGET glslang::SPIRV))
+    message(FATAL_ERROR
+        "The Linux game renderer needs glslang to translate the game's shaders. "
+        "Install the glslang development package or configure with "
+        "-DPS3RECOMP_RSX_VULKAN=OFF for a headless build.")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -395,8 +357,6 @@ set(LIBSRE_PRX "${PS3RECOMP_DIR}/fw_spu/libsre.prx" CACHE FILEPATH
     "Decrypted libsre.prx the SPURS queue paths are lifted from")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
     set(DOD3_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
-elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")   # a Windows venv
-    set(DOD3_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")
 else()
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(DOD3_PYTHON "${Python3_EXECUTABLE}")
@@ -414,19 +374,8 @@ add_custom_command(
     COMMENT "Lifting libsre's SPURS queue paths")
 set_source_files_properties("${LIBSRE_LIFTED_CPP}" PROPERTIES COMPILE_OPTIONS "-w;-ffp-contract=off")
 
-if(WIN32)
-    list(APPEND PORT_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os/win32/prof.cpp"
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/src/os/win32/setup_win.cpp")
-elseif(APPLE)
-    # What main.cpp needs from AppKit (the data folder, the log file, Option
-    # held at launch) and the setup's alert: the counterpart of os/win32/setup_win.cpp.
-    list(APPEND PORT_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm")
-    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm"
-        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND PORT_PLATFORM_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/input/rsx_host_mouse_linux.cpp")
-endif()
+list(APPEND PORT_PLATFORM_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/input/rsx_host_mouse_linux.cpp")
 
 # The installer (src/install/install.h): the core on every platform; the pages
 # (src/ui/wizard.cpp) in Dear ImGui (third_party/imgui, v1.92.9b), in a
@@ -439,42 +388,6 @@ set(SETUP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/crypto.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/self.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/keys.cpp")
-set(IMGUI_SOURCES
-    "${IMGUI_DIR}/imgui.cpp"
-    "${IMGUI_DIR}/imgui_draw.cpp"
-    "${IMGUI_DIR}/imgui_tables.cpp"
-    "${IMGUI_DIR}/imgui_widgets.cpp")
-if(WIN32)
-    list(APPEND IMGUI_SOURCES
-        "${IMGUI_DIR}/backends/imgui_impl_win32.cpp"
-        "${IMGUI_DIR}/backends/imgui_impl_dx12.cpp")
-    list(APPEND SETUP_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/setup_shared.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_win.cpp"
-        ${IMGUI_SOURCES})
-elseif(APPLE)
-    # The Mac's window layer (src/ui/ui_mac.mm): a window with a Metal
-    # view, ImGui's OSX and Metal backends (Objective-C++, ARC).
-    list(APPEND IMGUI_SOURCES
-        "${IMGUI_DIR}/backends/imgui_impl_osx.mm"
-        "${IMGUI_DIR}/backends/imgui_impl_metal.mm")
-    list(APPEND SETUP_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/wizard.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/launcher.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/look.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/setup_shared.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
-        ${IMGUI_SOURCES})
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_mac.mm"
-                        "${IMGUI_DIR}/backends/imgui_impl_osx.mm"
-                        "${IMGUI_DIR}/backends/imgui_impl_metal.mm"
-                 APPEND PROPERTY COMPILE_OPTIONS "-fobjc-arc")
-endif()
 # The retail PKG key, read from the submodule's tools/pkg_extract.py
 # (PS3_GPKG_KEY) into a header in the build tree: this repository carries no
 # copy, and the key stays off the compile command lines and build logs.
@@ -492,31 +405,8 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_pkg_py}")
 set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp" APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/gen")
 set_property(SOURCE ${SETUP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGUI_DIR}")
-# third-party code: its warnings are not ours to act on
-set_property(SOURCE ${IMGUI_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "-w")
-if(WIN32 OR APPLE)
-    # the key art's PNG decoder: stb_image, the copy in the runtime's codec
-    # library, compiled privately (src/ui/png.cpp)
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY
-                 INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/libs/codec")
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/png.cpp" APPEND PROPERTY COMPILE_OPTIONS "-w")
-    # the launcher's and the installer's typeface, Inter 4.1 (SIL Open Font License 1.1,
-    # third_party/fonts/inter), as arrays in gen/launcher_fonts.h
-    set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
-    foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
-        set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ttf}")
-        file(READ "${_ttf}" _hex HEX)
-        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
-        string(MAKE_C_IDENTIFIER "${_font}" _id)
-        string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
-    endforeach()
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/launcher_fonts.h" CONTENT "${_font_h}" @ONLY)
-endif()
 
-# The port's own sources, on every platform, one list per module under src/
-# (the SPU-side ones -- src/patches/spu_hooks.c and src/apu -- are in
-# SPU_SOURCES, with the lifted SPU code's options).
+# The port's own sources, grouped by module under src/.
 set(PORT_CPU_SOURCES                 # the lifted code's glue
     src/cpu/hot.cpp)
 set(PORT_INPUT_SOURCES               # the camera's stick; the keyboard and mouse as the pad
@@ -540,10 +430,7 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
     src/patches/sysset.cpp)
 set(PORT_UI_SOURCES                  # the in-game settings pages
     src/ui/settings_menu.cpp
-    src/ui/ini.cpp)                  # dod3.ini, edited in place (the pages' and the launcher's)
-if(MSVC)   # the pages' Spanish text is UTF-8 in the source (clang reads it so anyway)
-    set_property(SOURCE src/ui/settings_menu.cpp APPEND PROPERTY COMPILE_OPTIONS "/utf-8")
-endif()
+    src/ui/ini.cpp)                  # dod3.ini, edited in place
 set(PORT_SOURCES
     src/main.cpp
     src/util.cpp
@@ -581,16 +468,10 @@ if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
-    if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        # x86: SSE4.1 for spu_helpers.h's pshufb shuffle (without __SSSE3__ it
-        # is a 16-iteration byte loop, 30% of the audio mixer's time on
-        # Windows) and FMA so the lifted fmaf() is one instruction rather than
-        # a libm call (another 10%). Every x86 this runs on has both.
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
-            set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2;-msse4.1;-mfma")
-        else()
-            set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2")
-        endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2;-msse4.1;-mfma")
+    else()
+        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2")
     endif()
 endif()
 
@@ -605,26 +486,12 @@ set_property(SOURCE ${PORT_SOURCES} ${PORT_PLATFORM_SOURCES} ${SETUP_SOURCES}
              "${CMAKE_CURRENT_SOURCE_DIR}/src/apu/mp3dec.c"
              APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-# /Z7 on everything but the lifted PPU TUs, /DEBUG at link. The lifted code
-# is named through its function table instead (src/os/win32/prof.cpp), so the PDB
-# stays a few tens of MB and the link fast.
-if(WIN32 AND DOD3_SYMBOLS)
-    set_source_files_properties(${PORT_SOURCES} ${PORT_PLATFORM_SOURCES} ${PS3RECOMP_SCAFFOLD} ${HLE_NID_TABLE}
-        PROPERTIES COMPILE_OPTIONS "/Z7")
-    # These already carry options (set above); append rather than replace.
-    set_property(SOURCE ${SPU_SOURCES} "${LIBSRE_LIFTED_CPP}" ${SETUP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS "/Z7")
-    target_link_options(${PROJECT_NAME} PRIVATE /DEBUG /OPT:REF /OPT:ICF)
-endif()
-
-# The player's settings file goes beside the executable once; a copy the
-# player has edited is never overwritten (so a change to the repository's
-# dod3.ini reaches an existing build folder only by hand).
+# Copy the default settings file into a fresh build directory only.
 if(NOT EXISTS "${CMAKE_BINARY_DIR}/dod3.ini")
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/dod3.ini" DESTINATION "${CMAKE_BINARY_DIR}")
 endif()
 
-# The port's version as a header (gen/app_version.h), for the installer,
-# main.cpp's banner and app.rc's version block.
+# The port's version as a header for main.cpp's banner.
 file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/app_version.h" CONTENT
 "/* Generated from CMakeLists.txt: the port's own version. */
 #define DOD3_VER_MAJOR ${PROJECT_VERSION_MAJOR}
@@ -648,15 +515,6 @@ foreach(_set IN LISTS _prompt_sets)
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/prompts_data.h" CONTENT "${_prompt_h}" @ONLY)
 
-# app.rc carries the icon and the version block, and needs a resource
-# compiler. Listing it as a source on a host that has none is not a link
-# error, it is a "no rule to make" for a file nothing can consume.
-if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/res/app.rc")
-    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/res/app.rc"
-        PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/gen;${CMAKE_CURRENT_SOURCE_DIR}/src/res")
-    target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/res/app.rc")
-endif()
-
 target_compile_definitions(${PROJECT_NAME} PRIVATE DOD3_EBOOT=${DOD3_EBOOT})
 message(STATUS "EBOOT:           BLUS31197 ${DOD3_EBOOT}")
 
@@ -667,78 +525,29 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/runtime/spu"
     "${PS3RECOMP_DIR}/runtime/memory"
     "${PS3RECOMP_DIR}/runtime/syscalls"
-    "${PS3RECOMP_DIR}/runtime/platform"        # win32_compat.h and friends
+    "${PS3RECOMP_DIR}/runtime/platform"
     "${PS3RECOMP_DIR}/libs/video"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if(TARGET SDL2::SDL2)
-        target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
-    else()
-        target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
-        target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL2_LIBRARIES})
-    endif()
+if(TARGET SDL2::SDL2)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
+else()
+    target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL2_LIBRARIES})
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
 )
-# The installer's window on the Mac (src/ui/ui_mac.mm): MetalKit's view,
-# pads for ImGui through GameController, file types for the open panels.
-if(APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        "-framework MetalKit" "-framework GameController" "-framework UniformTypeIdentifiers")
-endif()
-
-# The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
-# link language from the generated C would leave the C++ standard library out.
+# Let CMake infer the C++ linker for the runtime and generated C sources.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-
-# Windows system import libraries. dbghelp symbolizes crash-handler addresses
-# against the PDB, user32 and gdi32 are what the backend's window and its GDI
-# present are made of, and winmm is timeBeginPeriod. None of the four names
-# anything a POSIX linker can find; the D3D12 backend's own imports come in
-# through the #pragma comment(lib) in libs/video/rsx_d3d12_backend.c.
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        dbghelp
-        user32
-        gdi32
-        winmm
-    )
-    # A windowed program, so a double-click opens no console. Output still goes
-    # wherever a parent redirects it (the scripts' logs), else to the parent
-    # terminal's console, else to dod3.log beside the executable (main.cpp,
-    # win_stdio_init). -DDOD3_CONSOLE=ON builds a console program again.
-    option(DOD3_CONSOLE "Link dod3.exe as a console program" OFF)
-    if(NOT DOD3_CONSOLE)
-        target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
-    endif()
-endif()
 
 # ---------------------------------------------------------------------------
 # Compiler-specific flags
 # ---------------------------------------------------------------------------
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        -Wall -Wextra -Wno-unused-parameter
-        -fno-strict-aliasing
-    )
-elseif(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        /W3 /wd4100 /wd4244 /wd4267
-        /Zc:__cplusplus         # report correct __cplusplus value
-        # ppu_recomp.h defines PPU_FENCE, the lowering of the guest's
-        # sync/lwsync/eieio/isync, and in C that is <stdatomic.h>. The lifter
-        # writes C++ by default, but --single-file writes ppu_recomp.c, and a
-        # port that took it would not compile without this. The runtime's own
-        # build already carries the same flag for the same reason.
-        /experimental:c11atomics
-    )
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
-        _CRT_SECURE_NO_WARNINGS
-    )
-endif()
+target_compile_options(${PROJECT_NAME} PRIVATE
+    -Wall -Wextra -Wno-unused-parameter
+    -fno-strict-aliasing)
 
 # The lifted translation units are machine-generated and can run to hundreds of
 # thousands of lines each, so they get their own flags:
@@ -747,9 +556,7 @@ endif()
 #     and at this volume they bury the diagnostics that matter.
 #   - no floating-point contraction. arm64 fuses a multiply and an add by
 #     default; a PPC fmadd is spelt as one where the lifter means one.
-#   - /bigobj on MSVC. A single lifted file routinely passes the 65,536-section
-#     limit of the default object format.
-#   - on x86-64 with clang-cl, DOD3_X86_LEVEL (default x86-64-v3: AVX2, FMA,
+#   - on x86-64, DOD3_X86_LEVEL (default x86-64-v3: AVX2, FMA,
 #     BMI, LZCNT, MOVBE -- any Intel since Haswell, any AMD since Excavator).
 #     At the baseline level every lifted fmadd is a call into the C runtime's
 #     fma(), sqrt() and trunc() are calls as well, cntlzw is a bsr with a
@@ -758,86 +565,30 @@ endif()
 #     arm64, and -fno-math-errno lets sqrt be the instruction. main.cpp checks
 #     the CPU at start (DOD3_X86_V3). Set DOD3_X86_LEVEL to an empty string
 #     for a build that runs on anything.
-#   - no on-demand guards on thread-local reads (clang-cl). The lifted code
+#   - no on-demand guards on thread-local reads. The lifted code
 #     reads one thread-local, the tail-call trampoline, after every call that
 #     may leave it set; as a C++ extern thread-local each read first tests
 #     whether the module's dynamic TLS initialisers have run on this thread,
 #     which an executable's always have. The check and its call were 20 of
 #     the 43 instructions of a call-and-drain.
-if(MSVC)
-    set(_recomp_opts "/w;/bigobj")
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        list(APPEND _recomp_opts "/Zc:tlsGuards-")
-    endif()
-    # DOD3_RECOMP_OPT: extra options for the lifted TUs alone (a compile
-    # experiment: -DDOD3_RECOMP_OPT=/clang:-O3 in a build folder of its own).
-    set(DOD3_RECOMP_OPT "" CACHE STRING "Extra compile options for the lifted PPU code")
-    if(DOD3_RECOMP_OPT)
-        list(APPEND _recomp_opts ${DOD3_RECOMP_OPT})
-    endif()
-    # DOD3_PGO: profile-guided optimisation of the lifted PPU code alone.
-    #   generate       instrument the lifted TUs (IR profile counters; the
-    #                  profile runtime comes from LLVM's resource directory)
-    #                  and let main.cpp write the profile every 30 s and on
-    #                  exit (LLVM_PROFILE_FILE names it);
-    #   use:<profdata> compile them on a merged profile
-    #                  (llvm-profdata merge -o lifted.profdata *.profraw).
-    # Each in a build folder of its own: the profile is tied to the lift.
-    set(DOD3_PGO "" CACHE STRING "Profile-guided optimisation of the lifted code: generate, or use:<profdata>")
-    if(DOD3_PGO STREQUAL "generate")
-        list(APPEND _recomp_opts "/clang:-fprofile-generate")
-        get_filename_component(_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
-        file(GLOB _profile_rt "${_llvm_bin}/../lib/clang/*/lib/windows/clang_rt.profile-x86_64.lib")
-        if(NOT _profile_rt)
-            message(FATAL_ERROR "DOD3_PGO=generate: clang_rt.profile-x86_64.lib not found under ${_llvm_bin}/../lib/clang")
-        endif()
-        list(GET _profile_rt -1 _profile_rt)
-        target_link_libraries(${PROJECT_NAME} PRIVATE "${_profile_rt}")
-        set_property(SOURCE src/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS DOD3_PGO_GENERATE)
-        message(STATUS "PGO:             instrumented lifted code (${_profile_rt})")
-    elseif(DOD3_PGO MATCHES "^use:(.+)$")
-        get_filename_component(_profdata "${CMAKE_MATCH_1}" ABSOLUTE)
-        if(NOT EXISTS "${_profdata}")
-            message(FATAL_ERROR "DOD3_PGO=use: no profile at ${_profdata}")
-        endif()
-        list(APPEND _recomp_opts "/clang:-fprofile-use=${_profdata}"
-             "/clang:-Wno-profile-instr-unprofiled" "/clang:-Wno-profile-instr-out-of-date")
-        message(STATUS "PGO:             lifted code optimised on ${_profdata}")
-    elseif(DOD3_PGO)
-        message(FATAL_ERROR "DOD3_PGO must be empty, generate, or use:<profdata>")
-    endif()
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
-        set(DOD3_X86_LEVEL "x86-64-v3" CACHE STRING
-            "-march for the lifted PPU code on x86-64 (empty: baseline x86-64)")
-        if(DOD3_X86_LEVEL)
-            list(APPEND _recomp_opts "-march=${DOD3_X86_LEVEL}"
-                 "/clang:-ffp-contract=off" "/clang:-fno-math-errno")
-            if(DOD3_X86_LEVEL MATCHES "v3|v4|haswell|skylake|znver")
-                set_property(SOURCE src/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS DOD3_X86_V3)
-            endif()
+set(_recomp_opts "-w;-ffp-contract=off")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+    set(DOD3_X86_LEVEL "x86-64-v3" CACHE STRING
+        "-march for the lifted PPU code on x86-64 (empty: baseline x86-64)")
+    if(DOD3_X86_LEVEL)
+        list(APPEND _recomp_opts "-march=${DOD3_X86_LEVEL}" "-fno-math-errno")
+        if(DOD3_X86_LEVEL MATCHES "v3|v4|haswell|skylake|znver")
+            set_property(SOURCE src/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS DOD3_X86_V3)
         endif()
     endif()
-    set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "${_recomp_opts}")
-else()
-    set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "-w;-ffp-contract=off")
 endif()
+set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
+    COMPILE_OPTIONS "${_recomp_opts}")
 # The native collision test (src/patches/collision_native.cpp, generated from
 # the lifted body) must round exactly as the lifted code does: the same
 # x86 level (a fused fma instruction, which flushes denormals as the thread's
 # MXCSR says, where the C runtime's fma() does not), no contraction, no errno.
-if(MSVC)
-    set(_native_fp_opts "")
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND DOD3_X86_LEVEL)
-        set(_native_fp_opts "-march=${DOD3_X86_LEVEL};/clang:-ffp-contract=off;/clang:-fno-math-errno")
-    endif()
-else()
-    set(_native_fp_opts "-ffp-contract=off")
-endif()
-if(_native_fp_opts)
-    set_property(SOURCE src/patches/collision_native.cpp APPEND PROPERTY COMPILE_OPTIONS "${_native_fp_opts}")
-endif()
+set_property(SOURCE src/patches/collision_native.cpp APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
 # PPU_INLINE_VM: the lifted code's loads and stores inline the runtime's fast
 # path (ps3recomp/runtime/ppu/ppu_vm_fast.h) instead of calling vm_read*/
 # vm_write*. The render thread spent ~60% of its time in those calls.

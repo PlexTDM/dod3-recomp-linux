@@ -1,216 +1,78 @@
-# Drakengard 3 Recompiled -- playing it
+# Drakengard 3 Recompiled -- Linux
 
-A native PC port of Drakengard 3 (PlayStation 3), made by recompiling the
-game's own code. It does not include the game: you need your own copy, and
-the setup takes the game's files from it.
+A native Linux port of Drakengard 3 (PlayStation 3), made by recompiling the
+game's own code. It does not include the game: you need your own copy.
 
 This project is not affiliated with or endorsed by Square Enix, Access Games
-or Sony. Drakengard 3 and its assets belong to their owners.
+or Sony. Drakengard 3 and all of its assets belong to their owners.
 
+## Requirements
 
-## What you need
+- 64-bit Linux, SDL2, Vulkan and a Vulkan-capable driver.
+- A CPU supporting AVX2, FMA and BMI2 for the default x86-64-v3 build.
+- The US release of Drakengard 3 (BLUS31197), dumped to a folder, a
+  decrypted disc image, or the PSN package (NPUB31251).
+- The genuine 1.01 update package. DLC packages are optional.
 
-1. A computer:
-
-   - Windows 10 or 11, 64-bit, a GPU with Direct3D 12, and a CPU with AVX2
-     (Intel Haswell / AMD Zen or newer).
-   - Or a Mac with Apple silicon (M1 or newer) on macOS 13 Ventura or newer.
-
-   About 16 GB of free disk space for the game, plus 10 GB more if you
-   install the Japanese voice pack and about 3 GB for the Spanish
-   translation. The install folder should be on a
-   drive that takes links between folders (NTFS or APFS, not exFAT).
-
-2. Your copy of Drakengard 3, US release, as one of:
-
-   - the disc (BLUS31197) dumped to a folder (the one that contains
-     PS3_GAME),
-   - a DECRYPTED disc image (.iso), or
-   - the PSN release's game package (NPUB31251): the .pkg file a
-     PlayStation 3 downloads for it, UP0082-NPUB31251_00-DOD3MAINGAME0000
-     (15.6 GB). No licence files are needed.
-
-   The easiest way is PS3 Disc Dumper (https://github.com/13xforever/ps3-disc-dumper,
-   free, for Windows, macOS and Linux) with a compatible Blu-ray drive: it
-   reads your disc and writes a decrypted folder, which the setup takes as
-   it is. A modded PS3 (multiMAN, webMAN MOD) can also copy the disc to a
-   decrypted folder or image. An image ripped with an ordinary disc tool is
-   still encrypted and will be refused, and so are other regions (EU, JP),
-   the European PSN release among them.
-
-3. The game's 1.01 update, as the package file a PlayStation 3 downloads:
-   UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg (172 MB). The
-   port runs the updated game, so the update is required. The setup checks
-   it is the genuine 1.01 package. This is the disc release's update, and
-   the PSN release takes it too; the PSN release's own update is not
-   needed.
-
-4. Optionally, the DLC packages you own (the .pkg files your PlayStation 3
-   downloads for them, UP0082-NPUB31251_00-...): the Japanese Voice Pack,
-   the six prologue chapters, the garbs and weapons, the music packs. No
-   licence files are needed.
-
-You do not need a PlayStation 3 emulator, firmware, or any other tool: the
-setup unpacks the packages and prepares the game's executable itself.
-
+An ordinary encrypted disc image and other regions are not supported. No
+emulator, console firmware or package licence files are needed.
 
 ## Installing
 
-Windows:
+Install with the native Linux executable, adding any DLC packages after the
+update package:
 
-1. Unzip the release anywhere you like (not inside Program Files).
-2. Run dod3.exe. Windows may show a SmartScreen warning the first time,
-   because the program is not signed: choose "More info", then "Run anyway".
-3. The setup opens. Add your files -- the disc image or folder (or the PSN
-   game package), the update package, and any DLC packages -- with Add
-   Files / Add Folder; each one is
-   recognised by itself, in any order. Then Install. The game's files are
-   copied next to dod3.exe into the "game" folder (a few minutes).
-4. Play. The first minutes of the first launch stutter while graphics
-   shaders are compiled; they are kept in the "cache" folder, so later
-   launches are smooth. From then on dod3.exe opens the launcher (below).
+```sh
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" \
+    dod3 --install <decrypted-disc.iso-or-folder> <update.pkg> [DLC.pkg ...]
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" dod3
+```
 
-macOS:
-
-1. Unzip the release and move "Drakengard 3 Recompiled.app" to
-   Applications (or anywhere you like).
-2. The first time, macOS refuses to open it, because the app is not
-   notarised by Apple. On macOS 15 and later: try to open it once, then go
-   to System Settings > Privacy & Security and choose "Open Anyway". On
-   macOS 13 and 14: Control-click the app, choose Open, then Open again.
-   After that it opens normally.
-3. The setup opens, as on Windows. The game's files go into
-   ~/Library/Application Support/Drakengard 3 Recompiled.
-
-   Linux:
-
-   1. Install the SDL2, Vulkan and Vulkan-driver packages for your distribution.
-      Install glslang development files as well so guest shaders are translated.
-   2. Run `dod3 --install <decrypted disc folder or ISO> <1.01 update.pkg>` from
-      a terminal. Add any DLC `.pkg` files after the update. The game data is
-      stored under `$XDG_DATA_HOME/dod3-recomp`, or
-      `~/.local/share/dod3-recomp` if `XDG_DATA_HOME` is unset.
-   3. Run `dod3` from the terminal to start the game. The Vulkan backend opens
-      its own SDL window. `DOD3_INSTALL_BASE=/path/to/data` selects a different
-      install directory.
-
-   The native game has no graphical launcher; settings can be edited in
-   `dod3.ini` in the install directory. The separate `dod3-setup` target is
-   for installing the Windows release for Wine or Proton, not for launching
-   the native game.
-
-## The launcher
-
-Once the game is installed, it opens on a launcher, over the game's own key
-art (from your copy of the game):
-
-- Play (Enter, or the pad's confirm button, starts it straight away)
-- Mods: the Spanish translation and the DLC Undub, what of them is
-  installed, a switch to turn one off and on again, Remove, and Add Files /
-  Add Folder for more (see Mods below)
-- DLC: which of the 20 packs are installed, and Add DLC Packages
-- Settings: the display, graphics, controls (the keyboard's keys too) and
-  system settings, saved to dod3.ini as you change them
-- Game Files, at the bottom: the setup, to install the disc or the update
-  again
-
-It works with the mouse, the keyboard and a controller (Esc or the pad's
-back button closes a page). To start the game without it, set Settings >
-System > Launcher at Start to Off; holding Shift (Option on a Mac) while
-starting the game opens it anyway.
-
-To run the setup again -- to replace a file -- use Game Files in the
-launcher, or run dod3.exe --setup from a command prompt on Windows.
-Everything already installed stays.
-
-If the setup cannot open its window, it can run from a command prompt:
-
-    dod3.exe --install <disc .iso or folder> <update .pkg> [DLC .pkg ...]
-
-and `dod3.exe --check <file>...` says what the setup makes of each file
-without installing anything.
-
+By default, game files, settings, saves, shader cache and logs are under
+`$XDG_DATA_HOME/dod3-recomp`, or `~/.local/share/dod3-recomp` when
+`XDG_DATA_HOME` is unset. Set `DOD3_INSTALL_BASE` to use another data
+directory. The native game has no graphical launcher. The separate optional
+`dod3-setup` target is a Linux GUI installer for the Windows release under
+Wine or Proton; it is not needed for the native game.
 
 ## Settings
 
-In the launcher: Settings, in four tabs (Display, Graphics, Controls,
-System), sets the settings below and saves them to dod3.ini as you change
-them; the game uses them from its next start.
+In the game, Settings > Graphics Settings sets resolution, display mode,
+frame rate, v-sync, anti-aliasing, texture filtering and field of view.
+System Settings controls intro skipping, behavior when unfocused, controller
+prompts and mouse sensitivity. Advanced Graphics controls aspect ratio,
+shadows, motion blur, post-processing, draw distance and tree detail.
 
-In the game: Settings > Graphics Settings (on the title menu, next to
-Audio Settings) sets the resolution, display mode, frame rate, v-sync,
-anti-aliasing (FXAA, or MSAA 2x/4x/8x), texture filtering and field of
-view. Settings > System Settings sets whether the logos and opening movie
-are skipped, what the game does while its window is in the background
-(keep running, mute, or pause), which controller's buttons the game shows,
-the mouse's sensitivity, and the renderer. Settings > Advanced
-Graphics sets the aspect ratio and the engine's own shadow quality, motion
-blur, post-processing, draw distance and tree detail. Confirm with X to save
-them; everything but the renderer, Skip Intro and Shadow Quality changes
-at once (a second of black while the resolution or display mode switches;
-Tree Detail in the next area the game loads), those three the next time
-the game starts.
-
-The first start adds the pages to the game's menu, which takes a second or
-two. The game's own files are not changed.
-
-Or edit dod3.ini (next to dod3.exe; on a Mac, in the Application Support
-folder above). It explains each setting:
+Settings can also be changed in `dod3.ini` in the install directory:
 
 | Setting | What it does |
 |---|---|
-| RSX_SCALE | Internal resolution as a multiple of 1280x720: 1.5 = 1080p, 2 = 1440p, 3 = 4K. Above the window's size it is averaged down: supersampling |
-| RSX_DISPLAY | windowed, borderless (recommended for full screen) or fullscreen |
-| RSX_WINDOW | Window size in windowed mode, e.g. 1920x1080 |
-| RSX_VSYNC | 1 to sync to the display; 0 lets the frame rate exceed its refresh |
-| DOD3_FPS | Frame-rate cap: 60 is tested and recommended, 120 works; adaptive holds the highest rate from 120 down to 30 that the scene keeps up with; unset keeps the original 30 |
-| DOD3_FOV | Field of view: 5 to 30 degrees added to the gameplay camera's 65; cutscenes keep their framing. Unset is the original |
-| DOD3_ASPECT | Aspect ratio, your screen's shape: 16:10, 21:9, 32:9, a ratio such as 2.39, or auto (the window's). Wider shows more at the sides in play and cutscenes, 16:10 more above and below; the HUD keeps its 16:9 layout in the middle, and the title, menus and movies are 16:9 in the middle of the screen. A screen of another shape shows it with bars (a 16:9 screen set to 21:9 shows what a 21:9 one would). A wider view is 1280 game pixels wide, so raise RSX_SCALE to keep it sharp. Unset is 16:9 |
-| RSX_ANISO | Texture filtering: 1 (original) to 16 (16x anisotropic, the default) |
-| RSX_AA | fxaa, or msaa2 / msaa4 / msaa8 (MSAA costs a lot at 4K); unset is off |
-| DOD3_SHADOWS | high or ultra: sharper, more defined shadows (ultra costs a few percent); unset is the original. From the next start |
-| DOD3_MOTION_BLUR | 0 turns motion blur off |
-| DOD3_POSTFX | 0 turns off depth of field, bloom and the colour grading |
-| DOD3_DRAW_DISTANCE | 2, 3, 5 or 10: props, bushes and small trees are drawn from that many times as far away; unset is the original |
-| DOD3_TREE_LOD | 2, 3, 5 or 10: the large trees are drawn, and stay their full models, that many times as far away; unset is the original. From the next area loaded |
-| DOD3_SKIP_INTRO | 1 (default) skips the logos and the opening movie at start-up; 0 keeps them |
-| DOD3_LAUNCHER | 0 starts the game straight away, without the launcher; holding Shift (Option on a Mac) while it starts opens the launcher anyway. Unset opens it at every start |
-| DOD3_UNFOCUSED | While the window is in the background: unset keeps running, mute silences the audio, pause stops the game until you come back |
-| DOD3_PROMPTS | The buttons the game shows: unset follows the controller you hold; or ps3, ps4, ps5, xbox, switch, keyboard |
-| DOD3_MOUSE_SENS | How far the mouse turns the camera; 1 is the default. DOD3_MOUSE = 0 turns the mouse off |
-| KEY_CROSS, KEY_MOVE_UP, ... | Windows: the keys for each pad button and stick direction (the file lists them all) |
-| DOD3_CAMERA_SPEED | original gives the camera stick the game's own speed, which falls as the frame rate rises; unset keeps it at the console's |
-| RSX_BACKEND | Windows: vulkan for the Vulkan renderer (experimental); unset is Direct3D 12 |
-
+| `RSX_SCALE` | Internal resolution as a multiple of 1280x720; values above the window resolution enable supersampling |
+| `RSX_DISPLAY` | `windowed`, `borderless` or `fullscreen` |
+| `RSX_WINDOW` | Window size in windowed mode, e.g. `1920x1080` |
+| `RSX_VSYNC` | `1` syncs to the display; `0` allows the game to exceed its refresh rate |
+| `DOD3_FPS` | Frame cap; `60` is tested, `120` works, `adaptive` selects a rate from 30 to 120 |
+| `DOD3_FOV` | Additional gameplay camera field of view, in degrees |
+| `DOD3_ASPECT` | `16:10`, `21:9`, `32:9`, a ratio such as `2.39`, or `auto` |
+| `RSX_ANISO` | Texture filtering, from 1x to 16x |
+| `RSX_AA` | `fxaa`, `msaa2`, `msaa4` or `msaa8`; unset disables anti-aliasing |
+| `DOD3_SHADOWS` | `high` or `ultra` for sharper shadows |
+| `DOD3_MOTION_BLUR` | `0` disables motion blur |
+| `DOD3_POSTFX` | `0` disables depth of field, bloom and color grading |
+| `DOD3_DRAW_DISTANCE` | `2`, `3`, `5` or `10` for increased scenery distance |
+| `DOD3_TREE_LOD` | `2`, `3`, `5` or `10` for increased tree distance and detail |
+| `DOD3_SKIP_INTRO` | `1` skips the logos and opening movie; `0` keeps them |
+| `DOD3_UNFOCUSED` | `mute` silences audio when unfocused; `pause` also pauses the game |
+| `DOD3_PROMPTS` | `ps3`, `ps4`, `ps5`, `xbox`, `switch` or `keyboard`; unset follows the active controller |
+| `DOD3_MOUSE_SENS` | Mouse camera sensitivity; `DOD3_MOUSE=0` disables mouse camera control |
+| `KEY_CROSS`, `KEY_MOVE_UP`, ... | Keys for each pad button and stick direction; the file lists all supported keys |
+| `DOD3_CAMERA_SPEED` | `original` restores the game's original camera speed behavior |
 
 ## Controls
 
-Xbox, PlayStation (DualShock 4, DualSense) and Switch Pro controllers,
-wired or over Bluetooth, plugged in before or during the game; the first
-one connected is player 1. The buttons follow their positions, so the
-bottom face button is Cross whatever the pad prints on it.
-
-The game shows the buttons of the controller you hold: A and B on an Xbox
-pad, B and A on a Switch one, the DualShock 4's or the DualSense's own, the
-keys when you play on the keyboard. It changes when you plug another pad in
-or pick up the other of pad and keyboard;
-Settings > System Settings > Button Prompts fixes it to one (PlayStation 3
-is the game's original art). A few places still name the PlayStation 3
-pad whatever you choose: "Press the START Button" on the title screen,
-"Press START to Skip" in cutscenes, the Circle on the dragon's icon, and
-the picture on the controller settings page.
-
-The camera stick turns the camera at the speed it has on the console
-whatever the frame rate. The game itself slows it as the frame rate rises
-(a quarter of the speed at 120 frames a second); DOD3_CAMERA_SPEED =
-original in dod3.ini gives that back. The game's own Controller Settings
-(camera sensitivity, inverted axes, the chase camera) work as before.
-
-### Keyboard and mouse
-
-The mouse turns the camera and the keys are the pad's buttons, with or
-without a controller plugged in: use either at any moment, and the prompts
-on screen follow the one you touched last.
+Xbox, PlayStation (DualShock 4 and DualSense) and Switch Pro controllers are
+supported over USB or Bluetooth. The first connected controller is player 1.
+The game can also be played with keyboard and mouse.
 
 | Key | Button | In play |
 |---|---|---|
@@ -222,125 +84,38 @@ on screen follow the one you touched last.
 | E, Backspace | Circle | Guard; back in menus |
 | Shift | R1 | Evade |
 | Q, middle mouse button | L1 | Lock on |
-| Mouse wheel | Right stick left and right | Switch target |
+| Mouse wheel | Right stick left/right | Switch target |
 | R, F | L2, R2 | Weapon menus |
-| V | L3 and R3 together | Intoner Mode (C and X press one each) |
+| V | L3 and R3 together | Intoner Mode |
 | Arrow keys, 1 2 3 4 | D-pad | Menus; items |
 | Esc, Enter | Start | Pause |
-| Tab | Select | The select menu |
+| Tab | Select | Select menu |
 
-Every key can be changed in dod3.ini, which lists them, and the prompts
-show the keys you chose. Settings > System Settings > Mouse Sensitivity
-sets how far the mouse turns the camera; the game's own camera settings
-apply to the mouse as they do to the stick. Escape pauses, so it no longer
-closes the game: Alt+F4 does, or Cmd+Q on a Mac.
+Keys are configurable in `dod3.ini`. Escape pauses the game; use Alt+F4 to
+close it. When the game has focus the cursor is hidden and the mouse controls
+the camera.
 
-While the game is in front the cursor is hidden and the mouse is the
-game's; switch to another application (Alt+Tab, Cmd+Tab on a Mac) and it
-is yours again. On a Mac the keys are places on the keyboard, the same on
-every layout; Alt is the Option key, and CapsLock cannot be used.
+## Japanese voices and mods
 
+With the Japanese Voice Pack installed, choose Change Outfits/Music > Voice
+> Language: Japanese on the title menu. The official pack does not include
+Japanese for the six DLC chapters. The DLC Undub mod provides those voices.
 
-## Japanese voices
+The Linux game has no graphical mod manager. Mods must be installed manually
+in the corresponding game data folders. For example, a patch mod can be
+placed under `game/disc/game/BLES00000/USRDIR/PATCH`. A mod that replaces
+`SQEX03GAME.XXX` may remove the port's additions to the in-game Settings
+menu. Back up the install directory before modifying game files.
 
-With the Japanese Voice Pack installed: on the title menu, Change
-Outfits/Music > Voice > Language: Japanese, then start or continue a game.
-Voices, lip-sync and the cutscene movies switch to Japanese.
+## Saves and troubleshooting
 
-The official pack has no Japanese for the six DLC chapters (the prologues),
-and the 1.01 update switches the voices to English while one is played.
-With the DLC Undub installed (see Mods below), the DLC chapters follow the
-Language setting too: Japanese voices, lip-sync and movies there as well,
-and English when English is chosen.
+Back up the `gamedata` folder in the install directory to preserve saves.
+The `cache` folder contains compiled shaders and may be removed to rebuild
+them.
 
+Each run writes `dod3.log` in the install directory and keeps the previous
+log as `dod3.prev.log`. Include the log, GPU and CPU details when reporting
+problems. If the game says its executable cannot be loaded, reinstall the
+genuine 1.01 update package with `dod3 --install`.
 
-## Mods
-
-The launcher installs two fan-made mods by name, on its Mods page. Unzip
-or unpack what you downloaded first, then add the files with Add Files or
-Add Folder. Your own game files stay as they are: a mod's files go to the
-game/mods folder (and the voice pack's folder, for the DLC Undub).
-
-- The Spanish translation by Traducciones Vacuno (TraduSquare, v1.1, for
-  the US release BLUS31197): from its downloads, the
-  Drakengard_ES_BLUS31197_V2.pkg and Drakengard_ES_BLUS31197DATA_V3.pkg
-  packages and MOVIES.zip (the US game's download), and if you have the
-  DLC, Drakengard_DLC_ES_BLUS31197_NPUB31251_V2.pkg and, with the Japanese
-  Voice Pack, Drakengard_ES_DLC_Voices_BLUS31197_NPUB31251_V2.pkg. Add
-  them as they are, the movies' .zip too; do not copy anything into the
-  game's folders by hand. The port's own Settings pages are there with it,
-  in Spanish too (Ajustes gráficos, Ajustes del sistema, Gráficos
-  avanzados); switched off, the game and the pages are in English again.
-
-- The DLC Undub by Canzah and Slow (Japanese voices for the DLC chapters):
-  unpack its .7z and add the folder that holds GAME and ISO with Add
-  Folder. It needs the Japanese Voice Pack. It follows Change Outfits/Music
-  > Voice > Language, as the pack does; the 1.01 update's executable needs
-  no swapping here.
-
-With both, the DLC chapters' text is the translation's in Japanese too,
-where the translation has its own (the undub's is English text timed for
-the Japanese voices).
-
-Other mods made as homebrew packages for this release, laid out as the
-console installs them (in the update's folder, the game-data folder, or
-the DLC's), are taken too and listed by their file names.
-
-To play without a mod for a while -- the game in English again, say --
-turn the switch on its card in the launcher's Mods page to Off: its files
-are set aside and the update's own put back, at once, and the game starts
-without it. On puts it back, again at once. The DLC Undub has no switch:
-Change Outfits/Music > Voice turns it on and off inside the game.
-
-To take a mod out: Remove on its card in the launcher's Mods page. The
-update's own files that a mod replaced are kept aside while it is
-installed and put back. (A mod installed by an older version of the setup
-has no such list: removing it asks for the update package, which puts the
-update's files back, and takes out all the mods; it has no switch either.)
-
-A mod copied into the update's folder by hand
-(game/disc/game/BLES00000/USRDIR/PATCH next to dod3.exe) is played as it
-is. If it replaces the game's script package (SQEX03GAME.XXX), the port's
-additions to the Settings menu are not there, because they are made to
-that package: the Graphics Settings, System Settings and Advanced Graphics
-pages, and what works through them (the wider field of view, the Aspect
-Ratio setting's wider view, skipping the intro). dod3.ini still sets the
-resolution, the display mode, the frame rate and the anti-aliasing.
-Running the setup again with the update package puts the update's own
-files back.
-
-
-## Your saves, and updating
-
-Saves and the game's own data are in the "gamedata" folder next to
-dod3.exe (on a Mac, in the Application Support folder). Back that folder up
-to keep your progress.
-
-To update to a new release, unzip it into a new folder and move these into
-it from the old one: game (the installed game), gamedata (saves), dod3.ini
-(your settings) and cache (compiled shaders; optional). Unzipping it over
-the old folder works too, but the release's dod3.ini (the default
-settings) then replaces yours: keep a copy and put it back. To uninstall,
-delete the folder.
-
-
-## If something goes wrong
-
-- Each run writes dod3.log next to dod3.exe (the run before is kept as
-  dod3.prev.log; on a Mac both are in the Application Support folder).
-  Please include it when you report a problem, with your GPU and CPU.
-- The setup refuses a file it cannot use and says why: an encrypted disc
-  image, another region or version, a package for another game, a damaged
-  package (its checksum fails). `dod3.exe --check <file>` shows the same.
-- "The game's executable could not be loaded": run dod3.exe --setup and add
-  the update package again.
-
-
-## Known issues
-
-- Tested on few machines so far (Windows: i9-13900K with an RTX 4090;
-  macOS: M1 Pro). Reports from other hardware are welcome.
-- At an aspect ratio other than 16:9 (21:9, 32:9, 16:10) the HUD keeps its
-  16:9 layout in the middle of the screen, and some of it can still be out
-  of place: the pause screen's frosted background stays 16:9, and not every
-  menu and effect has been checked at those shapes.
+At aspect ratios other than 16:9, some HUD elements may remain out of place.

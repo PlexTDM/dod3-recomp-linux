@@ -32,6 +32,7 @@ dist/
 deps/
 __pycache__/
 .venv/
+/ps3recomp-soyjxck/
 
 # Captures and frame grabs
 *.rsxcap
