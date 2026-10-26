@@ -75,13 +75,18 @@ macOS:
 
 Linux:
 
-1. Build the Linux release or follow [the build guide](docs/BUILDING.md).
+1. Build the native Linux game or follow [the build guide](docs/BUILDING.md).
 2. Install with `dod3 --install <decrypted disc folder or ISO> <1.01 update.pkg>`.
    Add any DLC packages after the update. By default, game files are stored in
    `$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`.
-3. Run `dod3` from a terminal to start the Vulkan-rendered game. Linux has no
-   graphical installer or launcher yet; edit `dod3.ini` in the install
+3. Run `dod3` from a terminal to start the Vulkan-rendered game. The native
+   game build has no graphical launcher; edit `dod3.ini` in the install
    directory for settings.
+
+Linux also has a separate `dod3-setup` installer-only target for installing
+the Windows release for use with Wine or Proton; see
+[the Linux setup guide](docs/BUILDING-LINUX.md). It does not build or install
+the native recompiled game.
 
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
 view, draw distance, skipping the intro, the keyboard's keys) are in the
@@ -96,9 +101,9 @@ The port is built in three steps: the game's PPU code is lifted to C++, its
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-On Linux, only the native installer can be built for now; see
-[docs/BUILDING-LINUX.md](docs/BUILDING-LINUX.md). The game itself still runs
-under Proton or Wine.
+The Linux setup-only build installs the Windows release for Wine or Proton;
+the native Linux recompiled game has its own build and runtime requirements
+below. See [the Linux setup guide](docs/BUILDING-LINUX.md) for the installer.
 
 1. **Toolchain.** Windows: Visual Studio 2022 or newer (the Build Tools are
    enough, with "Desktop development with C++" and the Windows SDK), LLVM

@@ -94,8 +94,10 @@ macOS:
       its own SDL window. `DOD3_INSTALL_BASE=/path/to/data` selects a different
       install directory.
 
-   Linux does not yet include the graphical installer or launcher; settings can
-   be edited in `dod3.ini` in the install directory.
+   The native game has no graphical launcher; settings can be edited in
+   `dod3.ini` in the install directory. The separate `dod3-setup` target is
+   for installing the Windows release for Wine or Proton, not for launching
+   the native game.
 
 ## The launcher
 

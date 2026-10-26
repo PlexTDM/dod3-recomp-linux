@@ -4,8 +4,10 @@ The port is built in three steps: the game's PPU code is lifted to C++, the
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-The Linux installer-only target does not need the lift; see
-[BUILDING-LINUX.md](BUILDING-LINUX.md).
+The Linux installer-only target for the Windows release does not need the
+lift; see [BUILDING-LINUX.md](BUILDING-LINUX.md). Building the native
+recompiled game does require the game's lift and decrypted `libsre.prx`, as
+described below.
 
 ## Prerequisites
 
@@ -173,8 +175,8 @@ root, for a developer tree:
 DOD3_INSTALL_BASE=. build/dod3
 ```
 
-On Linux there is no graphical installer or launcher yet. Install from the
-command line, then start `dod3` from the same data directory. By default
+The native Linux game has no graphical launcher. Install it from the command
+line, then start `dod3` from the same data directory. By default
 installed files and saves live under `$XDG_DATA_HOME/dod3-recomp` (or
 `~/.local/share/dod3-recomp`); set `DOD3_INSTALL_BASE` to choose another
 location:
@@ -184,6 +186,10 @@ DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" \
     build/dod3 --install /path/to/decrypted-disc-or-folder /path/to/update.pkg
 DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" build/dod3
 ```
+
+The separate Linux `dod3-setup` target is an installer for the Windows release
+running under Wine or Proton; it does not launch the native recompiled game.
+See [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
 The developer form takes the executable to run, with the environment it
 needs:
