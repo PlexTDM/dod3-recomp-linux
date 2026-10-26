@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(dod3
     VERSION 0.4.0
     LANGUAGES C CXX
-    DESCRIPTION "Drakengard 3 (PS3) recompiled for Windows and macOS"
+    DESCRIPTION "Drakengard 3 (PS3) recompiled for Windows, macOS and Linux"
 )
 # The port's own version, apart from the game's (the 1.01 update): the
 # numbers above go into the Windows version block, and this label is what
@@ -165,10 +165,45 @@ endif()
 #         -DRECOMP_DIR=/path/to/my_game/recompiled
 #
 if(NOT DEFINED PS3RECOMP_DIR)
-    # Default: the ps3recomp submodule in this repo
-    set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
+    # Linux uses sp00nznet's current renderer/runtime; other platforms keep
+    # the soyjxck runtime this port was developed against.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
+    else()
+        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp-soyjxck")
+    endif()
 endif()
 get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
+
+file(STRINGS "${PS3RECOMP_DIR}/libs/spurs/spurs_taskset.c"
+     _spurs_tasksets_on REGEX "int spurs_tasksets_on\\(")
+if(NOT _spurs_tasksets_on)
+    find_package(Git REQUIRED)
+    set(_spurs_compat_patch
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-spurs-taskset-registry.patch")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --unidiff-zero --check "${_spurs_compat_patch}"
+        RESULT_VARIABLE _spurs_patch_check
+        OUTPUT_QUIET ERROR_VARIABLE _spurs_patch_error)
+    if(NOT _spurs_patch_check EQUAL 0)
+        message(FATAL_ERROR
+            "The selected ps3recomp runtime lacks the SPURS taskset registry used by "
+            "Drakengard 3, and the compatibility patch cannot be applied:\n${_spurs_patch_error}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --unidiff-zero "${_spurs_compat_patch}"
+        RESULT_VARIABLE _spurs_patch_result
+        ERROR_VARIABLE _spurs_patch_error)
+    if(NOT _spurs_patch_result EQUAL 0)
+        message(FATAL_ERROR "Could not apply the SPURS runtime compatibility patch:\n${_spurs_patch_error}")
+    endif()
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer on Linux" ON)
+else()
+    option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer on Linux" OFF)
+endif()
 
 # The EBOOT the lift is from: 101 (the 1.01 update, lifted into
 # recompiled_101/; the default, and the version the port is built and tested
@@ -253,6 +288,19 @@ if(WIN32)
 endif()
 add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
                  EXCLUDE_FROM_ALL)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(SDL2 REQUIRED)
+    if(PS3RECOMP_RSX_VULKAN)
+        find_package(glslang CONFIG QUIET)
+    endif()
+    if(PS3RECOMP_RSX_VULKAN AND
+       (NOT TARGET glslang::glslang OR NOT TARGET glslang::SPIRV))
+        message(FATAL_ERROR
+            "The Linux game renderer needs glslang to translate the game's shaders. "
+            "Install the glslang development package or configure with "
+            "-DPS3RECOMP_RSX_VULKAN=OFF for a headless build.")
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # The HLE NID table
@@ -375,6 +423,9 @@ elseif(APPLE)
     list(APPEND PORT_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm")
     set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/os/macos/setup_mac.mm"
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND PORT_PLATFORM_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/input/rsx_host_mouse_linux.cpp")
 endif()
 
 # The installer (src/install/install.h): the core on every platform; the pages
@@ -514,6 +565,9 @@ add_executable(${PROJECT_NAME}
     ${RECOMP_SOURCES}
     ${SPU_SOURCES}
 )
+if(EXISTS "${PS3RECOMP_DIR}/include/ps3emu/vm_watch.h")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE DOD3_RUNTIME_VM_WATCH)
+endif()
 
 # The lifted SPU sources use bare #include "spu_context.h". Scope that include
 # directory (and their flags) to those TUs alone: adding it to the whole target
@@ -617,6 +671,14 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/libs/video"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(TARGET SDL2::SDL2)
+        target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
+    else()
+        target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL2_LIBRARIES})
+    endif()
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime

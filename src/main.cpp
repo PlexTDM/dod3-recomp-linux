@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <algorithm>
@@ -38,7 +39,11 @@
 #include <string>
 #include <vector>
 
+#if defined(__linux__) && !defined(DOD3_RUNTIME_VM_WATCH)
+#include "compat/vm_watch_linux.h"
+#else
 #include "ps3emu/vm_watch.h"
+#endif
 #include "ppu_recomp.h"                  /* the lifter's: ppu_context and the function table */
 #include "cpu/eboot.h"              /* the EBOOT version's addresses */
 #include "apu/mp3_standin.h"        /* our flashMP3.pic (tools/make_spu_overlays.py standin) */
@@ -171,6 +176,14 @@ extern "C" int rsx_metal_backend_pump_messages(void);
 #define rsx_backend_present rsx_metal_backend_present
 #define rsx_backend_pump    rsx_metal_backend_pump_messages
 #define RSX_BACKEND_NAME    "Metal"
+#elif defined(PS3RECOMP_RSX_VULKAN)
+extern "C" int rsx_vulkan_backend_init(uint32_t w, uint32_t h, const char* title);
+extern "C" void rsx_vulkan_backend_present(void);
+extern "C" int rsx_vulkan_backend_pump_messages(void);
+#define rsx_backend_init    rsx_vulkan_backend_init
+#define rsx_backend_present rsx_vulkan_backend_present
+#define rsx_backend_pump    rsx_vulkan_backend_pump_messages
+#define RSX_BACKEND_NAME    "Vulkan"
 #else
 extern "C" int rsx_null_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" void rsx_null_backend_present(void);
@@ -1329,6 +1342,12 @@ static DWORD WINAPI frame_clock(LPVOID)
     int rsx_ok = (rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
     s_window_up = rsx_ok != 0;
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME, rsx_ok ? "OK -- window open" : "FAILED");
+#if defined(PS3RECOMP_RSX_VULKAN)
+    if (!rsx_ok) {
+        fflush(stderr);
+        _exit(1);
+    }
+#endif
 
     unsigned last_flip = 0;
     /* The vblank period: 16 ms (62.5 Hz) by default, 1/(DOD3_VBLANK_MULT * n)
@@ -1810,10 +1829,29 @@ static std::vector<std::filesystem::path> cli_paths(int argc, char** argv, int f
     return out;
 }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+static std::filesystem::path linux_install_base(const char* executable)
+{
+    if (const char* override_dir = getenv("DOD3_INSTALL_BASE"))
+        if (*override_dir) return std::filesystem::u8path(override_dir);
+    if (const char* data_home = getenv("XDG_DATA_HOME"))
+        if (*data_home) return std::filesystem::u8path(data_home) / "dod3-recomp";
+    if (const char* home = getenv("HOME"))
+        if (*home) return std::filesystem::u8path(home) / ".local" / "share" / "dod3-recomp";
+    std::error_code ec;
+    const auto path = std::filesystem::absolute(std::filesystem::u8path(executable), ec);
+    return (ec ? std::filesystem::current_path() : path).parent_path();
+}
+#endif
+
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
     win_stdio_init();
+#endif
+#if defined(PS3RECOMP_RSX_VULKAN)
+    dod3_setenv("PS3RECOMP_VK_WINDOW", "1", 0);
+    dod3_setenv("PS3RECOMP_VK_GUEST_PROGRAMS", "1", 0);
 #endif
 #if defined(DOD3_X86_V3) && defined(_WIN32)
     /* Before anything else, setup included: the lifted code uses these. */
@@ -1863,7 +1901,7 @@ int main(int argc, char** argv)
         if (!data) return 1;
         const std::filesystem::path base(data);
 #else
-        const std::filesystem::path base = std::filesystem::path(argv[0]).parent_path();
+        const std::filesystem::path base = linux_install_base(argv[0]);
 #endif
         /* --keys <file>: the keys for the executable (install/keys.h) */
         std::vector<std::filesystem::path> files = cli_paths(argc, argv, 2), install_files;
@@ -1879,7 +1917,15 @@ int main(int argc, char** argv)
         return dod3setup::install_files_cli(tb && *tb ? std::filesystem::u8path(tb) : base, install_files, keys);
     }
     const bool force_setup = argc >= 2 && !strcmp(argv[1], "--setup");
-    if (argv[0]) s_exe_path = argv[0];   /* dod3.ini is found beside it, the launcher's before the game's */
+    if (argv[0]) {
+#if !defined(_WIN32) && !defined(__APPLE__)
+        std::error_code ec;
+        const auto exe = std::filesystem::absolute(std::filesystem::u8path(argv[0]), ec);
+        s_exe_path = ec ? argv[0] : dod3::utf8(exe);
+#else
+        s_exe_path = argv[0];
+#endif
+    }   /* dod3.ini is found beside it, the launcher's before the game's */
     if (argc < 2 || force_setup) {
 #ifdef _WIN32
         wchar_t dir[MAX_PATH] = L"";
@@ -1906,9 +1952,22 @@ int main(int argc, char** argv)
         dod3_mac_log_to_file();
         if (dod3_setup_mac(data, force_setup ? 1 : 0) != 0) return 1;
 #else
+        if (force_setup) {
+            fprintf(stderr, "The graphical setup is not available on Linux; use --install with the game files.\n");
+            return 2;
+        }
+        const std::filesystem::path base = linux_install_base(argv[0]);
+        std::error_code ec;
+        std::filesystem::create_directories(base, ec);
+        if (ec || chdir(base.c_str()) != 0) {
+            fprintf(stderr, "cannot open the install directory %s: %s\n",
+                    dod3::utf8(base).c_str(), ec ? ec.message().c_str() : strerror(errno));
+            return 1;
+        }
+        s_exe_path = dod3::utf8(base / "dod3");
         if (!dod3setup::installed(".").ready()) {
-            printf("usage: %s <PPU ELF>\n(or run it from a folder the installer has set up: %s --install <file>...; "
-                   "see src/install/install.h)\n",
+            printf("usage: %s --install <decrypted disc or folder> <update.pkg> [DLC.pkg ...]\n"
+                   "or run %s <PPU ELF> for a developer build\n",
                    argv[0], argv[0]);
             return 2;
         }

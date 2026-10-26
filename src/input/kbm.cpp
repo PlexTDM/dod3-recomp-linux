@@ -55,13 +55,20 @@
 #include "rsx_host_mouse.h"
 #include "util.h"
 
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(__linux__)
+#include <SDL.h>
+#include <strings.h>
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+#endif
+
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#else
+#elif defined(__APPLE__)
 #include <strings.h>
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
@@ -147,6 +154,75 @@ bool key_held(int k)
     if (k >= kMouseButton) return rsx_metal_backend_mouse_button_down((unsigned)(k - kMouseButton)) != 0;
     return key((unsigned)k);
 }
+#elif defined(__linux__)
+/* SDL keeps its keyboard state updated as the Vulkan backend pumps events. */
+const int kNoSuchKey = -3;
+const int kMouseButton = 0x200;
+const int kEitherShift = 0x300, kEitherCtrl = 0x301, kEitherAlt = 0x302;
+int letter_key(char c) { return SDL_SCANCODE_A + c - 'A'; }
+int function_key(int n) { return SDL_SCANCODE_F1 + n - 1; }
+int numpad_key(int n)
+{
+    static const int keys[] = {
+        SDL_SCANCODE_KP_0, SDL_SCANCODE_KP_1, SDL_SCANCODE_KP_2, SDL_SCANCODE_KP_3,
+        SDL_SCANCODE_KP_4, SDL_SCANCODE_KP_5, SDL_SCANCODE_KP_6, SDL_SCANCODE_KP_7,
+        SDL_SCANCODE_KP_8, SDL_SCANCODE_KP_9,
+    };
+    return keys[n];
+}
+bool key_held(int scancode)
+{
+    int count = 0;
+    const Uint8* state = SDL_GetKeyboardState(&count);
+    const auto key = [state, count](int code) {
+        return state && code >= 0 && code < count && state[code] != 0;
+    };
+    if (scancode == kEitherShift)
+        return key(SDL_SCANCODE_LSHIFT) || key(SDL_SCANCODE_RSHIFT);
+    if (scancode == kEitherCtrl)
+        return key(SDL_SCANCODE_LCTRL) || key(SDL_SCANCODE_RCTRL);
+    if (scancode == kEitherAlt)
+        return key(SDL_SCANCODE_LALT) || key(SDL_SCANCODE_RALT);
+    if (scancode >= kMouseButton) {
+        const Uint32 mask = SDL_GetMouseState(nullptr, nullptr);
+        const int button = scancode - kMouseButton;
+        static const Uint32 masks[] = {
+            SDL_BUTTON_LMASK, SDL_BUTTON_RMASK, SDL_BUTTON_MMASK,
+            SDL_BUTTON_X1MASK, SDL_BUTTON_X2MASK,
+        };
+        return button >= 0 && button < (int)(sizeof masks / sizeof masks[0]) &&
+               (mask & masks[button]) != 0;
+    }
+    return key(scancode);
+}
+
+const struct {
+    const char* name;
+    int vk;
+} kKeys[] = {
+    { "Space", SDL_SCANCODE_SPACE }, { "Enter", SDL_SCANCODE_RETURN },
+    { "Tab", SDL_SCANCODE_TAB }, { "Esc", SDL_SCANCODE_ESCAPE },
+    { "Backspace", SDL_SCANCODE_BACKSPACE }, { "Shift", kEitherShift },
+    { "Ctrl", kEitherCtrl }, { "Alt", kEitherAlt },
+    { "LShift", SDL_SCANCODE_LSHIFT }, { "RShift", SDL_SCANCODE_RSHIFT },
+    { "LCtrl", SDL_SCANCODE_LCTRL }, { "RCtrl", SDL_SCANCODE_RCTRL },
+    { "LAlt", SDL_SCANCODE_LALT }, { "RAlt", SDL_SCANCODE_RALT },
+    { "Up", SDL_SCANCODE_UP }, { "Down", SDL_SCANCODE_DOWN },
+    { "Left", SDL_SCANCODE_LEFT }, { "Right", SDL_SCANCODE_RIGHT },
+    { "Insert", SDL_SCANCODE_INSERT }, { "Delete", SDL_SCANCODE_DELETE },
+    { "Home", SDL_SCANCODE_HOME }, { "End", SDL_SCANCODE_END },
+    { "PageUp", SDL_SCANCODE_PAGEUP }, { "PageDown", SDL_SCANCODE_PAGEDOWN },
+    { "CapsLock", SDL_SCANCODE_CAPSLOCK }, { "Minus", SDL_SCANCODE_MINUS },
+    { "Equals", SDL_SCANCODE_EQUALS }, { "LBracket", SDL_SCANCODE_LEFTBRACKET },
+    { "RBracket", SDL_SCANCODE_RIGHTBRACKET }, { "Semicolon", SDL_SCANCODE_SEMICOLON },
+    { "Quote", SDL_SCANCODE_APOSTROPHE }, { "Comma", SDL_SCANCODE_COMMA },
+    { "Period", SDL_SCANCODE_PERIOD }, { "Slash", SDL_SCANCODE_SLASH },
+    { "Backslash", SDL_SCANCODE_BACKSLASH }, { "Grave", SDL_SCANCODE_GRAVE },
+    { "Mouse1", kMouseButton + 0 }, { "Mouse2", kMouseButton + 1 },
+    { "Mouse3", kMouseButton + 2 }, { "Mouse4", kMouseButton + 3 },
+    { "Mouse5", kMouseButton + 4 }, { "WheelUp", kWheelUp },
+    { "WheelDown", kWheelDown },
+};
 #else
 /* A key is its Windows virtual-key code. */
 const int kNoSuchKey = -3;   /* every key here can be read */

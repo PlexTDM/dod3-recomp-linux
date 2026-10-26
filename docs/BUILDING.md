@@ -26,7 +26,14 @@ macOS (Apple silicon):
 - Xcode's command-line tools; from Homebrew: `cmake ninja python zlib sdl2
   glslang spirv-cross`.
 
-Then, on either:
+Linux (x86-64):
+
+- GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python 3.11+, Git and zlib.
+- SDL2, Vulkan and glslang development packages (`libsdl2-dev libvulkan-dev
+  glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
+  Fedora), plus a Vulkan-capable driver.
+
+Then, on any platform:
 
 ```sh
 git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
@@ -120,6 +127,18 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+Linux:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+The Linux build selects the sp00nznet runtime's Vulkan backend by default.
+Use `-DPS3RECOMP_RSX_VULKAN=OFF` only for a headless build. glslang is needed
+to translate the game's shaders; the launcher enables
+`PS3RECOMP_VK_GUEST_PROGRAMS=1` automatically.
+
 A clean build takes about 15 minutes, nearly all of it the lifted translation
 units; a header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`)
 rebuilds all of them. A build folder keeps `RECOMP_DIR` in its cache, so one
@@ -152,6 +171,18 @@ root, for a developer tree:
 
 ```sh
 DOD3_INSTALL_BASE=. build/dod3
+```
+
+On Linux there is no graphical installer or launcher yet. Install from the
+command line, then start `dod3` from the same data directory. By default
+installed files and saves live under `$XDG_DATA_HOME/dod3-recomp` (or
+`~/.local/share/dod3-recomp`); set `DOD3_INSTALL_BASE` to choose another
+location:
+
+```sh
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" \
+    build/dod3 --install /path/to/decrypted-disc-or-folder /path/to/update.pkg
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" build/dod3
 ```
 
 The developer form takes the executable to run, with the environment it

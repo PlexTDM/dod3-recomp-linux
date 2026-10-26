@@ -1,4 +1,8 @@
 [submodule "ps3recomp"]
 	path = ps3recomp
+	url = https://github.com/sp00nznet/ps3recomp.git
+	branch = master
+[submodule "ps3recomp-soyjxck"]
+	path = ps3recomp-soyjxck
 	url = https://github.com/soyjxck/ps3recomp.git
 	branch = master
