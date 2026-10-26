@@ -1,7 +1,7 @@
 # Drakengard 3 Recompiled
 
 A native PC port of **Drakengard 3** (Drag-On Dragoon 3, PlayStation 3,
-BLUS31197) for Windows and macOS, made by static recompilation of the game's
+BLUS31197) for Windows, macOS and Linux, made by static recompilation of the game's
 code on the [ps3recomp](https://github.com/sp00nznet/ps3recomp) toolkit.
 
 The game's PowerPC and SPU code is translated to C++ ahead of time and built
@@ -22,8 +22,10 @@ If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
 What you need:
 
 - A PC with Windows 10 or 11 (64-bit), a GPU with Direct3D 12 and a CPU with
-  AVX2 (Intel Haswell / AMD Zen or newer), or a Mac with Apple silicon on
-  macOS 13 or newer. About 16 GB of free disk space, 10 GB more for the
+  AVX2 (Intel Haswell / AMD Zen or newer), a Mac with Apple silicon on
+  macOS 13 or newer, or 64-bit Linux with SDL2, Vulkan, glslang and a Vulkan
+  driver. Linux uses the sp00nznet runtime; Windows and macOS use the
+  soyjxck runtime that the game port is based on. About 16 GB of free disk space, 10 GB more for the
   Japanese voice pack and about 3 GB for the Spanish translation.
 - Your copy of the game, US release, as either:
   - the disc (BLUS31197), dumped to a folder or a **decrypted** `.iso`
@@ -71,6 +73,21 @@ macOS:
 3. The setup opens as on Windows. The game's files go into
    `~/Library/Application Support/Drakengard 3 Recompiled`.
 
+Linux:
+
+1. Build the native Linux game or follow [the build guide](docs/BUILDING.md).
+2. Install with `dod3 --install <decrypted disc folder or ISO> <1.01 update.pkg>`.
+   Add any DLC packages after the update. By default, game files are stored in
+   `$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`.
+3. Run `dod3` from a terminal to start the Vulkan-rendered game. The native
+   game build has no graphical launcher; edit `dod3.ini` in the install
+   directory for settings.
+
+Linux also has a separate `dod3-setup` installer-only target for installing
+the Windows release for use with Wine or Proton; see
+[the Linux setup guide](docs/BUILDING-LINUX.md). It does not build or install
+the native recompiled game.
+
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
 view, draw distance, skipping the intro, the keyboard's keys) are in the
 launcher's Settings, in the game's own Settings menu (Graphics Settings,
@@ -84,9 +101,9 @@ The port is built in three steps: the game's PPU code is lifted to C++, its
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-On Linux, only the native installer can be built for now; see
-[docs/BUILDING-LINUX.md](docs/BUILDING-LINUX.md). The game itself still runs
-under Proton or Wine.
+The Linux setup-only build installs the Windows release for Wine or Proton;
+the native Linux recompiled game has its own build and runtime requirements
+below. See [the Linux setup guide](docs/BUILDING-LINUX.md) for the installer.
 
 1. **Toolchain.** Windows: Visual Studio 2022 or newer (the Build Tools are
    enough, with "Desktop development with C++" and the Windows SDK), LLVM
@@ -94,6 +111,9 @@ under Proton or Wine.
    Windows, and vcpkg with `zlib:x64-windows` and `sdl2:x64-windows`
    (`VCPKG_ROOT`, or `C:\vcpkg`). macOS: Xcode's command-line tools and,
    from Homebrew, `cmake ninja python zlib sdl2 glslang spirv-cross`.
+   Linux: GCC 12+ or Clang 14+, CMake, Ninja, Python, SDL2, Vulkan, glslang,
+   zlib and Git (for example `libsdl2-dev libvulkan-dev glslang-dev zlib1g-dev`
+   on Debian/Ubuntu).
 
 2. **The sources.**
 
@@ -103,6 +123,10 @@ under Proton or Wine.
    python3 -m venv .venv                    # py -3 -m venv .venv on Windows
    .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
    ```
+
+   The checkout includes both runtime repositories. CMake selects sp00nznet's
+   current master for Linux and the soyjxck runtime for Windows/macOS, where
+   the port depends on its title-specific HLE changes.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another
    machine) installs the game into the repository root, which decrypts the

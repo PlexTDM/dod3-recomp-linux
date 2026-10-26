@@ -41,16 +41,16 @@ installer itself does not need Wine or Proton; those are only for the game.
 
 ## Get the source
 
-From the branch this page is on:
+From the Linux integration branch:
 
 ```sh
-git clone --recurse-submodules --branch linux-setup \
-    https://github.com/PlexTDM/dod3-recomp.git
-cd dod3-recomp
+git clone --recurse-submodules --branch linux-vulkan-integration \
+    https://github.com/PlexTDM/dod3-recomp-linux.git
+cd dod3-recomp-linux
 ```
 
-Once the branch is merged, clone the upstream repository instead and use
-`main`.
+The `dod3-setup` installer-only target is also available from the upstream
+repository's `main` branch.
 
 ## Build
 

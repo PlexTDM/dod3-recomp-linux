@@ -4,8 +4,10 @@ The port is built in three steps: the game's PPU code is lifted to C++, the
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-The Linux installer-only target does not need the lift; see
-[BUILDING-LINUX.md](BUILDING-LINUX.md).
+The Linux installer-only target for the Windows release does not need the
+lift; see [BUILDING-LINUX.md](BUILDING-LINUX.md). Building the native
+recompiled game does require the game's lift and decrypted `libsre.prx`, as
+described below.
 
 ## Prerequisites
 
@@ -26,7 +28,14 @@ macOS (Apple silicon):
 - Xcode's command-line tools; from Homebrew: `cmake ninja python zlib sdl2
   glslang spirv-cross`.
 
-Then, on either:
+Linux (x86-64):
+
+- GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python 3.11+, Git and zlib.
+- SDL2, Vulkan and glslang development packages (`libsdl2-dev libvulkan-dev
+  glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
+  Fedora), plus a Vulkan-capable driver.
+
+Then, on any platform:
 
 ```sh
 git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
@@ -120,6 +129,18 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+Linux:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+The Linux build selects the sp00nznet runtime's Vulkan backend by default.
+Use `-DPS3RECOMP_RSX_VULKAN=OFF` only for a headless build. glslang is needed
+to translate the game's shaders; the launcher enables
+`PS3RECOMP_VK_GUEST_PROGRAMS=1` automatically.
+
 A clean build takes about 15 minutes, nearly all of it the lifted translation
 units; a header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`)
 rebuilds all of them. A build folder keeps `RECOMP_DIR` in its cache, so one
@@ -153,6 +174,22 @@ root, for a developer tree:
 ```sh
 DOD3_INSTALL_BASE=. build/dod3
 ```
+
+The native Linux game has no graphical launcher. Install it from the command
+line, then start `dod3` from the same data directory. By default
+installed files and saves live under `$XDG_DATA_HOME/dod3-recomp` (or
+`~/.local/share/dod3-recomp`); set `DOD3_INSTALL_BASE` to choose another
+location:
+
+```sh
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" \
+    build/dod3 --install /path/to/decrypted-disc-or-folder /path/to/update.pkg
+DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" build/dod3
+```
+
+The separate Linux `dod3-setup` target is an installer for the Windows release
+running under Wine or Proton; it does not launch the native recompiled game.
+See [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
 The developer form takes the executable to run, with the environment it
 needs:

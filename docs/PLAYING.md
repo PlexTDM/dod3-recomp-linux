@@ -82,6 +82,23 @@ macOS:
 3. The setup opens, as on Windows. The game's files go into
    ~/Library/Application Support/Drakengard 3 Recompiled.
 
+   Linux:
+
+   1. Install the SDL2, Vulkan and Vulkan-driver packages for your distribution.
+      Install glslang development files as well so guest shaders are translated.
+   2. Run `dod3 --install <decrypted disc folder or ISO> <1.01 update.pkg>` from
+      a terminal. Add any DLC `.pkg` files after the update. The game data is
+      stored under `$XDG_DATA_HOME/dod3-recomp`, or
+      `~/.local/share/dod3-recomp` if `XDG_DATA_HOME` is unset.
+   3. Run `dod3` from the terminal to start the game. The Vulkan backend opens
+      its own SDL window. `DOD3_INSTALL_BASE=/path/to/data` selects a different
+      install directory.
+
+   The native game has no graphical launcher; settings can be edited in
+   `dod3.ini` in the install directory. The separate `dod3-setup` target is
+   for installing the Windows release for Wine or Proton, not for launching
+   the native game.
+
 ## The launcher
 
 Once the game is installed, it opens on a launcher, over the game's own key

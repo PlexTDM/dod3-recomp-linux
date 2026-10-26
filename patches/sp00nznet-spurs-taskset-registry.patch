@@ -1,0 +1,52 @@
+diff --git a/libs/spurs/spurs_taskset.c b/libs/spurs/spurs_taskset.c
+index 89d54bf..8f43fcf 100644
+--- a/libs/spurs/spurs_taskset.c
++++ b/libs/spurs/spurs_taskset.c
+@@ -11,0 +12,39 @@
++#include <stdatomic.h>
++
++#define SPURS_TS_REG_MAX 64
++static uint32_t s_ts_reg_spurs[SPURS_TS_REG_MAX];
++static uint32_t s_ts_reg_taskset[SPURS_TS_REG_MAX];
++static int s_ts_reg_n;
++static atomic_flag s_ts_reg_lock = ATOMIC_FLAG_INIT;
++
++static void spurs_taskset_register(uint32_t taskset_ea, uint32_t spurs_ea)
++{
++    while (atomic_flag_test_and_set_explicit(&s_ts_reg_lock, memory_order_acquire)) {}
++    for (int i = 0; i < s_ts_reg_n; i++) {
++        if (s_ts_reg_taskset[i] == taskset_ea) {
++            s_ts_reg_spurs[i] = spurs_ea;
++            atomic_flag_clear_explicit(&s_ts_reg_lock, memory_order_release);
++            return;
++        }
++    }
++    if (s_ts_reg_n < SPURS_TS_REG_MAX) {
++        s_ts_reg_spurs[s_ts_reg_n] = spurs_ea;
++        s_ts_reg_taskset[s_ts_reg_n] = taskset_ea;
++        s_ts_reg_n++;
++    }
++    atomic_flag_clear_explicit(&s_ts_reg_lock, memory_order_release);
++}
++
++int spurs_tasksets_on(uint32_t spurs_ea, uint32_t* out, int max)
++{
++    int found = 0;
++    while (atomic_flag_test_and_set_explicit(&s_ts_reg_lock, memory_order_acquire)) {}
++    for (int i = 0; i < s_ts_reg_n; i++) {
++        if (s_ts_reg_spurs[i] == spurs_ea) {
++            if (out && found < max) out[found] = s_ts_reg_taskset[i];
++            found++;
++        }
++    }
++    atomic_flag_clear_explicit(&s_ts_reg_lock, memory_order_release);
++    return found;
++}
+@@ -18,0 +58 @@ void spurs_taskset_init(uint32_t taskset_ea, uint32_t spurs_ea, uint64_t args,
++    spurs_taskset_register(taskset_ea, spurs_ea);
+diff --git a/libs/spurs/spurs_taskset.h b/libs/spurs/spurs_taskset.h
+index 0c64b55..ce6e640 100644
+--- a/libs/spurs/spurs_taskset.h
++++ b/libs/spurs/spurs_taskset.h
+@@ -145,0 +146 @@ void spurs_taskset_init(uint32_t taskset_ea, uint32_t spurs_ea, uint64_t args,
++int spurs_tasksets_on(uint32_t spurs_ea, uint32_t* out, int max);
