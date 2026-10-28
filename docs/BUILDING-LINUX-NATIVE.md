@@ -20,14 +20,14 @@ The native Linux installer (`dod3-setup`) is separate and already works. See
 
 ## Current state
 
-| Part | State | Notes |
-| --- | --- | --- |
-| Installer | Native, works | SDL2 + OpenGL + Dear ImGui, `src/os/linux/setup_linux.cpp` |
-| Launcher UI | Written, wired | `src/ui/launcher.cpp` + `src/ui/ui_linux.cpp`; included in the full target |
-| Game runtime | Native build boots to the title and into gameplay | Vulkan; title at 30 fps; save selection, New Game, stage loading and movement work; stage loads build pipelines and dip to ~14-22 fps |
-| Linux RSX backend | Opt-in Vulkan, partial | `rsx_vulkan_backend.c`; RGBA8 and FP16 HDR colour targets; runtime display mode, window size and V-Sync; `RSX_SCALE` internal resolution (restart for a new scale); toolkit scenes pass |
-| Linux full game target | Added, links | `build-native/dod3`, 280 MB |
-| Lifted PPU/SPU sources | Not committed | Generated locally from the player's `EBOOT_101.ELF` |
+| Part                   | State                                             | Notes                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Installer              | Native, works                                     | SDL2 + OpenGL + Dear ImGui, `src/os/linux/setup_linux.cpp`                                                                                                                              |
+| Launcher UI            | Written, wired                                    | `src/ui/launcher.cpp` + `src/ui/ui_linux.cpp`; included in the full target                                                                                                              |
+| Game runtime           | Native build boots to the title and into gameplay | Vulkan; title and menus at 60 fps; save selection, New Game, stage loading and movement work; stage loads build pipelines on worker threads and hold 25-45 fps while they do                                             |
+| Linux RSX backend      | Opt-in Vulkan, partial                            | `rsx_vulkan_backend.c`; RGBA8 and FP16 HDR colour targets; runtime display mode, window size and V-Sync; `RSX_SCALE` internal resolution (restart for a new scale); toolkit scenes pass |
+| Linux full game target | Added, links                                      | `build-native/dod3`, 280 MB                                                                                                                                                             |
+| Lifted PPU/SPU sources | Not committed                                     | Generated locally from the player's `EBOOT_101.ELF`                                                                                                                                     |
 
 The Linux game path selects the **Vulkan** backend in `src/main.cpp` and sets
 `PS3RECOMP_VK_WINDOW=1` / `PS3RECOMP_VK_GUEST_PROGRAMS=1`. A native build now
@@ -52,12 +52,12 @@ a pad, or the toolkit's `PAD_SCRIPT` / `PAD_FILE` test inputs.
 
 The Linux Vulkan backend reads these `dod3.ini` / environment values:
 
-| Key | Values | Applies |
-| --- | --- | --- |
-| `RSX_DISPLAY` | `windowed`, `borderless`, `fullscreen` | Live from Graphics Settings |
-| `RSX_WINDOW` | `1280x720`, `1920x1080`, ... | Windowed mode, at startup/launcher |
-| `RSX_SCALE` | `1`, `1.5`, `2`, `3`, `4` | Internal resolution; restart required |
-| `RSX_VSYNC` | `1` (on), `0` (off) | Live from Graphics Settings |
+| Key           | Values                                 | Applies                               |
+| ------------- | -------------------------------------- | ------------------------------------- |
+| `RSX_DISPLAY` | `windowed`, `borderless`, `fullscreen` | Live from Graphics Settings           |
+| `RSX_WINDOW`  | `1280x720`, `1920x1080`, ...           | Windowed mode, at startup/launcher    |
+| `RSX_SCALE`   | `1`, `1.5`, `2`, `3`, `4`              | Internal resolution; restart required |
+| `RSX_VSYNC`   | `1` (on), `0` (off)                    | Live from Graphics Settings           |
 
 `RSX_SCALE` enlarges the register-file engine's colour and depth targets (targets
 at least `RSX_SCALE_MIN` pixels in both directions, default 200), scales
@@ -102,6 +102,13 @@ stays offscreen and `RSX_SCALE` still controls the internal target size.
 ## Prerequisites
 
 Tested on Arch Linux x86_64. Other distributions need equivalent packages.
+
+From the repository root, initialize the pinned runtime submodule if it is
+not already present:
+
+```sh
+git submodule update --init --recursive
+```
 
 ```sh
 sudo pacman -S --needed \
@@ -255,64 +262,67 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 ### Build system
 
 - [x] Add a full native Linux target in `CMakeLists.txt`; do not stop at
-  `DOD3_SETUP_ONLY`.
+      `DOD3_SETUP_ONLY`.
 - [x] Add `src/os/linux/proton.cpp` to `PORT_PLATFORM_SOURCES`; the
-  `dod3-setup` main stays in its own target.
+      `dod3-setup` main stays in its own target.
 - [x] Add `src/ui/wizard.cpp`, `src/ui/launcher.cpp`, `src/ui/look.cpp`,
-  `src/ui/setup_shared.cpp`, `src/ui/png.cpp`, and `src/ui/ui_linux.cpp` to
-  `SETUP_SOURCES` on Linux.
+      `src/ui/setup_shared.cpp`, `src/ui/png.cpp`, and `src/ui/ui_linux.cpp` to
+      `SETUP_SOURCES` on Linux.
 - [x] Add ImGui's `imgui_impl_sdl2.cpp` and `imgui_impl_opengl3.cpp` on Linux.
 - [x] Link SDL2, OpenGL, `dl`, `pthread`, and zlib for the full target.
 - [x] Pass `-DPS3RECOMP_RSX_VULKAN=ON` and ensure Vulkan headers are found.
 - [x] Ensure glslang is found so guest shaders can be translated to SPIR-V.
 - [x] Keep generated `recompiled_101/`, `spu/`, `out/`, and `build-native/`
-  out of git.
+      out of git.
 
 ### Launcher and setup flow
 
 - [x] Include `ui/ui.h` in `src/main.cpp`.
 - [x] On Linux, when no ELF argument is given, use `DOD3_INSTALL_BASE` or the
-  executable directory as the install base.
+      executable directory as the install base.
 - [x] If the install is not ready, call `run_installer(base)`.
 - [x] Otherwise call `run_launcher_loop(base)` and boot the game on `kPlay`.
 - [x] Honor `DOD3_LAUNCHER=0` (no Shift/Option detection on Linux yet).
 - [x] Make the installer's Play button launch the native binary, not Proton,
-  when built natively.
+      when built natively.
 - [ ] Verify `install-desktop.sh` and the desktop entry point at the native
-  binary.
+      binary.
 
 ### Renderer
 
 - [x] Replace the Linux null backend selection in `src/main.cpp` with
-  `rsx_vulkan_backend_init/present/pump_messages`.
+      `rsx_vulkan_backend_init/present/pump_messages`.
 - [x] Default `PS3RECOMP_VK_GUEST_PROGRAMS=1` for the game (guest shaders are
-  required for correct visuals).
+      required for correct visuals).
 - [x] Add FP16 HDR colour-target render passes (the title binds format 10,
-  `R16G16B16A16_SFLOAT`) and blit them to the RGBA8 display image.
+      `R16G16B16A16_SFLOAT`) and blit them to the RGBA8 display image.
 - [x] Accept `VK_INCOMPLETE` when a Wayland driver exposes more than 64
-  surface formats; this unblocked the Wayland swapchain.
+      surface formats; this unblocked the Wayland swapchain.
 - [x] Read `RSX_DISPLAY` / `RSX_WINDOW` / `RSX_VSYNC`, recreate the swapchain
-  on resize or a live display/V-Sync change, and implement `RSX_SCALE`
-  internal-resolution targets, scaled viewports/scissors, WPOS variants and
-  readback resampling. `RSX_SCALE` applies at the next start.
+      on resize or a live display/V-Sync change, and implement `RSX_SCALE`
+      internal-resolution targets, scaled viewports/scissors, WPOS variants and
+      readback resampling. `RSX_SCALE` applies at the next start.
 - [ ] Verify the draw-engine path (`PS3RECOMP_RSX_ENGINE=dispatch`).
 - [ ] Add/verify cube-map support; Drakengard 3 may use environment maps.
 - [ ] Add/verify vertex-texture support.
 - [ ] Check depth snapshots, MRT, depth textures, render-to-texture, and
-  occlusion queries against the game's effects.
-- [ ] Check the synchronous Vulkan submit path for performance; batch or port
-  the Windows Vulkan engine if needed.
+      occlusion queries against the game's effects.
+- [x] Check the synchronous Vulkan submit path for performance; batch or port
+      the Windows Vulkan engine if needed. Done in place rather than by porting
+      the Windows engine: two frames in flight, one submission a frame, async
+      pipeline builds, uploads recorded into the frame (see the 2026-10-26 log
+      entry).
 - [ ] Wire Linux equivalents for Windows-only D3D12 buffer-pool and anisotropy
-  settings where they affect rendering.
+      settings where they affect rendering.
 
 ### Runtime and platform
 
 - [ ] Audit `_WIN32` blocks in `src/main.cpp` for Linux behavior (window focus,
-  mouse capture, logging, profiling, process arguments).
+      mouse capture, logging, profiling, process arguments).
 - [x] Verify controller input (SDL2 `cellPad`), save loading and the New Game
-  flow.
+      flow.
 - [ ] Add native Linux keyboard and mouse mapping in `src/input/kbm.cpp`
-  (currently Windows/macOS only).
+      (currently Windows/macOS only).
 - [ ] Verify SDL2 audio (`cellAudio`) under gameplay.
 - [ ] Verify POSIX thread/memory/filesystem shims under the game's load.
 - [x] Verify save data load and New Game.
@@ -320,14 +330,14 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 - [x] Verify the native MP3 stand-in (title and stage music).
 - [ ] Verify the `gamedata/dev_flash` layout.
 - [ ] Exercise the native SPURS queue push path; 0 PPU pushes were observed in
-  the title and first-stage runs.
+      the title and first-stage runs.
 - [ ] Verify shutdown/exit paths and log file locations.
 
 ### Validation
 
 - [x] Native binary links and opens a Vulkan window.
 - [x] Get past the startup movie with native Edge zlib and the native SPURS
-  queue.
+      queue.
 - [x] Boot to the title screen.
 - [x] Reach the first playable area and move around.
 - [ ] Verify longer gameplay stability and performance after pipeline warm-up.
@@ -339,15 +349,63 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 ### Packaging
 
 - [ ] Document runtime dependencies (SDL2, Vulkan loader/driver, glslang not
-  needed at runtime).
+      needed at runtime).
 - [ ] Decide whether to ship a binary, a build script, or both.
 - [ ] Add a native Linux release/CI job once the build is stable.
 
 ## Progress log
 
+### 2026-10-26
+
+Playability pass on the Vulkan backend. The hitching and the stage-load
+freezes came from the frame submission, not from the guest, and the depth
+format had no stencil.
+
+- **Two frames in flight.** A present ended with a fence wait, so the walker
+  and the GPU took turns: `RSX_VK_BATCH_STATS` measured 11-12 ms a frame spent
+  inside `vkWaitForFences` in play, with about 9 ms of recording either side.
+  The display blit is now recorded into the frame's own command buffer, the
+  submit carries the acquire/signal semaphores, and the present is queued
+  without waiting; the next frame records into the other of two slots
+  (`VK_SLOTS`), each with its own command buffer, fence and staging arenas, so
+  a frame waits on the fence of the one two before it. Wait time in play is
+  down to ~1.5 ms a frame.
+- **Staging arenas reset per frame.** They used to reset only when one
+  overflowed, which ended the batch, waited and reallocated 32-128 MB in the
+  middle of play; the constants arena overflowed every ~40 frames and the
+  vertex arena every ~75. They reset when the frame's slot comes round again.
+  `arena 0.0` in the stats; a stage load's worst frame fell from 2.9 s to
+  under 0.2 s.
+- **Async pipeline builds on Linux.** The engine's worker-thread pipeline build
+  was compiled in for Windows and macOS only, so on Linux every new material
+  compiled on the FIFO walker: 215 pipelines of 60-100 ms, 121 of them inside
+  one frame of the first stage's load (9.7 s in that frame alone). Linux uses
+  the workers now. The Vulkan create calls a worker makes take a mutex
+  (`s_eng_vk_mu`, held for the call, not for the translate around it), and the
+  worker builds the triangle-list variants eagerly, so the walker only binds.
+  The same load now runs at 25-45 fps instead of 5-17.
+- **Texture uploads ride the frame.** An uploaded level used to get its own
+  staging buffer, a submit and a full device wait; in play the engine uploads a
+  few textures a frame (fire, water, HUD animations), and those waits were most
+  of the walker's time. They stage into the frame's upload arena and are
+  recorded into the frame's command buffer: an upload is a memcpy and one copy
+  command.
+- **Depth and stencil.** The depth format is `D32_SFLOAT_S8_UINT` now (it was
+  `D32_SFLOAT`), the same thing `D32_FLOAT_S8X24` is on D3D12 and
+  `Depth32Float_Stencil8` on Metal, so the title's stencil tests stop being
+  inert. Depth snapshots copy the 32-bit depth aspect unchanged. Stencil
+  clears clear the aspects that were asked for, and both render-pass builders
+  load and store the stencil.
+- Measured on the i5-10400 / RX 6700 machine, save loaded from the title, in
+  borderless 1920x1080 at `RSX_SCALE = 1.5`: the first stage's load went from
+  5-17 fps with multi-second stalls to 25-45 fps; the cathedral fight went from
+  40 to 45-57 fps; the outdoor path runs at 30-33 fps, where the GPU wait is
+  near zero (the guest's own CPU cost). The old binary did not reach gameplay
+  within 200 s from the same save, so no in-play A/B was possible in that
+  window.
+
 ### 2026-10-25
 
-- Created this document.
 - Confirmed the installer and Windows/Proton game are working.
 - Inspected the existing Linux pieces:
   - `src/ui/ui_linux.cpp` provides SDL2 + OpenGL + ImGui.
@@ -415,22 +473,15 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 
 - The Vulkan backend is intentionally conservative and incomplete. Missing
   cube maps or vertex textures may make some scenes render incorrectly.
-- The synchronous submit path is not designed for 60 fps; performance work may
-  be required before the game is playable.
+- In play the renderer now keeps the GPU busy while the walker records the
+  next frame, so what is left is mostly the guest's own CPU cost: on the
+  i5-10400 test machine the outdoor path sits at ~30 fps with a GPU wait near
+  zero, where the cathedral fight reaches 45-57.
+- The engine's scissored depth/stencil clear (`clear_depth_stencil_rect`, which
+  this title uses to pack several shadow maps into one depth target) is still
+  not implemented on Vulkan, so a packed target is cleared whole.
 - The lifted code is large and compiler/resource intensive.
 - The Windows path has years of game-specific fixes; Linux will expose
   assumptions that are currently hidden by D3D12 or Proton.
 - Native does not automatically mean faster than Proton. The first goal is
   correctness and integration; performance comes after.
-
-## Rough effort estimate
-
-For one developer familiar with the code:
-
-- Native binary boots to the title screen: 1-3 weeks.
-- Playable with acceptable performance: 2-6 months full-time.
-- Release-quality parity with Windows: 6-12+ months, depending on renderer
-  gaps and performance.
-
-These are estimates, not commitments. The first build will replace them with
-real blockers.

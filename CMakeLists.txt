@@ -169,6 +169,14 @@ if(NOT DEFINED PS3RECOMP_DIR)
     set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
 endif()
 get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
+if(NOT EXISTS "${PS3RECOMP_DIR}/CMakeLists.txt"
+   OR NOT EXISTS "${PS3RECOMP_DIR}/tools/pkg_extract.py")
+    message(FATAL_ERROR
+        "ps3recomp toolkit not found at ${PS3RECOMP_DIR}.\n"
+        "If using this repository's submodule, run "
+        "`git submodule update --init --recursive`; otherwise set "
+        "-DPS3RECOMP_DIR= to a ps3recomp checkout.")
+endif()
 
 # The EBOOT the lift is from: 101 (the 1.01 update, lifted into
 # recompiled_101/; the default, and the version the port is built and tested
