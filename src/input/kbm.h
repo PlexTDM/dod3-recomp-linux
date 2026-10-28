@@ -31,8 +31,8 @@ enum Dod3Bind {
     kBinds
 };
 
-/* Once at boot. Nothing where the port has no keyboard and mouse of its own
- * (neither Windows nor macOS: the toolkit's built-in keys stay). */
+/* Once at boot. Nothing until the Linux port gains a keyboard and mouse of
+ * its own; the toolkit's built-in keys stay. */
 void dod3_kbm_install();
 /* Is the port's keyboard and mouse the one in use on this platform? */
 bool dod3_kbm_present();

@@ -27,9 +27,7 @@
 #include "install/crypto.h"    /* to_hex */
 #include "util.h"
 #include "app_version.h"       /* generated: the port's version label */
-#if defined(__linux__)
 #include "os/linux/proton.h"   /* the Proton builds the game can start with */
-#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -50,9 +48,7 @@ enum class Page {
     GameFiles,
     Dlc,
     Mods,
-#if defined(__linux__)
     Proton,
-#endif
     Keys,
     Confirm,
     Installing,
@@ -83,12 +79,10 @@ struct Wizard : Kit {
     std::vector<std::string> notes;   /* what the last files added came to */
     InstallJob job;
 
-#if defined(__linux__)
     /* the Proton page: the builds found, and the one Play starts */
     std::vector<ProtonVersion> protons;
     fs::path proton_path;
     bool proton_saved = false;
-#endif
 
     /* the Keys page: a field per key; a check (decrypting the executable)
      * runs whenever all of them are well-formed and have changed since */
@@ -125,9 +119,7 @@ struct Wizard : Kit {
         page = p;
         page_new = true;
         page_frames = 0;
-#if defined(__linux__)
         if (p == Page::Proton) refresh_protons();
-#endif
     }
 
     /* ---- the files added ---- */
@@ -149,7 +141,6 @@ struct Wizard : Kit {
         if (!p.empty()) add({ p });
     }
 
-#if defined(__linux__)
     void refresh_protons()
     {
         protons = proton_versions();
@@ -178,7 +169,6 @@ struct Wizard : Kit {
     {
         return proton_usable(proton_path) ? proton_name(proton_path) : "Not found";
     }
-#endif
 
     void poll_checks()
     {
@@ -360,12 +350,10 @@ struct Wizard : Kit {
                             "in the files you add.");
         ImGui::Dummy(ImVec2(0, px(2)));
         path_line(F.regular, 13, kFaint, have.ready() ? "Installed in " : "Installing to ", base);
-#if defined(__linux__)
         const bool proton = proton_usable(proton_path);
         para(F.regular, 13, proton ? kDim : kWarn,
              proton ? ("Proton: " + proton_label() + (proton_saved ? "" : " (found automatically)")).c_str()
                     : "Proton: not found; Play falls back to Wine.");
-#endif
     }
 
     void game_card(const char* title, const char* id_line, const char* need, const Source& src, bool installed,
@@ -523,7 +511,6 @@ struct Wizard : Kit {
             para(F.regular, 13, kFaint, "Installed mods are taken out with Remove, in the launcher's Mods page.");
     }
 
-#if defined(__linux__)
     void page_proton()
     {
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -587,7 +574,6 @@ struct Wizard : Kit {
         ImGui::Dummy(ImVec2(0, px(8)));
         if (button("Rescan Proton Versions", 0)) refresh_protons();
     }
-#endif
 
     void page_keys()
     {
@@ -736,9 +722,7 @@ struct Wizard : Kit {
                 ImGui::Unindent(px(22));
             }
         }
-#if defined(__linux__)
         row(proton_usable(proton_path), "Proton", proton_label().c_str());
-#endif
         card_end();
         para(F.regular, 14, alpha(kText, 0.82f),
              "From now on the game opens on its launcher: Play, and the mods, the DLC and the settings.");
@@ -767,19 +751,11 @@ struct Wizard : Kit {
 
     Page after_mods() const
     {
-#if defined(__linux__)
         return Page::Proton;
-#else
-        return need_keys() ? Page::Keys : Page::Confirm;
-#endif
     }
     Page before_keys() const
     {
-#if defined(__linux__)
         return Page::Proton;
-#else
-        return update_required() ? Page::Mods : Page::Dlc;
-#endif
     }
 
     std::string step_note(Page p) const
@@ -810,9 +786,7 @@ struct Wizard : Kit {
                 return t;
             }
             return "Optional";
-#if defined(__linux__)
         case Page::Proton: return proton_label();
-#endif
         case Page::Keys: return keys_ok() ? "Checked" : "Needed for the executable";
         case Page::Confirm:
             if (page == Page::Installing) {
@@ -832,9 +806,7 @@ struct Wizard : Kit {
         };
         std::vector<Step> list = { { "Welcome", Page::Welcome }, { "Game Files", Page::GameFiles }, { "DLC", Page::Dlc } };
         if (update_required()) list.push_back({ "Mods", Page::Mods });   /* mods are for the 1.01 build */
-#if defined(__linux__)
         list.push_back({ "Proton", Page::Proton });
-#endif
         if (need_keys() || page == Page::Keys) list.push_back({ "Keys", Page::Keys });
         list.push_back({ "Install", Page::Confirm });
         const Page shown = locked() ? Page::Confirm : page;
@@ -986,14 +958,12 @@ struct Wizard : Kit {
             case 1: go(after_mods()); break;
             }
             break;
-#if defined(__linux__)
         case Page::Proton:
             switch (nav(y, right, { { .label = "Back", .back = true }, { .label = "Next", .primary = true } })) {
             case 0: go(update_required() ? Page::Mods : Page::Dlc); break;
             case 1: go(need_keys() ? Page::Keys : Page::Confirm); break;
             }
             break;
-#endif
         case Page::Keys:
             switch (nav(y, right, { { .label = "Back", .back = true }, { .label = "Next", .primary = true, .enabled = keys_ok() } })) {
             case 0: go(before_keys()); break;
@@ -1056,9 +1026,7 @@ struct Wizard : Kit {
             return { "Game Files", update_required() ? "The game and its 1.01 update." : "The game disc." };
         case Page::Dlc: return { "DLC", "Optional: the packs you own. More can be added later, from the launcher." };
         case Page::Mods: return { "Mods", "Optional: fan-made additions, installed beside your own game files." };
-#if defined(__linux__)
         case Page::Proton: return { "Proton", "The build that starts the Windows game on Linux." };
-#endif
         case Page::Keys: return { "Keys", "The keys that open the game's executable, EBOOT.BIN." };
         case Page::Confirm:
             return { "Install", anything() || make_elf_needed() ? "Ready to install." : "Nothing new to install." };
@@ -1107,9 +1075,7 @@ struct Wizard : Kit {
         case Page::GameFiles: page_game_files(); break;
         case Page::Dlc: page_dlc(); break;
         case Page::Mods: page_mods(); break;
-#if defined(__linux__)
         case Page::Proton: page_proton(); break;
-#endif
         case Page::Keys: page_keys(); break;
         case Page::Confirm: page_confirm(); break;
         case Page::Installing: page_installing(); break;
@@ -1136,9 +1102,7 @@ int run_installer(const fs::path& base)
     look::load_fonts(w.F);
     w.base = base;
     w.art = look::load_art(base);
-#if defined(__linux__)
     w.refresh_protons();
-#endif
     if (const char* a = getenv("DOD3_SETUP_AUTO")) w.tests.auto_left = atoi(a);
     if (const char* g = getenv("DOD3_SETUP_GRAB")) w.tests.grab = g;
     if (const char* g = getenv("DOD3_SETUP_GRAB_AT")) w.tests.grab_at = std::max(21, atoi(g));   /* the request goes 20 frames before */

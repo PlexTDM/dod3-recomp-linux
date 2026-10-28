@@ -21,11 +21,7 @@ struct File {
 
     bool seek(uint64_t o)
     {
-#ifdef _WIN32
-        return _fseeki64(f, (long long)o, SEEK_SET) == 0;
-#else
         return fseeko(f, (off_t)o, SEEK_SET) == 0;
-#endif
     }
     bool read(void* p, size_t n) { return fread(p, 1, n, f) == n; }
 };

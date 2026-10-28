@@ -41,8 +41,8 @@
  *
  * The values are dod3.ini keys (build_rows lists them, and the launcher shows
  * the same list); Apply writes the open page's to dod3.ini and applies the
- * live rows at once -- the display rows too, on Direct3D 12, Vulkan and
- * Metal (LIVE_DISPLAY). The others wait for the next start, and a row whose
+ * live rows at once -- the display rows too, on Vulkan (LIVE_DISPLAY). The
+ * others wait for the next start, and a row whose
  * saved value differs from the running one says so.
  *
  * With the Spanish fan translation's menus installed and on, the pages speak
@@ -81,9 +81,6 @@ bool dod3_menus_spanish();                                        /* src/kernel/
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
-#if defined(_WIN32) || defined(__APPLE__)
-extern "C" int g_rsx_aniso;         /* the live anisotropy level: rsx_d3d12_engine.c, rsx_metal_backend.m */
-#endif
 extern "C" int g_rsx_aa;            /* rsx_draw_engine.c: 1 = FXAA at present */
 
 namespace {
@@ -374,22 +371,12 @@ void read_current(Row& r, int& idx)
 }
 
 /* The renderer applies RSX_DISPLAY / RSX_VSYNC / RSX_SCALE changes at its
- * next window pump (g_rsx_display_reload); the Direct3D 12, Vulkan and
- * Metal engines do. The Linux Vulkan backend applies display mode and
- * V-Sync live, but its internal-resolution targets are built at start. */
-#if defined(_WIN32) || defined(__APPLE__)
-#define LIVE_DISPLAY true
-#define LIVE_SCALE  true
-#define LIVE_AA     true
-#elif defined(__linux__)
+ * next window pump (g_rsx_display_reload). The Vulkan backend applies display
+ * mode and V-Sync live, but its internal-resolution targets are built at
+ * start. */
 #define LIVE_DISPLAY true
 #define LIVE_SCALE  false
 #define LIVE_AA     false
-#else
-#define LIVE_DISPLAY false
-#define LIVE_SCALE  false
-#define LIVE_AA     false
-#endif
 
 /* Every page's rows, in order: what each is, not what it is set to. The
  * launcher (src/ui/launcher.cpp) shows the same list. */
@@ -534,10 +521,10 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
     rows.push_back({ "RSX_BACKEND",
                      "Renderer",
                      "The graphics API the game is drawn with.",
-#ifdef _WIN32
-                     { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
+#if defined(DOD3_RSX_VULKAN)
+                     { { NULL, "Vulkan" } },
 #else
-                     { { NULL, "Metal" } },
+                     { { NULL, "Null (software)" } },
 #endif
                      0,
                      false,
@@ -625,9 +612,6 @@ void apply()
             else
                 dod3_unsetenv(r.key);
             r.running = r.pending;
-#if defined(_WIN32) || defined(__APPLE__)
-            if (!strcmp(r.key, "RSX_ANISO")) g_rsx_aniso = v ? atoi(v) : 16;
-#endif
             if (!strcmp(r.key, "RSX_AA")) {
                 g_rsx_aa = !v                    ? 0
                            : !strcmp(v, "fxaa")  ? 1

@@ -193,9 +193,9 @@ int install_files_cli(const fs::path& base, const std::vector<fs::path>& files, 
 /* The title's game-data install, laid out under the game tree's root
  * (game/disc): on first boot the title copies COOKEDSOUND and COOKEDPS3 (5.1
  * GB) to /dev_hdd0/game/BLES00000DATA one step per frame, about 8 minutes,
- * and a copy cut short breaks it for good. The two folders are links onto the
- * disc's instead (junctions on Windows, relative symlinks elsewhere); links
- * that point nowhere (a moved folder) are made again, and a copy cut short is
+ * and a copy cut short breaks it for good. The two folders are relative
+ * symlinks onto the disc's instead; links that point nowhere (a moved folder)
+ * are made again, and a copy cut short is
  * replaced. Run by the installer and at every boot (main.cpp). Where no link
  * can be made, no tree is left and the title copies the data itself. */
 bool gamedata_layout(const fs::path& game_root);

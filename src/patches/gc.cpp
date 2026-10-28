@@ -22,9 +22,6 @@
 #include <stddef.h>
 #include <vector>
 #include <algorithm>
-#ifdef _WIN32
-extern "C" void win_prof_slow_frame_async(uint64_t start_us, uint64_t end_us, double frame_ms);
-#endif
 
 extern "C" uint32_t g_rsx_engine_frame;   /* rsx_draw_engine.c: the present count */
 
@@ -262,12 +259,6 @@ void DOD3_FN_COLLECT_GARBAGE(ppu_context* ctx)
                 "from %08X\n",
                 ++n, ms, s_reach_ms, s_reach_calls, nobj, nobj ? s_reach_ms * 1e6 / nobj : 0.0, g_rsx_engine_frame,
                 caller);
-#ifdef _WIN32
-        /* DOD3_GC_LOG=2 with DOD3_PROF / DOD3_PROF_TREE: the sampled stacks
-         * of the collection, as [slow-frame] lines. */
-        if (gc_log() >= 2) win_prof_slow_frame_async(u0, dod3_now_us(), ms);
-#else
         (void)u0;
-#endif
     }
 }

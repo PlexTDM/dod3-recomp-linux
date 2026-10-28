@@ -7,11 +7,7 @@
 #pragma once
 #include <stdint.h>
 #if defined(_M_X64) || defined(__x86_64__)
-#if defined(_MSC_VER)
-#include <intrin.h>
-#else
 #include <x86intrin.h>
-#endif
 static inline uint64_t dod3_cycles(void) { return __rdtsc(); }
 #else
 #include <chrono>

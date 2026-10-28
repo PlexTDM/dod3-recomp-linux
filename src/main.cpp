@@ -8,7 +8,7 @@
  * ppu_sysprx_register, ppu_fs_register, lv2_init_syscalls, ppu_run) is the
  * toolkit's; what is here is the port's own part:
  *   - the frame clock: vblanks, flips and FIFO drains, presented through
- *     D3D12 (Windows), Metal (macOS) or the null backend;
+ *     Vulkan or the null backend;
  *   - the frame-rate lock (DOD3_FPS) and what happens out of focus
  *     (DOD3_UNFOCUSED);
  *   - the title-specific runtime defaults, in main();
@@ -50,42 +50,19 @@
 #include "install/crypto.h"
 #include "install/install.h"           /* the release layout (the installer) */
 #include "ui/ini.h"                    /* dod3.ini */
-#if defined(__linux__)
 #include "ui/setup_shared.h"           /* kPlay / kQuit for the launcher loop */
 #include "ui/ui.h"                     /* run_installer, run_launcher_loop */
-#endif
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
- * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
- * passthrough to <windows.h>; off Windows the toolkit's shim supplies the same
- * names over pthreads and mmap, so the call sites below are written once. */
+ * VirtualAlloc, the scalar typedefs -- come from one place: the toolkit's shim
+ * supplies them over pthreads and mmap, so the call sites below are written
+ * once. */
 #include "win32_compat.h"
 
-#ifdef _WIN32
-#include <intrin.h>
-#include <immintrin.h>
-#include <io.h>
-#include <fcntl.h>
-#include <shellapi.h>                    /* CommandLineToArgvW */
-#include <tlhelp32.h>
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "winmm.lib")
-#else
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
-#ifdef __APPLE__
-#include <mach/mach.h>
-#include <spawn.h>
-extern char** environ;
-extern "C" {   /* src/os/macos/setup_mac.mm */
-const char* dod3_mac_data_dir(void);
-void dod3_mac_log_to_file(void);
-int dod3_setup_mac(const char* base_dir, int force);
-}
-#endif
 
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
 void dod3_hud_aspect_install();     /* src/patches/hud_aspect.cpp */
@@ -93,21 +70,6 @@ void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's f
 void dod3_mods_prepare();           /* src/kernel/mods.cpp: the mods' files, the DLC chapters' voices */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
 
-#ifdef _WIN32
-/* timeBeginPeriod: <windows.h> arrives with WIN32_LEAN_AND_MEAN set, which
- * excludes the multimedia timer API, so it is asked for by name -- and after
- * windows.h, since timeapi.h uses UINT. No shim exists off Windows because
- * there is nothing to shim: the 15.6 ms default timer granularity this works
- * around is a Windows problem. */
-#include <timeapi.h>
-#include <direct.h>
-/* main() makes its folders with POSIX mkdir; the CRT has it as _mkdir. */
-#define mkdir(path, mode) _mkdir(path)
-/* src/os/win32/prof.cpp: DOD3_PROF sampling profiler and DOD3_STALL_MS stack dumps. */
-extern "C" void win_prof_start(void);
-extern "C" void win_prof_slow_frame(uint64_t start_us, uint64_t end_us, double frame_ms);
-extern "C" void win_prof_slow_frame_async(uint64_t start_us, uint64_t end_us, double frame_ms);
-#endif
 
 /* ---------------------------------------------------------------------------
  * What the scaffold gives this file
@@ -155,27 +117,11 @@ unsigned cellGcm_flip_request_count(void);
 /* ---------------------------------------------------------------------------
  * RSX present backend
  * -----------------------------------------------------------------------*/
-/* D3D12 on Windows, Metal on Apple, and the null backend's headless software
- * path anywhere else -- the same selection runtime/host/host_posix.c and the
- * toolkit's boot harness make. All three expose the same three entry points,
- * so the frame clock below is backend-agnostic. */
-#if defined(_WIN32)
-extern "C" int rsx_d3d12_backend_init(uint32_t w, uint32_t h, const char* title);
-extern "C" void rsx_d3d12_backend_present(void);
-extern "C" int rsx_d3d12_backend_pump_messages(void);
-#define rsx_backend_init    rsx_d3d12_backend_init
-#define rsx_backend_present rsx_d3d12_backend_present
-#define rsx_backend_pump    rsx_d3d12_backend_pump_messages
-#define RSX_BACKEND_NAME    "D3D12"
-#elif defined(__APPLE__)
-extern "C" int rsx_metal_backend_init(uint32_t w, uint32_t h, const char* title);
-extern "C" void rsx_metal_backend_present(void);
-extern "C" int rsx_metal_backend_pump_messages(void);
-#define rsx_backend_init    rsx_metal_backend_init
-#define rsx_backend_present rsx_metal_backend_present
-#define rsx_backend_pump    rsx_metal_backend_pump_messages
-#define RSX_BACKEND_NAME    "Metal"
-#elif defined(DOD3_RSX_VULKAN)
+/* Vulkan when built in, otherwise the null backend's headless software path --
+ * the same selection runtime/host/host_posix.c and the toolkit's boot harness
+ * make. Both expose the same three entry points, so the frame clock below is
+ * backend-agnostic. */
+#if defined(DOD3_RSX_VULKAN)
 extern "C" int rsx_vulkan_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" void rsx_vulkan_backend_present(void);
 extern "C" int rsx_vulkan_backend_pump_messages(void);
@@ -247,21 +193,9 @@ static std::mutex s_kick_mu;
 static std::condition_variable s_kick_cv;
 static std::atomic<bool> s_kicked{ false };
 extern "C" int (*g_lv2_usleep_hook)(uint32_t lr, uint64_t usec);
-#ifdef _WIN32
-/* Windows: the walker's wait between drains is an event and a
- * high-resolution timer. std::condition_variable::wait_for rounds a timeout
- * up to whole milliseconds there (SleepConditionVariableSRW), so the 0.5 ms
- * to the next vblank tick of an uncapped run took 1-2 ms. g_dod3_kick_hr = 0
- * (DOD3_AB=kickhr) waits on the condition variable as before. */
-static HANDLE s_kick_event, s_kick_timer;
-static int g_dod3_kick_hr = 1;
-#endif
 static void fifo_kick(void)
 {
     if (!s_kicked.exchange(true, std::memory_order_acq_rel)) {
-#ifdef _WIN32
-        if (s_kick_event) SetEvent(s_kick_event);
-#endif
         std::lock_guard<std::mutex> lk(s_kick_mu);
         s_kick_cv.notify_one();
     }
@@ -272,8 +206,8 @@ static void fifo_kick(void)
  * the walker writes a label (g_gcm_label_write_hook) or a drain pass
  * completes, never longer than it asked: the label it waits for lands in the
  * middle of a long drain pass, and a usleep that runs its course costs the
- * scheduler's millisecond or two on Windows, not 200 us -- several ms of
- * every frame on the busiest thread, with the game thread waiting behind it
+ * scheduler's millisecond or two, not 200 us -- several ms of every frame on
+ * the busiest thread, with the game thread waiting behind it
  * (Unreal's end-of-frame sync). DOD3_FAST_POLL_LR=<hex guest return
  * address>, 0 for none; DOD3_AB=labelwake switches the label wake in a run. */
 extern "C" void (*g_gcm_label_write_hook)(void);
@@ -307,11 +241,7 @@ static void trace(uint32_t type, uint32_t a, uint32_t b)
 {
     if (!s_trace) return;
     TraceEv& e = s_trace[s_trace_i.fetch_add(1) & (TRACE_N - 1)];
-#ifdef _WIN32
-    e.tid = (uint32_t)GetCurrentThreadId();
-#else
     e.tid = 0;
-#endif
     e.t = dod3_now_us();
     e.type = type;
     e.a = a;
@@ -398,14 +328,7 @@ static void hitch_to_profiler(double ms)
 {
     trace_dump(ms);
     if (!getenv("DOD3_PROF")) return;
-#ifdef _WIN32
-    /* Handed to the profiler thread: symbolising here, on the walker, could
-     * deadlock against the profiler's thread suspension. */
-    const uint64_t now = dod3_now_us();
-    win_prof_slow_frame_async(now - (uint64_t)(ms * 1000.0), now, ms);
-#else
     (void)ms;
-#endif
 }
 
 /* DOD3_FPS=<n> locks the frame rate at n (30, 60, 120, 240, or any other);
@@ -570,10 +493,6 @@ extern "C" volatile int g_audio_hold;                 /* cellAudio.c: 1 mute, 2 
 extern "C" void ps3_guest_clock_pause(int paused);   /* sys_timer.c */
 extern "C" uint64_t ppu_timebase_now(void);           /* sys_timer.c: mftb */
 
-#ifdef __APPLE__
-extern "C" int rsx_metal_backend_window_focused(void);   /* the app active and the window key */
-#endif
-static bool s_window_up;   /* the backend opened its window */
 
 /* Is the game's window the one in front? DOD3_FOCUS_FILE=<path> (testing):
  * out of focus while that file exists. */
@@ -585,15 +504,7 @@ static bool window_focused(void)
         if (f) fclose(f);
         return !f;
     }
-#ifdef _WIN32
-    DWORD pid = 0;
-    if (HWND w = GetForegroundWindow()) GetWindowThreadProcessId(w, &pid);
-    return pid == GetCurrentProcessId();
-#elif defined(__APPLE__)
-    return !s_window_up || rsx_metal_backend_window_focused();   /* no window: nothing to leave */
-#else
     return true;
-#endif
 }
 
 /* The frame clock asks every pass; the window is looked at 20 times a
@@ -660,11 +571,7 @@ static void pgo_write(void) {}
     fflush(stdout);
     fflush(stderr);
     pgo_write();
-#ifdef _WIN32
-    TerminateProcess(GetCurrentProcess(), 0);
-#else
     _exit(0);
-#endif
 }
 
 /* The engine checks the script packages (and the startup packages and INIs)
@@ -859,116 +766,7 @@ static void fps_install_override(void)
                            : "no cap");
 }
 
-#ifdef __APPLE__
-extern "C" uint32_t g_rsx_engine_frame;
-/* DOD3_STALL_SAMPLE=<dir>: a watchdog for hitches. When no frame has been
- * presented for 300 ms it runs `sample` on this process for a second, so
- * the stacks of every thread are taken while the stall is happening, and it
- * logs how long each stall lasted. At most 12 samples a run, 2 s apart. */
-static void* stall_watch(void* arg)
-{
-    const char* dir = (const char*)arg;
-    /* DOD3_STALL_MS / DOD3_STALL_MAX: the threshold (default 300) and how many
-     * samples a run may take (default 12). */
-    const uint64_t thr_us = (getenv("DOD3_STALL_MS") ? (uint64_t)atoi(getenv("DOD3_STALL_MS")) : 300u) * 1000u;
-    const int max_n = getenv("DOD3_STALL_MAX") ? atoi(getenv("DOD3_STALL_MAX")) : 12;
-    uint32_t last = g_rsx_engine_frame;
-    uint64_t last_t = dod3_now_us(), last_sample = 0, stall_from = 0;
-    int n = 0;
-    for (;;) {
-        usleep(20000);
-        const uint32_t f = g_rsx_engine_frame;
-        const uint64_t t = dod3_now_us();
-        if (f != last) {
-            if (stall_from) fprintf(stderr, "[stall] frame %u came after %.0f ms\n", f, (t - last_t) / 1000.0);
-            last = f;
-            last_t = t;
-            stall_from = 0;
-            continue;
-        }
-        if (!f || t - last_t < thr_us) continue;
-        if (!stall_from) stall_from = t;
-        if (n < max_n && t - last_sample > 2000000 && stall_from == t) {
-            char path[512], pid[16];
-            snprintf(path, sizeof path, "%s/stall_%02d_f%u.txt", dir, n, f);
-            snprintf(pid, sizeof pid, "%d", (int)getpid());
-            char* const argv[] = { (char*)"/usr/bin/sample", pid, (char*)"1", (char*)"-file", path, NULL };
-            pid_t child;
-            if (posix_spawn(&child, "/usr/bin/sample", NULL, NULL, argv, environ) == 0) {
-                fprintf(stderr, "[stall] no present for %llu ms after frame %u -> %s\n",
-                        (unsigned long long)(thr_us / 1000), f, path);
-                n++;
-                last_sample = t;
-            }
-        }
-    }
-    return NULL;
-}
-#endif
 
-#ifdef __APPLE__
-/* DOD3_STUTTER_MS=<n> also starts this: at every present it reads each host
- * thread's CPU time, and for a frame slower than n ms prints the threads that
- * used the CPU during it ([stutter-cpu]). The guest-side [stutter] report
- * sees syscalls; this sees the host -- which thread actually burned the
- * frame, the RSX walker (this process's main thread) included. */
-static void* cpu_watch(void*)
-{
-    pthread_setname_np("stutter cpu watch");
-    const uint64_t thr_us = (uint64_t)atoi(getenv("DOD3_STUTTER_MS")) * 1000u;
-    struct Snap {
-        std::string name;
-        uint64_t cpu_us;
-    };
-    std::map<uint64_t, Snap> prev;
-    uint32_t last = 0;
-    uint64_t last_t = 0;
-    for (;;) {
-        usleep(1000);
-        const uint32_t f = g_rsx_engine_frame;
-        if (f == last) continue;
-        const uint64_t t = dod3_now_us();
-        std::map<uint64_t, Snap> cur;
-        thread_act_array_t th;
-        mach_msg_type_number_t n = 0;
-        if (task_threads(mach_task_self(), &th, &n) == KERN_SUCCESS) {
-            for (mach_msg_type_number_t i = 0; i < n; i++) {
-                thread_identifier_info_data_t idi;
-                mach_msg_type_number_t c1 = THREAD_IDENTIFIER_INFO_COUNT;
-                thread_extended_info_data_t ext;
-                mach_msg_type_number_t c2 = THREAD_EXTENDED_INFO_COUNT;
-                if (thread_info(th[i], THREAD_IDENTIFIER_INFO, (thread_info_t)&idi, &c1) == KERN_SUCCESS &&
-                    thread_info(th[i], THREAD_EXTENDED_INFO, (thread_info_t)&ext, &c2) == KERN_SUCCESS)
-                    cur[idi.thread_id] = { ext.pth_name[0] ? ext.pth_name : "?",
-                                           (ext.pth_user_time + ext.pth_system_time) / 1000u };
-                mach_port_deallocate(mach_task_self(), th[i]);
-            }
-            vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof(thread_act_t));
-        }
-        if (last && t - last_t >= thr_us) {
-            std::vector<std::pair<uint64_t, std::string>> used;
-            for (auto& [id, sn] : cur) {
-                auto it = prev.find(id);
-                const uint64_t d = sn.cpu_us - (it != prev.end() ? it->second.cpu_us : 0);
-                if (d >= 3000) used.push_back({ d, sn.name });
-            }
-            std::sort(used.rbegin(), used.rend());
-            std::string line;
-            char buf[96];
-            for (size_t i = 0; i < used.size() && i < 10; i++) {
-                snprintf(buf, sizeof buf, "%s%s %.0f", i ? ", " : "", used[i].second.c_str(), used[i].first / 1000.0);
-                line += buf;
-            }
-            fprintf(stderr, "[stutter-cpu] frames %u-%u took %.0f ms; CPU ms by host thread: %s\n", last, f,
-                    (t - last_t) / 1000.0, line.c_str());
-        }
-        prev.swap(cur);
-        last = f;
-        last_t = t;
-    }
-    return NULL;
-}
-#endif
 
 /* DOD3_AB=<switch>[,<seconds>]: an A/B test inside one run. Two runs of the
  * same battle differ by 3 fps for no reason at all (the scene is not
@@ -995,20 +793,16 @@ static void* cpu_watch(void*)
  *            indexes / as now (RSX_ENGINE_SLOW; note the inverted sense)
  *   icallflat  indirect calls into the title's code through a flat table /
  *            through the 4096-entry cache
- *   usleepspin  (Windows) guest sleeps of 0.5-1 ms on a timer with a short
- *            spin at the end / spun for their whole length
  *   pumpsleep  GCM callbacks delivered at guest sleeps too / at HLE calls
  *            only
  *   hleindex HLE calls find their handler through an index / by scanning
  *   texreads only the texture units the fragment program samples are bound
  *            / every unit that is switched on (RSX_BIND_UNREAD)
- *   kickhr   (Windows) the walker's wait between drains on an event and a
- *            high-resolution timer / on the condition variable
  *   none     nothing: the control, which has to report no difference
- * On Windows each report also gives the CPU time per frame of the busiest
- * threads in either state (thread cycle counters, so exact): a switch that
- * changes the frame rate without changing anyone's work per frame changed
- * how long somebody waits. */
+ * Each report also gives the CPU time per frame of the busiest threads in
+ * either state (thread cycle counters, so exact): a switch that changes the
+ * frame rate without changing anyone's work per frame changed how long
+ * somebody waits. */
 extern "C" int g_ppu_vm_slow_stores;
 extern "C" void ppu_vm_slow_any_update(void);
 static void ab_stores(int on)
@@ -1023,10 +817,6 @@ extern "C" int g_rsx_query_nosync;
 static void ab_querysync(int on) { g_rsx_query_nosync = on ? 0 : 1; }
 extern "C" int g_spurs_jc_par;
 static void ab_jcpar(int on) { g_spurs_jc_par = on ? 4 : 0; }
-#ifdef _WIN32   /* the D3D12 engine's buffer pool (rsx_d3d12_engine.c is Windows-only) */
-extern "C" int g_eng_buf_pool;
-static void ab_bufpool(int on) { g_eng_buf_pool = on; }
-#endif
 extern "C" int g_eng_tex_watch;
 static void ab_texwatch(int on) { g_eng_tex_watch = on; }
 extern "C" int g_dod3_spu_patch_hook;   /* src/patches/spu_hooks.c */
@@ -1037,16 +827,6 @@ extern "C" int g_dod3_lzf_memo;
 static void ab_lzfmemo(int on) { g_dod3_lzf_memo = on; }
 extern "C" int g_eng_vc_watch;   /* rsx_draw_engine.c */
 static void ab_vcwatch(int on) { g_eng_vc_watch = on; }
-#ifdef _WIN32
-extern "C" int g_rsx_snap_incr;   /* rsx_d3d12_engine.c: own-target snapshots by copy draws */
-static void ab_snapincr(int on) { g_rsx_snap_incr = on; }
-extern "C" int g_rsx_ms_twin;     /* rsx_d3d12_engine.c: MSAA twins read by snapshots, drawn by passes without depth */
-static void ab_mstwin(int on) { g_rsx_ms_twin = on; }
-#endif
-#if defined(_WIN32) || defined(__APPLE__)
-extern "C" int g_eng_aniso_on;    /* rsx_d3d12_engine.c, rsx_metal_backend.m: RSX_ANISO on game textures */
-static void ab_aniso(int on) { g_eng_aniso_on = on; }
-#endif
 extern "C" uint32_t g_rsx_engine_hitches;   /* rsx_draw_engine.c: presents over 25 ms apart */
 extern "C" int g_dod3_collision_native;     /* src/cpu/hot.cpp: the collision test native (1) or lifted (0) */
 static void ab_collnative(int on) { g_dod3_collision_native = on; }
@@ -1062,13 +842,6 @@ extern "C" int g_ppu_hle_index;             /* ppu_hle.cpp */
 static void ab_hleindex(int on) { g_ppu_hle_index = on; }
 extern "C" int g_rsx_bind_unread;           /* rsx_draw_engine.c */
 static void ab_texreads(int on) { g_rsx_bind_unread = on ? 0 : 1; }
-#ifdef _WIN32
-static void ab_kickhr(int on) { g_dod3_kick_hr = on; }
-#endif
-#ifdef _WIN32
-extern "C" int g_usleep_spin_below;         /* sys_timer.c */
-static void ab_usleepspin(int on) { g_usleep_spin_below = on ? 500 : 1000; }
-#endif
 static void ab_none(int) {}
 static const struct {
     const char* name;
@@ -1076,195 +849,16 @@ static const struct {
 } s_ab_switches[] = {
     { "stores", ab_stores },       { "icall", ab_icall },     { "labelwake", ab_labelwake },
     { "querysync", ab_querysync }, { "jcpar", ab_jcpar },
-#ifdef _WIN32
-    { "bufpool", ab_bufpool },
-#endif
     { "kickbusy", ab_kickbusy },   { "msdsp", ab_msdsp },     { "texwatch", ab_texwatch },
     { "patchhook", ab_patchhook }, { "lzfmemo", ab_lzfmemo }, { "vcwatch", ab_vcwatch },
     { "collnative", ab_collnative }, { "fifofast", ab_fifofast }, { "engslow", ab_engslow },
     { "icallflat", ab_icallflat }, { "pumpsleep", ab_pumpsleep }, { "hleindex", ab_hleindex },
     { "texreads", ab_texreads },
-#ifdef _WIN32
-    { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin }, { "usleepspin", ab_usleepspin },
-    { "kickhr", ab_kickhr },
-#endif
-#if defined(_WIN32) || defined(__APPLE__)
-    { "aniso", ab_aniso },
-#endif
     { "none", ab_none },
 };
-#ifdef _WIN32
-struct AbThread {
-    HANDLE h = NULL;
-    uint64_t last = 0;
-    bool seen = false;
-    double cyc[2] = { 0, 0 };
-    std::string name;
-};
-static std::map<DWORD, AbThread> s_ab_threads;
-static double s_ab_frames[2];
-/* Charge each thread's cycles since the last call to `state`. */
-static void ab_cpu_sample(int state, unsigned frames, bool count)
-{
-    /* The snapshot lists every thread in the system and takes tens of
-     * milliseconds -- on the thread that walks the RSX FIFO, so each one is a
-     * long frame. Take it on every 16th window; in between, the handles. */
-    static unsigned calls = 0;
-    if (calls++ % 16 == 0) {
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (snap != INVALID_HANDLE_VALUE) {
-            const DWORD pid = GetCurrentProcessId();
-            THREADENTRY32 te;
-            te.dwSize = sizeof te;
-            for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
-                if (te.th32OwnerProcessID != pid) continue;
-                AbThread& t = s_ab_threads[te.th32ThreadID];
-                if (!t.h) t.h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, te.th32ThreadID);
-            }
-            CloseHandle(snap);
-        }
-    }
-    for (auto& kv : s_ab_threads) {
-        AbThread& t = kv.second;
-        ULONG64 c = 0;
-        if (!t.h || !QueryThreadCycleTime(t.h, &c)) continue;
-        if (t.seen && count) t.cyc[state] += (double)(c - t.last);
-        t.last = c;
-        t.seen = true;
-        if (t.name.empty() || t.name.compare(0, 4, "tid ") == 0) {
-            PWSTR w = NULL;
-            t.name.clear();
-            if (SUCCEEDED(GetThreadDescription(t.h, &w)) && w) {
-                for (PWSTR q = w; *q; q++) t.name += (char)(*q < 128 ? *q : '?');
-                LocalFree(w);
-            }
-            if (t.name.empty()) t.name = "tid " + std::to_string(kv.first);
-        }
-    }
-    if (count) s_ab_frames[state] += frames;
-}
-static void ab_cpu_report(const char* name)
-{
-    static uint64_t tsc0 = 0;
-    static LARGE_INTEGER q0, qf;
-    if (!tsc0) {
-        tsc0 = __rdtsc();
-        QueryPerformanceCounter(&q0);
-        QueryPerformanceFrequency(&qf);
-        return;
-    }
-    LARGE_INTEGER q;
-    QueryPerformanceCounter(&q);
-    const double hz = (double)(__rdtsc() - tsc0) * (double)qf.QuadPart / (double)(q.QuadPart - q0.QuadPart);
-    if (s_ab_frames[0] < 1 || s_ab_frames[1] < 1 || hz < 1e8) return;
-    std::vector<const AbThread*> v;
-    for (auto& kv : s_ab_threads) v.push_back(&kv.second);
-    std::sort(v.begin(), v.end(),
-              [](const AbThread* a, const AbThread* b) { return a->cyc[0] + a->cyc[1] > b->cyc[0] + b->cyc[1]; });
-    std::string line;
-    char buf[160];
-    for (size_t i = 0; i < v.size() && i < 7; i++) {
-        snprintf(buf, sizeof buf, "%s%s %.2f / %.2f", i ? "; " : "", v[i]->name.c_str(),
-                 v[i]->cyc[1] / hz * 1e3 / s_ab_frames[1], v[i]->cyc[0] / hz * 1e3 / s_ab_frames[0]);
-        line += buf;
-    }
-    fprintf(stderr, "[ab] %s: CPU ms per frame, on / off: %s\n", name, line.c_str());
-}
-/* DOD3_FRAME_CPU=<ms>: at every present, each thread's CPU time since the
- * present before; a frame longer than <ms> prints the threads that used the
- * most of it. "Who burned this 40 ms frame" -- or nobody, which is a wait.
- * Thread cycle counters, read on the thread that presents; the thread list
- * is refreshed every DOD3_FRAME_CPU_REFRESH presents (600; the snapshot is
- * slow). */
-static void frame_cpu_tick(void)
-{
-    static long thr = -1;
-    if (thr < 0) {
-        const char* e = getenv("DOD3_FRAME_CPU");
-        thr = e ? atol(e) : 0;
-    }
-    if (thr <= 0) return;
-    static std::map<DWORD, AbThread> th;
-    static uint64_t last_us = 0, tsc0 = 0;
-    static LARGE_INTEGER q0, qf;
-    static unsigned calls = 0;
-    const uint64_t now = dod3_now_us();
-    if (!tsc0) {
-        tsc0 = __rdtsc();
-        QueryPerformanceCounter(&q0);
-        QueryPerformanceFrequency(&qf);
-    }
-    /* The snapshot is itself a 20-30 ms stall of this (the presenting)
-     * thread, so it is rare, and the frame it lands in says so. */
-    /* DOD3_FRAME_CPU_REFRESH=<n>: refresh every n presents (default 600);
-     * a large n keeps the refresh's own stall out of a long run. */
-    static unsigned every = 0;
-    if (!every) {
-        const char* e = getenv("DOD3_FRAME_CPU_REFRESH");
-        every = e && atoi(e) > 0 ? (unsigned)atoi(e) : 600u;
-    }
-    const bool refreshed = (calls++ % every) == 0;
-    if (refreshed) {
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (snap != INVALID_HANDLE_VALUE) {
-            const DWORD pid = GetCurrentProcessId();
-            THREADENTRY32 te;
-            te.dwSize = sizeof te;
-            for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
-                if (te.th32OwnerProcessID != pid) continue;
-                AbThread& t = th[te.th32ThreadID];
-                if (!t.h) t.h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, te.th32ThreadID);
-            }
-            CloseHandle(snap);
-        }
-    }
-    const double frame_ms = last_us ? (double)(now - last_us) / 1000.0 : 0.0;
-    const bool slow = last_us && frame_ms > (double)thr;
-    std::vector<std::pair<double, std::string>> used;
-    for (auto& kv : th) {
-        AbThread& t = kv.second;
-        ULONG64 c = 0;
-        if (!t.h || !QueryThreadCycleTime(t.h, &c)) continue;
-        const double d = t.seen ? (double)(c - t.last) : 0.0;
-        t.last = c;
-        t.seen = true;
-        if (!slow || d <= 0) continue;
-        if (t.name.empty() || t.name.compare(0, 4, "tid ") == 0) {
-            PWSTR w = NULL;
-            t.name.clear();
-            if (SUCCEEDED(GetThreadDescription(t.h, &w)) && w) {
-                for (PWSTR q = w; *q; q++) t.name += (char)(*q < 128 ? *q : '?');
-                LocalFree(w);
-            }
-            if (t.name.empty()) t.name = "tid " + std::to_string(kv.first);
-        }
-        used.push_back({ d, t.name });
-    }
-    if (slow) {
-        LARGE_INTEGER q;
-        QueryPerformanceCounter(&q);
-        const double hz = (double)(__rdtsc() - tsc0) * (double)qf.QuadPart / (double)(q.QuadPart - q0.QuadPart);
-        std::sort(used.rbegin(), used.rend());
-        std::string line;
-        char buf[128];
-        double total = 0;
-        for (size_t i = 0; i < used.size(); i++) total += used[i].first;
-        for (size_t i = 0; i < used.size() && i < 8; i++) {
-            snprintf(buf, sizeof buf, "%s%s %.1f", i ? ", " : "", used[i].second.c_str(), used[i].first / hz * 1e3);
-            line += buf;
-        }
-        fprintf(stderr, "[frame-cpu] frame %lu took %.1f ms%s; CPU ms: %s; all threads %.1f\n",
-                (unsigned long)g_frames_presented, frame_ms, refreshed ? " (thread list refreshed in it)" : "",
-                line.c_str(), total / hz * 1e3);
-        if (!refreshed) win_prof_slow_frame_async(last_us, now, frame_ms);
-    }
-    last_us = now;
-}
-#else
 static void ab_cpu_sample(int, unsigned, bool) {}
 static void ab_cpu_report(const char*) {}
 static void frame_cpu_tick(void) {}
-#endif
 static void ab_step(uint64_t now_us)
 {
     static int which = -2, state = 0, pairs = 0;
@@ -1331,16 +925,10 @@ static void ab_step(uint64_t now_us)
 
 static DWORD WINAPI frame_clock(LPVOID)
 {
-#ifdef __APPLE__
-    pthread_setname_np("rsx walker (main)");
-#elif defined(_WIN32)
-    SetThreadDescription(GetCurrentThread(), L"rsx walker");   /* names it for the profilers */
-#endif
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "ps3recomp";
 
     int rsx_ok = (rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
-    s_window_up = rsx_ok != 0;
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME, rsx_ok ? "OK -- window open" : "FAILED");
 
     unsigned last_flip = 0;
@@ -1362,11 +950,6 @@ static DWORD WINAPI frame_clock(LPVOID)
     g_lv2_usleep_hook = guest_usleep_hook;
     g_gcm_label_write_hook = label_written;
     g_gcm_fifo_kick_hook = fifo_kick;
-#ifdef _WIN32
-    s_kick_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    s_kick_timer = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */,
-                                          TIMER_ALL_ACCESS);
-#endif
     /* RSX_HITCH_LOG with DOD3_PROF: each logged hitch also prints the
      * profiler's samples of the frame it ends ([slow-frame]). */
     if (getenv("DOD3_TRACE_HITCH")) {
@@ -1392,19 +975,6 @@ static DWORD WINAPI frame_clock(LPVOID)
             uint64_t wait_us = (uint64_t)fifo_sleep_ms * 1000ull;
             if ((long long)(next_tick - t) < (long long)wait_us)
                 wait_us = (long long)(next_tick - t) > 0 ? next_tick - t : 0;
-#ifdef _WIN32
-            if (g_dod3_kick_hr && s_kick_event && s_kick_timer) {
-                if (!s_kicked.load(std::memory_order_acquire) && wait_us) {
-                    LARGE_INTEGER due;
-                    due.QuadPart = -(LONGLONG)(wait_us * 10u);
-                    SetWaitableTimer(s_kick_timer, &due, 0, NULL, NULL, FALSE);
-                    const HANDLE hs[2] = { s_kick_event, s_kick_timer };
-                    WaitForMultipleObjects(2, hs, FALSE, INFINITE);
-                }
-                ResetEvent(s_kick_event);
-                s_kicked.store(false, std::memory_order_release);
-            } else
-#endif
             {
             std::unique_lock<std::mutex> lk(s_kick_mu);
             s_kick_cv.wait_for(lk, std::chrono::microseconds(wait_us),
@@ -1528,43 +1098,7 @@ static void derive_vfs_root(const char* eboot)
 /* ---------------------------------------------------------------------------
  * Guest VM
  * -----------------------------------------------------------------------*/
-#ifdef _WIN32
-/* Demand-paging for the flat VM: reserve the whole 4 GB guest space, which
- * costs no commit, and commit each 64 KB page on first access. Every 32-bit
- * guest offset is then valid, so a garbage guest pointer reads zero instead of
- * killing the process. Faults outside the arena fall through untouched. */
-static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
-{
-    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        ULONG_PTR fault = ep->ExceptionRecord->ExceptionInformation[1];
-        uintptr_t base = (uintptr_t)vm_base;
-        /* A write to a page the texture write-watch protected: it is noted
-         * and the page opened (ps3emu/vm_watch.h). */
-        if (vm_watch_fault(fault, ep->ExceptionRecord->ExceptionInformation[0] == 1))
-            return EXCEPTION_CONTINUE_EXECUTION;
-        if (vm_base && fault >= base && fault < base + VM_SIZE) {
-            /* Only the reserved part of the 64 KB block: re-committing a
-             * page the texture write-watch protected would re-open it. */
-            void* page = (void*)(fault & ~(uintptr_t)0xFFFF);
-            MEMORY_BASIC_INFORMATION mi;
-            if (!VirtualQuery((void*)fault, &mi, sizeof mi)) return EXCEPTION_CONTINUE_SEARCH;
-            if (mi.State == MEM_RESERVE)
-                return vm_commit_reserved(page, 0x10000) ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
-            /* Committed already: another thread got here first (retry), or
-             * a read-only page the watch does not track, opened as before. */
-            if (mi.State == MEM_COMMIT) {
-                if (mi.Protect & PAGE_READWRITE) return EXCEPTION_CONTINUE_EXECUTION;
-                DWORD old;
-                if (VirtualProtect((void*)(fault & ~(uintptr_t)0xFFF), 0x1000, PAGE_READWRITE, &old))
-                    return EXCEPTION_CONTINUE_EXECUTION;
-            }
-        }
-    }
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-#endif
 
-#ifndef _WIN32
 /* The texture write-watch's faults (ps3emu/vm_watch.h): a store to a page it
  * protected is noted, the page opened, and the store re-runs. */
 static LONG WINAPI vm_watch_veh(EXCEPTION_POINTERS* ep)
@@ -1575,16 +1109,9 @@ static LONG WINAPI vm_watch_veh(EXCEPTION_POINTERS* ep)
         return EXCEPTION_CONTINUE_EXECUTION;
     return EXCEPTION_CONTINUE_SEARCH;
 }
-#endif
 
 static bool alloc_guest_vm(void)
 {
-#ifdef _WIN32
-    AddVectoredExceptionHandler(1, vm_commit_veh);
-    vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE, MEM_RESERVE, PAGE_READWRITE);
-    ppu_vm_size = 0;              /* the whole space is backed; no OOB guard needed */
-    if (vm_base) vm_watch_init(vm_base, VM_SIZE);
-#else
     /* The arena is mapped up front and lazily backed by the OS: only pages the
      * title touches cost anything. It stops below the 0xE0000000 mark, so
      * ppu_vm_size arms the loader's bounds check for what is left. An mmap
@@ -1595,11 +1122,10 @@ static bool alloc_guest_vm(void)
     ppu_vm_size = 0xE0000000u;
     if (vm_base) {
         /* A write to a page the watch protected arrives as SIGBUS/SIGSEGV
-         * through win32_compat's vectored-handler shim, as on Windows. */
+         * through win32_compat's vectored-handler shim. */
         AddVectoredExceptionHandler(1, vm_watch_veh);
         vm_watch_init(vm_base, 0xE0000000u);
     }
-#endif
     return vm_base != nullptr;
 }
 
@@ -1612,35 +1138,7 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1, uint64_
     ppu_guest_call(opd, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
-#ifdef __APPLE__
-static uint32_t s_boot_entry;
 
-/* The guest's half of the Apple split in main(): run the entry OPD, then end
- * the process the way the non-Apple path's return from main() would. */
-static void* guest_main(void*)
-{
-    pthread_setname_np("main");
-    int rc = ppu_run(s_boot_entry, STACK_TOP);
-    printf("\n[boot] ppu_run returned %d (entry function unwound)\n", rc);
-    fflush(stdout);
-    exit(g_sys_process_exit_called ? (int)g_sys_process_exit_code : 0);
-}
-#endif
-
-#if defined(DOD3_X86_V3) && defined(_WIN32)
-/* The lifted code is built for x86-64-v3 (CMake DOD3_X86_LEVEL): main says so
- * at start, where the alternative is an illegal-instruction crash somewhere
- * in the title's start-up. */
-__attribute__((target("xsave"))) static bool x86_v3_cpu(void)
-{
-    int r1[4], r7[4];
-    __cpuidex(r1, 1, 0);
-    __cpuidex(r7, 7, 0);
-    const bool os_avx = (r1[2] & (1 << 27)) && ((_xgetbv(0) & 6) == 6);
-    return os_avx && (r1[2] & (1 << 12)) /* FMA */ && (r1[2] & (1 << 22)) /* MOVBE */ &&
-           (r7[1] & (1 << 5)) /* AVX2 */ && (r7[1] & (1 << 3)) && (r7[1] & (1 << 8)) /* BMI1, BMI2 */;
-}
-#endif
 
 /* dod3.ini: the player's settings, as KEY = VALUE lines (# and ; start a
  * comment). Every key is one of the environment switches the runtime already
@@ -1691,91 +1189,6 @@ static void load_settings_file()
     if (applied) fprintf(stderr, "[settings] %d from %s\n", applied, s_settings_path.c_str());
 }
 
-#ifdef _WIN32
-extern "C" int dod3_setup_win(const wchar_t* base_dir, int force);   /* src/os/win32/setup_win.cpp */
-
-/* dod3.exe is linked as a windowed program (CMakeLists.txt, DOD3_CONSOLE), so
- * it has a console only if one is lent to it. Output goes where the parent
- * redirected it (the scripts' logs: unchanged); with no redirection, to the
- * console of a terminal that started it; and from a double-click, to dod3.log
- * beside the executable (the previous run's kept as dod3.prev.log). */
-/* Make `h` the process's standard output and error, as a parent's redirection
- * would: the Win32 handles and the C runtime's descriptors 1 and 2, which the
- * stdout/stderr streams already use. (Not freopen: it moves the streams onto
- * new descriptors and leaves 1 and 2 without a handle.) */
-static void win_stdio_to(HANDLE h)
-{
-    SetStdHandle(STD_OUTPUT_HANDLE, h);
-    SetStdHandle(STD_ERROR_HANDLE, h);
-    /* Started with no standard handles at all (a double-click), the streams
-     * have no descriptor yet: give them one first. */
-    FILE* f;
-    if (_fileno(stdout) < 0) freopen_s(&f, "NUL", "w", stdout);
-    if (_fileno(stderr) < 0) freopen_s(&f, "NUL", "w", stderr);
-    const int fd = _open_osfhandle((intptr_t)h, _O_TEXT | _O_APPEND);
-    if (fd < 0) return;
-    _dup2(fd, 1);
-    _dup2(fd, 2);
-    if (_fileno(stdout) > 2) _dup2(fd, _fileno(stdout));
-    if (_fileno(stderr) > 2) _dup2(fd, _fileno(stderr));
-    if (fd > 2 && fd != _fileno(stdout) && fd != _fileno(stderr)) _close(fd);
-    setvbuf(stderr, NULL, _IONBF, 0);
-}
-
-/* A log on disk or in a pipe is buffered, a megabyte per stream, and flushed
- * by a thread of its own every 200 ms. Unbuffered -- the default for stderr,
- * and what win_stdio_to set -- every line was a WriteFile on the thread that
- * printed it, and the RSX walker sat in one for 173 ms and 385 ms in a play
- * session, dod3.log open under the antivirus's real-time scan. A console
- * keeps its line-by-line output. On a kill, up to 200 ms of lines are lost;
- * the crash handler flushes. */
-static DWORD WINAPI win_stdio_flusher(LPVOID)
-{
-    SetThreadDescription(GetCurrentThread(), L"log flush");
-    for (;;) {
-        Sleep(200);
-        fflush(stderr);
-        fflush(stdout);
-    }
-}
-static void win_stdio_buffer(void)
-{
-    const HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
-    if (!h || h == INVALID_HANDLE_VALUE) return;
-    const DWORD t = GetFileType(h);
-    if (t != FILE_TYPE_DISK && t != FILE_TYPE_PIPE) return;
-    setvbuf(stderr, NULL, _IOFBF, 1u << 20);
-    setvbuf(stdout, NULL, _IOFBF, 1u << 20);
-    HANDLE th = CreateThread(NULL, 0, win_stdio_flusher, NULL, 0, NULL);
-    if (th) CloseHandle(th);
-}
-
-static void win_stdio_init(void)
-{
-    const HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
-    const bool force_log = getenv("DOD3_LOG_FILE") != NULL;   /* the double-click path, from anywhere */
-    if (!force_log && h && h != INVALID_HANDLE_VALUE && GetFileType(h) != FILE_TYPE_UNKNOWN) return;
-    if (!force_log && AttachConsole(ATTACH_PARENT_PROCESS)) {
-        const HANDLE con = CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                       NULL, OPEN_EXISTING, 0, NULL);
-        if (con != INVALID_HANDLE_VALUE) win_stdio_to(con);
-        return;
-    }
-    wchar_t log[MAX_PATH] = L"", prev[MAX_PATH];
-    GetModuleFileNameW(NULL, log, MAX_PATH);
-    wchar_t* sl = wcsrchr(log, L'\\');
-    if (!sl || (size_t)(sl - log) + 16 >= MAX_PATH) return;
-    wcscpy_s(sl + 1, MAX_PATH - (sl + 1 - log), L"dod3.prev.log");
-    wcscpy_s(prev, MAX_PATH, log);
-    wcscpy_s(sl + 1, MAX_PATH - (sl + 1 - log), L"dod3.log");
-    MoveFileExW(log, prev, MOVEFILE_REPLACE_EXISTING);
-    /* Append-only, so the two descriptors never overwrite each other. */
-    const HANDLE f =
-        CreateFileW(log, FILE_APPEND_DATA | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f != INVALID_HANDLE_VALUE) win_stdio_to(f);
-}
-#endif
 
 /* Our stand-in flashMP3.pic (see the PS3_DEV_FLASH default in main()):
  * wanted unless Sony's decoder is asked for; written out only when the copy
@@ -1805,26 +1218,15 @@ static bool dod3_mp3_standin_install(const char* dev_flash)
     return static_cast<bool>(out);
 }
 
-/* File arguments from `from` on, as paths. On Windows from the wide command
- * line: argv is in the ANSI code page, which cannot hold every name
- * ("Kainé's Garb.pkg" is not valid UTF-8 there). */
+/* File arguments from `from` on, as paths. argv is UTF-8 on Linux; converting
+ * through path_from_utf8 keeps wide-character filesystems exact. */
 static std::vector<std::filesystem::path> cli_paths(int argc, char** argv, int from)
 {
     std::vector<std::filesystem::path> out;
-#ifdef _WIN32
-    (void)argv;
-    int n = 0;
-    if (LPWSTR* w = CommandLineToArgvW(GetCommandLineW(), &n)) {
-        for (int i = from; i < n && i < argc; i++) out.emplace_back(w[i]);
-        LocalFree(w);
-    }
-#else
     for (int i = from; i < argc; i++) out.push_back(dod3::path_from_utf8(argv[i]));
-#endif
     return out;
 }
 
-#if defined(__linux__)
 /* The source tree this executable was built from, if it is still beside it:
  * a developer tree has game/ at the top, and the native binary lives in
  * build-native/. */
@@ -1866,24 +1268,9 @@ static std::filesystem::path linux_install_base(const char* argv0)
         if (*h) return std::filesystem::path(h) / ".local/share/Drakengard 3 Recompiled";
     return cwd;
 }
-#endif
 
 int main(int argc, char** argv)
 {
-#ifdef _WIN32
-    win_stdio_init();
-#endif
-#if defined(DOD3_X86_V3) && defined(_WIN32)
-    /* Before anything else, setup included: the lifted code uses these. */
-    if (!x86_v3_cpu()) {
-        static const char msg[] =
-            "This build needs a CPU with AVX2, FMA and BMI2 (x86-64-v3: Intel Haswell "
-            "or AMD Excavator/Zen and newer). Rebuild with -DDOD3_X86_LEVEL= for older processors.";
-        fprintf(stderr, "%s\n", msg);
-        MessageBoxA(NULL, msg, "Drakengard 3 Recompiled", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-#endif
     /* No arguments -- a double-click, a shortcut -- or --setup: the release
      * layout. Everything is relative to the executable's directory (the
      * player's files, dod3.ini, saves, shader cache), the title and disc root
@@ -1911,18 +1298,7 @@ int main(int argc, char** argv)
     /* --install <file>...: the installer without a UI, into the release
      * layout (any mix of the disc, the update and DLC packages). */
     if (argc >= 3 && !strcmp(argv[1], "--install")) {
-#ifdef _WIN32
-        wchar_t dir[MAX_PATH] = L"";
-        GetModuleFileNameW(NULL, dir, MAX_PATH);
-        if (wchar_t* sl = wcsrchr(dir, L'\\')) *sl = 0;
-        const std::filesystem::path base(dir);
-#elif defined(__APPLE__)
-        const char* data = dod3_mac_data_dir();
-        if (!data) return 1;
-        const std::filesystem::path base(data);
-#else
         const std::filesystem::path base = std::filesystem::path(argv[0]).parent_path();
-#endif
         /* --keys <file>: the keys for the executable (install/keys.h) */
         std::vector<std::filesystem::path> files = cli_paths(argc, argv, 2), install_files;
         std::filesystem::path keys;
@@ -1939,31 +1315,6 @@ int main(int argc, char** argv)
     const bool force_setup = argc >= 2 && !strcmp(argv[1], "--setup");
     if (argv[0]) s_exe_path = argv[0];   /* dod3.ini is found beside it, the launcher's before the game's */
     if (argc < 2 || force_setup) {
-#ifdef _WIN32
-        wchar_t dir[MAX_PATH] = L"";
-        GetModuleFileNameW(NULL, dir, MAX_PATH);
-        if (wchar_t* sl = wcsrchr(dir, L'\\')) *sl = 0;
-        /* DOD3_INSTALL_BASE: somewhere else (tests) */
-        if (const wchar_t* tb = _wgetenv(L"DOD3_INSTALL_BASE"))
-            if (*tb) wcsncpy_s(dir, tb, _TRUNCATE);
-        SetCurrentDirectoryW(dir);
-        if (dod3_setup_win(dir, force_setup ? 1 : 0) != 0) return 1;
-#elif defined(__APPLE__)
-        /* Not the app's folder -- a signed .app is read-only, and a
-         * downloaded one may run from a translocated copy -- but
-         * ~/Library/Application Support/Drakengard 3 Recompiled
-         * (src/os/macos/setup_mac.mm). Option held at launch opens the launcher. */
-        const char* data = dod3_mac_data_dir();
-        /* DOD3_INSTALL_BASE: somewhere else (tests) */
-        if (const char* tb = getenv("DOD3_INSTALL_BASE"))
-            if (*tb) data = tb;
-        if (!data || chdir(data) != 0) {
-            fprintf(stderr, "cannot open the data folder %s\n", data ? data : "(Application Support)");
-            return 1;
-        }
-        dod3_mac_log_to_file();
-        if (dod3_setup_mac(data, force_setup ? 1 : 0) != 0) return 1;
-#else
         const std::filesystem::path base = linux_install_base(argv[0]);
         std::error_code ec;
         if (argv[0]) s_exe_path = std::filesystem::absolute(argv[0], ec).string();
@@ -1992,7 +1343,6 @@ int main(int argc, char** argv)
             fprintf(stderr, "cannot enter the install folder %s\n", dod3::utf8(base).c_str());
             return 1;
         }
-#endif
         dod3_setenv("PS3_TITLE", "Drakengard 3", 0);
         dod3_setenv("PS3_VFS_ROOT", "game/disc", 0);
         s_release_argv[0] = argv[0];
@@ -2008,15 +1358,6 @@ int main(int argc, char** argv)
         return 2;
     }
 
-#ifdef _WIN32
-    /* 1 ms timer resolution. The default granularity is about 15.6 ms, which
-     * inflates every shorter wait the title makes and throttles the whole
-     * thing. POSIX timers are already fine-grained. */
-    timeBeginPeriod(1);
-    setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
-    win_stdio_buffer();                 /* ...except into a file or a pipe: buffered, flushed every 200 ms */
-    pgo_writer_start();                 /* nothing unless DOD3_PGO=generate */
-#endif
 
     printf("=== Drakengard 3 Recompiled %s (BLUS31197 %s) ===\n", DOD3_VERSION_STRING, DOD3_EBOOT_NAME);
 
@@ -2099,10 +1440,6 @@ int main(int argc, char** argv)
      * resolution, at any scale. With 640x360 left alone as well (400) a seam
      * runs down the foliage of the open levels, so that one still scales. */
     dod3_setenv("RSX_SCALE_MIN", "200", 0);
-    /* Translated shaders survive between runs (see rsx_metal_backend.m). */
-    dod3_setenv("PS3RECOMP_MSL_CACHE", "cache/msl", 0);
-    /* ...and compiled DXBC on Windows (rsx_d3d12_engine.c). */
-    dod3_setenv("PS3RECOMP_DXBC_CACHE", "cache/dxbc", 0);
     mkdir("cache", 0755);
     /* The sound driver (CDevSd's MultiStream threads and the MultiStream SPU
      * task, image 1 = spu_0000) at user-interactive QoS: at default QoS a
@@ -2125,14 +1462,6 @@ int main(int argc, char** argv)
     uint32_t entry = ppu_load_elf(argv[1]);
     if (!entry) {
         fprintf(stderr, "ERROR: could not load %s\n", argv[1]);
-#ifdef _WIN32
-        char msg[512];
-        snprintf(msg, sizeof msg,
-                 "The game's executable (%s) could not be loaded. Run dod3.exe --setup to "
-                 "set the game up again.",
-                 argv[1]);
-        MessageBoxA(NULL, msg, "Drakengard 3 Recompiled", MB_OK | MB_ICONERROR);
-#endif
         return 1;
     }
 #if DOD3_EBOOT == 101
@@ -2150,22 +1479,6 @@ int main(int argc, char** argv)
     dod3_menu_patch_prepare();
     dod3_dlc_prepare();
     dod3_mods_prepare();
-#ifdef _WIN32
-    /* DOD3_PROF / DOD3_STALL_MS / DOD3_STALL_SAMPLE: src/os/win32/prof.cpp. */
-    win_prof_start();
-#elif defined(__APPLE__)
-    if (const char* d = getenv("DOD3_STALL_SAMPLE")) {
-        mkdir(d, 0755);
-        pthread_t th;
-        if (pthread_create(&th, NULL, stall_watch, (void*)d) == 0) pthread_detach(th);
-    }
-#endif
-#ifdef __APPLE__
-    if (getenv("DOD3_STUTTER_MS")) {
-        pthread_t th;
-        if (pthread_create(&th, NULL, cpu_watch, NULL) == 0) pthread_detach(th);
-    }
-#endif
 
     derive_vfs_root(argv[1]);
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
@@ -2188,28 +1501,6 @@ int main(int argc, char** argv)
 
     printf("\n[boot] dispatching entry OPD 0x%08X (stack top 0x%08X)\n\n", entry, STACK_TOP);
 
-#ifdef __APPLE__
-    /* AppKit only creates windows on the main thread, and the Metal backend's
-     * init dispatch_syncs onto the main queue when called from anywhere else.
-     * With the guest occupying the main thread nothing drains that queue and
-     * the frame clock deadlocks before it ever walks the FIFO -- the guest then
-     * spins on GCM get forever. So on Apple the roles swap: the guest runs on
-     * a thread with the same 256 MB host stack guest PPU threads get, and the
-     * frame clock owns the main thread. A guest exit ends the process from
-     * its own thread. */
-    s_boot_entry = entry;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 256u * 1024 * 1024);
-    pthread_t guest;
-    if (pthread_create(&guest, &attr, guest_main, NULL) != 0) {
-        fprintf(stderr, "ERROR: could not start the guest thread\n");
-        return 1;
-    }
-    pthread_attr_destroy(&attr);
-    frame_clock(NULL);
-    return 0;
-#else
     CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
 
     int rc = ppu_run(entry, STACK_TOP);
@@ -2221,5 +1512,4 @@ int main(int argc, char** argv)
      * one. Returning a hardcoded 0 would report success for a run that never
      * got anywhere. */
     return g_sys_process_exit_called ? (int)g_sys_process_exit_code : 0;
-#endif
 }

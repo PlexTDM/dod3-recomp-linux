@@ -185,9 +185,7 @@ const char* key_name(ImGuiKey k)
     case ImGuiKey_End: return "End";
     case ImGuiKey_PageUp: return "PageUp";
     case ImGuiKey_PageDown: return "PageDown";
-#ifndef __APPLE__
     case ImGuiKey_CapsLock: return "CapsLock";
-#endif
     case ImGuiKey_Minus: return "Minus";
     case ImGuiKey_Equal: return "Equals";
     case ImGuiKey_LeftBracket: return "LBracket";
