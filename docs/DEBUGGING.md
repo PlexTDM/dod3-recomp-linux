@@ -25,34 +25,15 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   cursor a step off its place is a different run.
 - `DOD3_AB=<switch>[,<seconds>]`: an A/B test inside one run. It flips one
   run-time switch every few seconds, counts the frames in each window and
-  reports the paired difference with its standard error, and (Windows) each
-  thread's CPU time per frame in either state. Switches: `stores`, `icall`,
-  `labelwake`, `querysync`, `jcpar`, `bufpool`, `kickbusy`, `msdsp`,
+  reports the paired difference with its standard error. Switches: `stores`,
+  `icall`, `labelwake`, `querysync`, `jcpar`, `bufpool`, `kickbusy`, `msdsp`,
   `texwatch`, `patchhook`, `lzfmemo`, `vcwatch`, `snapincr`, `aniso`,
   `collnative`, `fifofast` (the walker's bulk constant/program uploads),
   `engslow` (the draw engine's old per-draw paths; on means slow),
   `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `hleindex`, `texreads`
-  (only the texture units a fragment program samples bound), `none` (the control,
-  which must report no difference). `DOD3_AB_FROM=<s>` skips the boot and
-  menus (default 70).
-- `tools/replay_regress.sh`: the rendering regression. Replays RSX captures
-  through the engine headlessly and compares the frames with a reference set
-  (`tools/compare_frames.py`). The captures and references are made from the
-  game and are not in the repository: record captures with `RSX_CAPTURE`
-  (`tools/capture_run.bat` + `tools/capture_now.bat` capture 30 frames at a
-  problem the player reaches), and keep a known-good replay as the
-  reference. Each renderer wants its own reference: Metal and Direct3D 12
-  frames differ by a few levels of rounding.
-- `rsx_replay <capture> --bench <n>`: the walker's benchmark. The capture
-  is decompressed into memory and played n times in one process, the first
-  pass warming the caches; each pass prints the engine's CPU per present
-  (wall time, thread CPU, and the replay's own page copies taken out). The
-  same every run, so two builds compare without a game (alternate them a
-  few times; the machine's load still moves it a few percent). In the bench
-  the replay stands in for the game's write-watch, from the capture's page
-  records; `RSX_REPLAY_WATCH=0/1` overrides. `RSX_REPLAY_PROF=1` (Windows)
-  samples the replay thread and prints its hottest functions, self and
-  inclusive; `RSX_REPLAY_PROF_CALLERS=<function>` who calls one.
+  (only the texture units a fragment program samples bound), `none` (the
+  control, which must report no difference). `DOD3_AB_FROM=<s>` skips the
+  boot and menus (default 70).
 
 ## Frames
 
@@ -61,9 +42,6 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   and the installer's test hook use). `PS3RECOMP_FRAME_DUMP=<path>` with
   `_EVERY` and `_SEQ` dumps frames on a schedule; `RSX_DUMP_FULL=1` at the
   internal resolution. `tools/ppm2png.py` converts a frame.
-- `PS3RECOMP_METAL_WINDOW_GRAB=<prefix>` (macOS): the same request file,
-  for what the window shows: the window's size in pixels, the bars, and where
-  the frame sits in it (the Aspect Ratio setting's placement).
 - `RSX_FRAMETIME=0` turns off the `[frametime]` line every 5 s (fps, mean and
   worst frame, frames over 34 ms).
 - `RSX_PRESENT_PACE_LOG=1`: with a frame-rate cap the renderer holds each
@@ -81,37 +59,22 @@ executable when it has no console; the previous run is `dod3.prev.log`.
   of the light shafts and the bloom, which show their taps when scaled).
 - `RSX_HITCH_LOG=<ms>` lists frames over that, with the walker's GPU-blocked
   time and what it uploaded in the frame (textures: creating, decoding and
-  staging them; vertex buffers; pipelines); with `DOD3_PROF` also the
-  sampled stacks of the frame;
-  `DOD3_TRACE_HITCH=1` adds the events of the frame before it (guest sleeps,
-  drains, label writes, flips, ring recycles) as `[trace]` lines.
-- `DOD3_FRAME_CPU=<ms>` (Windows): for each frame longer than that, the
-  threads that used the CPU during it, from thread cycle counters.
+  staging them; vertex buffers; pipelines); `DOD3_TRACE_HITCH=1` adds the
+  events of the frame before it (guest sleeps, drains, label writes, flips,
+  ring recycles) as `[trace]` lines.
 - `DOD3_STUTTER_MS=<n>`: per slow frame, `[stutter-rsx]` (textures, vertex
-  conversions, pipelines built), `[stutter]` (guest threads) and, on macOS,
-  `[stutter-cpu]`.
-- `RSX_GPU_TIME=1` (D3D12): GPU time per submit and the draw/barrier/PSO
-  counts; `=2` the costliest passes. `RSX_DRAW_STATS=1`, `RSX_SNAP_STATS=1`
-  (snapshots), `RSX_SYNC_STATS=1` (the walker's GPU waits), `RSX_PIPE_LOG=1`
-  (pipelines built), `RSX_SURF_DUMP_DIR=<dir>` (every surface).
-- `D3D12_DBG=1` the Direct3D debug layer, its errors and warnings on stderr
-  (the first three of each kind); `RSX_VK_VALIDATION=1` the Vulkan
-  validation layer.
+  conversions, pipelines built) and `[stutter]` (guest threads).
+- Vulkan and the engine: `RSX_VK_BATCH_STATS=1` (submits and the frame's
+  CPU/GPU split), `RSX_DRAW_STATS=1`, `RSX_SNAP_STATS=1` (snapshots),
+  `RSX_PIPE_LOG=1` (pipelines built), `RSX_SURF_DUMP_DIR=<dir>` (every
+  surface). `PS3RECOMP_VK_DEVICE=<n>` picks another GPU;
+  `PS3RECOMP_VK_DUMP=<path>` writes each presented frame as a PPM.
 
 ## Profiling
 
-- `DOD3_PROF=<ms>` (Windows, `src/os/win32/prof.cpp`): an in-process sampling
-  profiler. Every `DOD3_PROF_REPORT` seconds (5), each busy thread's CPU
-  share, its hottest functions and where it waits; lifted PPU code is named
-  through the function table (`ppu:<address>`), the rest through the PDB.
-  `DOD3_PROF_TREE=<part of a thread name>` adds inclusive time over a deep
-  stack and the call chains behind the waits for the threads it matches
-  (`tid` matches the unnamed ones: the game's main thread and the RSX
-  walker); `DOD3_PROF_CALLERS=<function>` who calls a function.
-- `DOD3_STALL_MS=<n>`: when no frame has been presented for n ms, every
-  thread's stack, at most `DOD3_STALL_MAX` times (12), into
-  `DOD3_STALL_SAMPLE=<dir>` or the log. On macOS the same switch runs
-  `sample`; `tools/stack_summary.py` condenses its output.
+- `DOD3_PROF=<ms>` is accepted by the runner and marks profiler-enabled
+  builds; today it only gates the hitch hook. Lifted PPU code is named
+  through the function table (`ppu:<address>`).
 - `PPU_WAITPROF=1`: time in syscalls by thread and guest call site, every
   5 s, with the fence poll's statistics; `=2` adds the most frequent calls
   (who sends or signals how often: which thread answers a wait).
@@ -160,12 +123,10 @@ Each turns a change back off, to bisect a regression: `PPU_SLOW_STORES=1`
 `LWM_KERNEL=1` (kernel lwmutex), `PS3_LWCOND_SLEEP=1`, `GCM_POS_FLIP=0`,
 `RSX_TEX_WATCH=0` (hash textures every frame), `RSX_VCACHE=0` /
 `RSX_VCACHE_CHECK=1` / `RSX_VC_WATCH_CHECK=1`, `RSX_BUF_POOL=0`,
-`RSX_TEX_HEAPS=0` (a committed resource per texture), `RSX_VB_PAGES=0` (a
-buffer per cached mesh), `DOD3_RENDER_TICK_HZ=40` (the title's idle tick:
-movies on a 25 ms grid), `DOD3_LOAD_IDLE=0` (the loader only in its own
-5 ms of a frame; `DOD3_LOAD_IDLE_LOG=1` says what it did in the limiter's
-sleep), `RSX_SNAP_INCR=0` (full snapshot copies),
-`SPU_TASK_POOL=0` (a thread per
+`DOD3_RENDER_TICK_HZ=40` (the title's idle tick: movies on a 25 ms grid),
+`DOD3_LOAD_IDLE=0` (the loader only in its own 5 ms of a frame;
+`DOD3_LOAD_IDLE_LOG=1` says what it did in the limiter's sleep),
+`RSX_SNAP_INCR=0` (full snapshot copies), `SPU_TASK_POOL=0` (a thread per
 task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `RSX_ASYNC_SHADERS=0` (build shaders on the walker), `RSX_QUERY_NOSYNC=1`,
 `DOD3_PACE=vblank`, `DOD3_VBLANK_MULT=<n>` / `DOD3_VBLANK_HZ=<hz>`,
@@ -174,18 +135,7 @@ task), `SPURS_TASKSET_SERIAL=01AA7700` (PhysX one task at a time),
 `RSX_ENGINE_SLOW=1` (the draw engine's per-draw paths before its cache
 indexes and single fragment-program pass), `RSX_VCACHE_PROMOTE=0` (no
 buffer of its own for a reused vertex-cache entry under 64 KB),
-`RSX_D3D12_REBIND=1` (every draw sets all its state), `RSX_BIND_UNREAD=1`
-(every texture unit that is on bound, sampled or not).
-
-The Direct3D 12 renderer's first line about the device says whether it
-relaxes the alignment of buffer-to-texture copies (`relaxed copy alignment:
-yes|no`): Windows 11's runtime with a current driver does, Windows 10's does
-not, and on such a system a copy off 512 bytes makes Direct3D reject the
-whole command list, after which the renderer draws nothing more (the picture
-freezes, the game runs on). `RSX_D3D12_STRICT_COPY=1` holds a relaxing system
-to the strict rule, to see on one machine what the other kind does; with
-`RSX_D3D12_STAGE_ALIGN=256` the stage is aligned as it was before 0.2.5,
-which reproduces the freeze on the first loading screen.
+`RSX_BIND_UNREAD=1` (every texture unit that is on bound, sampled or not).
 
 `PS3_VERBOSE=1` turns the runtime's per-event log back on (it is off here:
 two lines per SPURS job at 2,700 jobs a second).
@@ -238,18 +188,9 @@ runtime's function from then on.
   testing `DOD3_UNFOCUSED`.
 - `DOD3_LOG_FILE=1` writes `dod3.log` even with a console.
 - `DOD3_CAM_LOG=1`: a line a frame with the view's rotation, the camera
-  stick's value, the mouse's share and the frame time (the script reports
-  the view through the settings bridge). `DOD3_CAM_TEST_FILE=<path>` adds
-  the two numbers in the file to the camera stick's values, read 50 times
-  a second: how the camera's response was measured
-  (`src/input/camera.cpp`). `DOD3_KBM_LOG=1`: a line whenever what the keys
-  and mouse buttons hold as a pad changes.
-- `PS3RECOMP_METAL_EVENT_FILE=<path>` (macOS): keys, modifiers, mouse
-  motion, buttons and the wheel from a file, for a run with no one at the
-  keyboard. When the file appears its lines (`key <keycode> <1|0>`,
-  `flags <modifier flags>`, `move <dx> <dy>`, `button <n> <1|0>`,
-  `wheel <notches>`) are sent to the window as events, through the same
-  code as the real ones, and the file is removed.
+  stick's value and the frame time (the script reports the view through the
+  settings bridge). Controller input only for now; keyboard and mouse are
+  not wired.
 - `DOD3_PROMPTS_CYCLE=<seconds>`: step through every set of button prompts
   (`src/patches/prompts.cpp`), to look at the atlases on any screen that
   shows buttons. `python tools/ue3 info <package> 99999` lists a package's

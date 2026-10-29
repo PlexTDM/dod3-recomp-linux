@@ -1,10 +1,11 @@
 # Building Drakengard 3 Recompiled natively on Linux
 
-Status: **in progress**. Last updated: 2026-10-25.
+Status: **playable, in progress**. Last updated: 2026-10-29.
 
 This document tracks the native Linux port: the launcher and the game itself,
-not the already-working `dod3-setup` installer. Proton/Wine is still the
-supported way to play until this build reaches parity.
+not the `dod3-setup` installer. The game reaches the title, save selection,
+New Game and gameplay with the Vulkan backend; packaging and longer-run
+validation are still open.
 
 ## Goal
 
@@ -24,7 +25,7 @@ The native Linux installer (`dod3-setup`) is separate and already works. See
 | ---------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Installer              | Native, works                                     | SDL2 + OpenGL + Dear ImGui, `src/os/linux/setup_linux.cpp`                                                                                                                              |
 | Launcher UI            | Written, wired                                    | `src/ui/launcher.cpp` + `src/ui/ui_linux.cpp`; included in the full target                                                                                                              |
-| Game runtime           | Native build boots to the title and into gameplay | Vulkan; title and menus at 60 fps; save selection, New Game, stage loading and movement work; stage loads build pipelines on worker threads and hold 25-45 fps while they do                                             |
+| Game runtime           | Native build boots to the title and into gameplay | Vulkan; title and menus at 60 fps; save selection, New Game, stage loading and movement work; stage loads build pipelines on worker threads and hold 25-45 fps while they do            |
 | Linux RSX backend      | Opt-in Vulkan, partial                            | `rsx_vulkan_backend.c`; RGBA8 and FP16 HDR colour targets; runtime display mode, window size and V-Sync; `RSX_SCALE` internal resolution (restart for a new scale); toolkit scenes pass |
 | Linux full game target | Added, links                                      | `build-native/dod3`, 280 MB                                                                                                                                                             |
 | Lifted PPU/SPU sources | Not committed                                     | Generated locally from the player's `EBOOT_101.ELF`                                                                                                                                     |
@@ -45,8 +46,8 @@ reconfigure with `-DDOD3_LIBSRE_STUB=OFF` to lift the real helpers with
 `tools/gen_libsre.py`.
 
 Controller input works through SDL2. Native Linux keyboard and mouse mapping is
-not wired yet: `src/input/kbm.cpp` has Windows and macOS branches only, so use
-a pad, or the toolkit's `PAD_SCRIPT` / `PAD_FILE` test inputs.
+not wired yet: `src/input/kbm.cpp` is inert, so use a pad, or the toolkit's
+`PAD_SCRIPT` / `PAD_FILE` test inputs.
 
 ## Display settings
 
@@ -91,8 +92,8 @@ stays offscreen and `RSX_SCALE` still controls the internal target size.
   POSIX compatibility shims, SDL2 audio/input, and RSX backends.
 - **Lifted code**: generated from the retail 1.01 `EBOOT_101.ELF` into
   `recompiled_101/` (PPU) and `spu/` (SPU). Both are gitignored and large.
-- **Rendering**: Windows D3D12, macOS Metal, Linux Vulkan. The Vulkan backend
-  is loaded through `dlopen("libvulkan.so.1")`.
+- **Rendering**: Vulkan, loaded through `dlopen("libvulkan.so.1")`. The null
+  backend remains the headless fallback.
 - **Launcher/installer UI**: `src/ui/launcher.cpp` and `src/ui/wizard.cpp`
   are platform-independent; `src/ui/ui_linux.cpp` provides the SDL2/OpenGL
   window and ImGui backends.
@@ -139,8 +140,8 @@ The player must supply:
 
 - `game/elf/EBOOT_101.ELF` (26,872,424 bytes, from the 1.01 update),
 - `game/game/disc/PS3_GAME/...` and the update/DLC data,
-- `game/dod3.exe` only if using the Windows release for comparison; the native
-  build does not need it.
+- `game/dod3.exe` only if you keep a Windows release in the same folder for
+  Proton; the native build does not need it.
 
 The current install is at `game/` and was produced by `dod3-setup`. It contains
 about 16 GB, almost all of it `game/game/disc/PS3_GAME/USRDIR/`.
@@ -157,7 +158,7 @@ If starting from an ISO and update PKG:
   "/path/UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg"
 ```
 
-Or use the existing `game/` folder from the Windows release.
+Or use an existing `game/` folder produced by `dod3-setup`.
 
 ### 2. Lift the PPU code
 
@@ -210,9 +211,9 @@ cmake --build build-native -j2
 A clean build is expected to take about 30 minutes, mostly the lifted PPU
 code. On GCC, each 600k-line lifted translation unit peaks around 5 GB of
 anonymous memory even at `-O1`; six parallel jobs OOM-killed a 23 GB machine.
-Use `-j2` (or `-j1` under memory pressure), not `-j$(nproc)`. The lifted TUs
-default to `-O1` on non-MSVC builds; override with
-`-DDOD3_RECOMP_OPT=-O3` only in a separate build directory.
+Use `-j2` or `-j3` (or `-j1` under memory pressure), not `-j$(nproc)`. The
+lifted TUs default to `-O1` on GCC; override with `-DDOD3_RECOMP_OPT=-O3`
+only in a separate build directory.
 
 ### 6. Run
 
@@ -282,7 +283,7 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
       executable directory as the install base.
 - [x] If the install is not ready, call `run_installer(base)`.
 - [x] Otherwise call `run_launcher_loop(base)` and boot the game on `kPlay`.
-- [x] Honor `DOD3_LAUNCHER=0` (no Shift/Option detection on Linux yet).
+- [x] Honor `DOD3_LAUNCHER=0` (no Shift detection on Linux yet).
 - [x] Make the installer's Play button launch the native binary, not Proton,
       when built natively.
 - [ ] Verify `install-desktop.sh` and the desktop entry point at the native
@@ -307,22 +308,19 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 - [ ] Add/verify vertex-texture support.
 - [ ] Check depth snapshots, MRT, depth textures, render-to-texture, and
       occlusion queries against the game's effects.
-- [x] Check the synchronous Vulkan submit path for performance; batch or port
-      the Windows Vulkan engine if needed. Done in place rather than by porting
-      the Windows engine: two frames in flight, one submission a frame, async
-      pipeline builds, uploads recorded into the frame (see the 2026-10-26 log
-      entry).
-- [ ] Wire Linux equivalents for Windows-only D3D12 buffer-pool and anisotropy
-      settings where they affect rendering.
+- [x] Check the synchronous Vulkan submit path for performance. Done in place:
+      two frames in flight, one submission a frame, async pipeline builds,
+      uploads recorded into the frame (see the 2026-10-26 log entry).
+- [ ] Tune the buffer pool and anisotropy defaults for the Vulkan path.
 
 ### Runtime and platform
 
-- [ ] Audit `_WIN32` blocks in `src/main.cpp` for Linux behavior (window focus,
-      mouse capture, logging, profiling, process arguments).
+- [x] Audit the old `_WIN32` blocks in `src/main.cpp`; the platform branches
+      were removed and the Linux behavior is the only path.
 - [x] Verify controller input (SDL2 `cellPad`), save loading and the New Game
       flow.
 - [ ] Add native Linux keyboard and mouse mapping in `src/input/kbm.cpp`
-      (currently Windows/macOS only).
+      through SDL2.
 - [ ] Verify SDL2 audio (`cellAudio`) under gameplay.
 - [ ] Verify POSIX thread/memory/filesystem shims under the game's load.
 - [x] Verify save data load and New Game.
@@ -343,7 +341,6 @@ Observed on 2026-10-25 with `DOD3_LIBSRE_STUB=ON`:
 - [ ] Verify longer gameplay stability and performance after pipeline warm-up.
 - [ ] Complete the first chapter and the heavy destruction scene.
 - [ ] Check saves, settings, launcher round-trip, and fullscreen/windowed modes.
-- [ ] Compare screenshots and performance against the Proton/D3D12 build.
 - [ ] Run the toolkit's Vulkan CI scenes locally.
 
 ### Packaging
@@ -481,7 +478,7 @@ format had no stencil.
   this title uses to pack several shadow maps into one depth target) is still
   not implemented on Vulkan, so a packed target is cleared whole.
 - The lifted code is large and compiler/resource intensive.
-- The Windows path has years of game-specific fixes; Linux will expose
-  assumptions that are currently hidden by D3D12 or Proton.
+- The native path is younger than the Proton release; some game-specific
+  fixes may still assume the older renderer.
 - Native does not automatically mean faster than Proton. The first goal is
   correctness and integration; performance comes after.

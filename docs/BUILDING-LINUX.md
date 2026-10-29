@@ -1,9 +1,11 @@
 # Building the Linux setup
 
-The Linux target is `dod3-setup`, the native installer only. It installs the
+The setup-only target is `dod3-setup`, the native installer. It installs the
 disc, the 1.01 update and DLC into a folder containing the Windows
-`dod3.exe`, and can start the game through a `play.sh` or Wine. It does not
-build the recompiled game: the game itself still runs under Proton or Wine.
+`dod3.exe`, and can start that release through a `play.sh` or Wine. It does
+not build the recompiled game. For the native Linux build, see
+[BUILDING-LINUX-NATIVE.md](BUILDING-LINUX-NATIVE.md) and
+[BUILDING.md](BUILDING.md).
 
 # TLDR
 

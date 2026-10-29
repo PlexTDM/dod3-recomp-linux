@@ -541,7 +541,7 @@ static int unfocused_hold(uint64_t now_us)
 
 /* The window was closed: end the process. Stopping only the rendering left
  * the guest running headless -- a dod3.exe nobody could see, holding the GPU
- * and the audio device until Task Manager found it. The guest threads cannot
+ * and the audio device until the desktop session found it. The guest threads cannot
  * be joined (they run lifted code with no exit path), so this is a hard exit
  * after the logs are flushed. */
 #ifdef DOD3_PGO_GENERATE

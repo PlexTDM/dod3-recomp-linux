@@ -7,11 +7,11 @@
  * below is inert: the pad is still usable, the keyboard bindings in dod3.ini
  * have nothing to drive them, and the prompts fall back to the pad's glyphs.
  *
- * The binding table, the key-name parser and the per-platform key polling were
- * part of the Windows and macOS runners, which this build no longer carries.
- * A Linux implementation belongs on SDL2 (the window and input subsystem the
- * Vulkan backend already uses); until then this translation unit keeps the
- * interface linkable and the call sites unchanged.
+ * The binding table, the key-name parser and the per-platform key polling went
+ * with the platform runners this build no longer carries. A Linux
+ * implementation belongs on SDL2 (the window and input subsystem the Vulkan
+ * backend already uses); until then this translation unit keeps the interface
+ * linkable and the call sites unchanged.
  */
 #include <stdint.h>
 #include <stdio.h>

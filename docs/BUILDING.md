@@ -4,48 +4,53 @@ The port is built in three steps: the game's PPU code is lifted to C++, the
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-The Linux installer-only target does not need the lift; see
+The Linux installer (`dod3-setup`) does not need the lift; see
 [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
 ## Prerequisites
 
-Windows:
+Linux x86-64:
 
-- Visual Studio 2022 or newer -- the Build Tools are enough -- with "Desktop
-  development with C++" and the Windows SDK.
-- LLVM with clang-cl (the toolchain used; MSVC's `cl` is not: the SPU
-  dispatch relies on `musttail`, and the lifted code uses Clang builtins).
-- CMake 3.20 or later, Ninja, Python 3.11 or later, Git for Windows (the
-  `tools/*.sh` scripts run under Git Bash).
-- vcpkg with `zlib:x64-windows` and `sdl2:x64-windows` (`VCPKG_ROOT`, or
-  `C:\vcpkg`). SDL2 reads the controllers.
-- Optional: the Vulkan SDK (`VULKAN_SDK`) for the Vulkan renderer.
+- GCC 12+ or Clang 15+, CMake 3.20 or later, Ninja, Python 3.11 or later,
+  Git.
+- SDL2, zlib, Vulkan headers, and glslang built with SPIRV-Tools (the Vulkan
+  backend translates the guest's shaders to HLSL and then to SPIR-V).
+- A Vulkan-capable GPU and driver; `vulkaninfo --summary` should list a
+  device.
+- A CPU with AVX2 (Intel Haswell / AMD Zen or newer).
 
-macOS (Apple silicon):
+Arch Linux:
 
-- Xcode's command-line tools; from Homebrew: `cmake ninja python zlib sdl2
-  glslang spirv-cross`.
+```sh
+sudo pacman -S --needed base-devel cmake ninja git python \
+    sdl2 vulkan-headers vulkan-icd-loader glslang spirv-tools zlib
+```
 
-Then, on either:
+Debian/Ubuntu:
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config python3 \
+    libsdl2-dev libvulkan-dev glslang-dev spirv-tools zlib1g-dev
+```
+
+Then:
 
 ```sh
 git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
 cd dod3-recomp
-python3 -m venv .venv                    # py -3 -m venv .venv on Windows
+python3 -m venv .venv
 .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
 ```
 
-CMake uses the venv's Python (`.venv/bin/python` or `.venv\Scripts\python.exe`)
-for the code it generates at build time.
+CMake uses the venv's Python for the code it generates at build time.
 
 ## The game's files
 
 The port is built from the game's 1.01 update: its executable, decrypted, as
 `elf/EBOOT_101.ELF` (SHA-256 `ed89e80f2336a948…`, 26,872,424 bytes). The
 installer makes it from the update package, and lays out `game/disc` from
-your disc or the PSN release's game package at the same time. Any built `dod3` can do that into the
-repository root before the first lift -- a release build, or a build from
-another machine:
+your disc or the PSN release's game package at the same time. Any built `dod3`
+or `dod3-setup` can do that into the repository root before the first lift:
 
 ```sh
 DOD3_INSTALL_BASE=. path/to/dod3 --install <disc .iso or folder, or PSN game .pkg> <update .pkg> [DLC .pkg ...]
@@ -96,85 +101,56 @@ already in `spu/` are kept, so a second run only redoes what changed.
 
 ## Compiling
 
-Windows (from a plain command prompt; the script finds Visual Studio, LLVM,
-CMake and vcpkg):
-
-```bat
-tools\build_win.bat            rem configure + build into build
-tools\build_win.bat build      rem build only
-```
-
-Or run CMake yourself from a "x64 Native Tools" prompt:
-
-```bat
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
-      -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
-cmake --build build
-```
-
-macOS:
-
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -S . -B build-native -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPS3RECOMP_RSX_VULKAN=ON \
+    -DDOD3_LIBSRE_STUB=ON
+cmake --build build-native -j3
 ```
 
-A clean build takes about 15 minutes, nearly all of it the lifted translation
+A clean build takes about 30 minutes, nearly all of it the lifted translation
 units; a header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`)
-rebuilds all of them. A build folder keeps `RECOMP_DIR` in its cache, so one
-configured for the other version must be removed, or given `-DRECOMP_DIR=`
-explicitly (the scripts do); CMake refuses a lift that is not the version's.
+rebuilds all of them. Each lifted TU can need several gigabytes at `-O1`, so
+keep `-j` low. `-j2` is safe on a 16 GB machine, `-j3` on 24 GB or more; more
+than that has OOM-killed `cc1plus` on the lifted files.
+
 CMake options:
 
 | Option | Default | |
 |---|---|---|
 | `DOD3_EBOOT` | 101 | the version the lift is from. 100 builds the disc version instead (`elf/EBOOT.ELF`, `recompiled/`, `src/cpu/eboot.h`'s other column); kept for comparison, not maintained |
 | `RECOMP_DIR` | `recompiled_101` | the lifted PPU C++ |
-| `DOD3_X86_LEVEL` | x86-64-v3 | the lifted code's x86 level (clang-cl); empty for the baseline. The default needs AVX2, FMA and BMI2, and the executable checks for them at start |
 | `DOD3_INLINE_VM` | ON | inline the guest-memory fast path into the lifted code |
-| `DOD3_SYMBOLS` | ON | Windows: `/Z7` on the port's and the runtime's sources, `/DEBUG` at link, for the profiler and the crash handler |
-| `DOD3_CONSOLE` | OFF | Windows: link as a console program |
+| `DOD3_SYMBOLS` | ON | debug info on the port's and the runtime's sources, for the profiler and the crash handler |
+| `DOD3_LIBSRE_STUB` | ON | stub the non-zlib SPURS LFQueue pushes. Set to OFF with `-DLIBSRE_PRX=/path/to/libsre.prx` only if you have a decrypted `libsre.prx` |
 | `LIBSRE_PRX` | the submodule's | the module the SPURS LFQueue push helpers are lifted from at build time (`tools/gen_libsre.py`) |
-| `DOD3_PGO` | empty | profile-guided optimisation of the lifted code alone, in a build folder of its own: `generate` instruments it (the game then writes the profile named by `LLVM_PROFILE_FILE` every 30 s and on exit), `use:<profdata>` compiles it on a merged profile (`llvm-profdata merge -o lifted.profdata *.profraw`) |
-
-The replay tool (`rsx_replay`, for the rendering regression) is not part of
-the default target: `cmake --build build --target rsx_replay`, or
-`tools\build_win.bat build rsx_replay`.
+| `DOD3_RECOMP_OPT` | `-O1` on GCC | extra options for the lifted translation units alone; use a separate build folder |
+| `DOD3_SETUP_ONLY` | OFF | build only `dod3-setup`, the Linux installer (see [BUILDING-LINUX.md](BUILDING-LINUX.md)) |
 
 ## Running
 
-With no arguments, `dod3` runs the game installed next to it (the release
-layout: `game/`, `elf/`, `dod3.ini`, `gamedata/`, `cache/` beside the
-executable), and opens the installer when it is not installed yet.
-`DOD3_INSTALL_BASE=<dir>` points that at another folder -- the repository
-root, for a developer tree:
+With no arguments, `dod3` runs the game installed next to it (the layout:
+`game/`, `elf/`, `dod3.ini`, `gamedata/`, `cache/` beside the executable), and
+opens the installer when it is not installed yet. `DOD3_INSTALL_BASE=<dir>`
+points that at another folder -- the repository root, for a developer tree:
 
 ```sh
-DOD3_INSTALL_BASE=. build/dod3
+DOD3_INSTALL_BASE=game ./build-native/dod3
 ```
 
 The developer form takes the executable to run, with the environment it
 needs:
 
 ```sh
-PS3_TITLE="Drakengard 3" PS3_VFS_ROOT=game/disc DOD3_FPS=60 build/dod3 elf/EBOOT_101.ELF
+PS3_TITLE="Drakengard 3" PS3_VFS_ROOT=game/game/disc DOD3_FPS=60 \
+    ./build-native/dod3 game/elf/EBOOT_101.ELF
 tools/run_timed.sh 120 out/run.log        # a bounded run with a log
 ```
 
 `dod3.ini` is read from the executable's folder (CMake copies the
 repository's once into the build folder) or the current one; a variable set
 in the environment wins over it.
-
-## Releases
-
-- Windows: `bash tools/package_win.sh v0.1.0` zips `build/dod3.exe` with the
-  DLLs it needs, `dod3.ini`, the player guide and the licences into `dist/`.
-- macOS: `tools/build_mac_deps.sh` once (SDL2, glslang, SPIRV-Cross built for
-  the deployment target), then `tools/package_mac.sh v0.1.0` builds its own
-  release tree and makes the signed `.app`.
-
-Both refuse to package anything of the game's.
 
 ## Regenerating the committed tables
 
@@ -183,6 +159,5 @@ Both refuse to package anything of the game's.
 | `src/patches/menu_patch_data_101.h` | `python tools/menu_patch.py --eboot=101 --header=src/patches/menu_patch_data_101.h` (`src/patches/menu_patch_data.h` without `--eboot`, for 1.00) |
 | `src/apu/mp3dec_tables.h` | `python tools/gen_mp3_tables.py <minimp3.h> > src/apu/mp3dec_tables.h` |
 | `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
-| `src/res/app.ico` | `python tools/make_icon.py src/res/app.ico` |
 | `src/res/prompts/*.png` | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`) |
 | `src/patches/collision_native.cpp` | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |

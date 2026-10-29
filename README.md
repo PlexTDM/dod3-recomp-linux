@@ -1,15 +1,15 @@
 # Drakengard 3 Recompiled
 
-A native PC port of **Drakengard 3** (Drag-On Dragoon 3, PlayStation 3,
-BLUS31197) for Windows and macOS, made by static recompilation of the game's
-code on the [ps3recomp](https://github.com/sp00nznet/ps3recomp) toolkit.
+A native Linux port of **Drakengard 3** (Drag-On Dragoon 3, PlayStation 3,
+BLUS31197), made by static recompilation of the game's code on the
+[ps3recomp](https://github.com/sp00nznet/ps3recomp) toolkit.
 
 The game's PowerPC and SPU code is translated to C++ ahead of time and built
 into a normal executable, with the PS3's system libraries replaced by native
-implementations and the RSX graphics by Direct3D 12, Metal or Vulkan. There
-is no emulation at run time.
+implementations and the RSX graphics by Vulkan. There is no emulation at run
+time.
 
-![The start of the game, running natively on Windows](docs/images/opening.jpg)
+![The start of the game](docs/images/opening.jpg)
 
 **Nothing of the game is in this repository.** You need your own copy of
 Drakengard 3: the US disc and the game's 1.01 update, plus whatever DLC you
@@ -21,10 +21,9 @@ If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
 
 What you need:
 
-- A PC with Windows 10 or 11 (64-bit), a GPU with Direct3D 12 and a CPU with
-  AVX2 (Intel Haswell / AMD Zen or newer), or a Mac with Apple silicon on
-  macOS 13 or newer. About 16 GB of free disk space, 10 GB more for the
-  Japanese voice pack and about 3 GB for the Spanish translation.
+- A Linux PC (x86-64) with a Vulkan-capable GPU and a CPU with AVX2 (Intel
+  Haswell / AMD Zen or newer). About 16 GB of free disk space, 10 GB more for
+  the Japanese voice pack and about 3 GB for the Spanish translation.
 - Your copy of the game, US release, as either:
   - the disc (BLUS31197), dumped to a folder or a **decrypted** `.iso`
     ([PS3 Disc Dumper](https://github.com/13xforever/ps3-disc-dumper) writes
@@ -44,39 +43,28 @@ What you need:
   (Japanese voices for the DLC chapters), which the launcher installs on its
   Mods page; see [docs/PLAYING.md](docs/PLAYING.md#mods).
 
-Windows:
+There is no prebuilt Linux release in this tree yet; build it from source
+below. First build and run the installer, which unpacks the game:
 
-1. Download `dod3-recomp-<version>-win64.zip` from the
-   [releases](https://github.com/soyjxck/dod3-recomp/releases) and unzip it
-   anywhere (not inside Program Files).
-2. Run `dod3.exe`. SmartScreen may warn the first time, as the program is not
-   signed: "More info", then "Run anyway".
-3. In the setup that opens, add your files (the disc image or folder, or the
-   PSN game package; the update package; any DLC packages) with Add Files /
-   Add Folder, in any
-   order, then Install. The game's files are copied into the `game` folder
-   next to `dod3.exe` (a few minutes).
-4. Play. From then on `dod3.exe` opens the launcher: Play, and the game's
-   mods, DLC and settings.
+```sh
+./tools/build_linux_setup.sh
+./build-installer/dod3-setup
+```
 
-macOS:
+Add your files (the disc image or folder, or the PSN game package; the update
+package; any DLC packages) with Add Files / Add Folder, in any order, then
+Install. The game's files are copied into the `game` folder (a few minutes).
 
-1. Download `dod3-recomp-<version>-macos-arm64.zip` from the
-   [releases](https://github.com/soyjxck/dod3-recomp/releases), unzip it and
-   move "Drakengard 3 Recompiled.app" to Applications.
-2. The app is not notarised, so macOS refuses it the first time. On macOS 15
-   and later: open it once, then allow it in System Settings > Privacy &
-   Security ("Open Anyway"). On macOS 13 and 14: Control-click the app,
-   choose Open, then Open again.
-3. The setup opens as on Windows. The game's files go into
-   `~/Library/Application Support/Drakengard 3 Recompiled`.
+The same installer can put the data beside a Windows `dod3.exe` for running
+under Proton or Wine; the native Linux executable reads the same `game/`
+layout.
 
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
-view, draw distance, skipping the intro, the keyboard's keys) are in the
-launcher's Settings, in the game's own Settings menu (Graphics Settings,
-System Settings and Advanced Graphics), or in `dod3.ini`.
-[docs/PLAYING.md](docs/PLAYING.md) has the controls, the saves, the Japanese
-voices, and what to do if something goes wrong.
+view, draw distance, skipping the intro) are in the launcher's Settings, in
+the game's own Settings menu (Graphics Settings, System Settings and Advanced
+Graphics), or in `dod3.ini`. [docs/PLAYING.md](docs/PLAYING.md) has the
+controls, the saves, the Japanese voices, and what to do if something goes
+wrong.
 
 ## Building
 
@@ -84,33 +72,41 @@ The port is built in three steps: the game's PPU code is lifted to C++, its
 SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
-On Linux, only the native installer can be built for now; see
-[docs/BUILDING-LINUX.md](docs/BUILDING-LINUX.md). The game itself still runs
-under Proton or Wine.
+1. **Toolchain.** GCC 12+ or Clang 15+, CMake 3.20 or later, Ninja, Python
+   3.11 or later, Git, SDL2, Vulkan headers, glslang with SPIRV-Tools, zlib
+   and their development packages. On Arch:
 
-1. **Toolchain.** Windows: Visual Studio 2022 or newer (the Build Tools are
-   enough, with "Desktop development with C++" and the Windows SDK), LLVM
-   with clang-cl, CMake 3.20 or later, Ninja, Python 3.11 or later, Git for
-   Windows, and vcpkg with `zlib:x64-windows` and `sdl2:x64-windows`
-   (`VCPKG_ROOT`, or `C:\vcpkg`). macOS: Xcode's command-line tools and,
-   from Homebrew, `cmake ninja python zlib sdl2 glslang spirv-cross`.
+   ```sh
+   sudo pacman -S --needed base-devel cmake ninja git python \
+       sdl2 vulkan-headers vulkan-icd-loader glslang spirv-tools zlib
+   ```
+
+   Debian/Ubuntu:
+
+   ```sh
+   sudo apt install build-essential cmake ninja-build pkg-config python3 \
+       libsdl2-dev libvulkan-dev glslang-dev spirv-tools zlib1g-dev
+   ```
 
 2. **The sources.**
 
    ```sh
    git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
    cd dod3-recomp
-   python3 -m venv .venv                    # py -3 -m venv .venv on Windows
+   python3 -m venv .venv
    .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
    ```
 
-3. **The game's files.** Any built `dod3` (a release's, or one from another
-   machine) installs the game into the repository root, which decrypts the
-   update's executable to `elf/EBOOT_101.ELF` and lays out `game/disc`:
+3. **The game's files.** Any built `dod3` (or `dod3-setup`) installs the
+   game into the repository root, which decrypts the update's executable to
+   `elf/EBOOT_101.ELF` and lays out `game/disc`:
 
    ```sh
    DOD3_INSTALL_BASE=. path/to/dod3 --install <disc .iso or folder> <update .pkg> [DLC .pkg ...]
    ```
+
+   With the native setup, install into `game/` as described under
+   [Installing](#installing).
 
 4. **Lift the PPU code** (a few minutes; about 550 MB of C++ in
    `recompiled_101/`):
@@ -133,42 +129,39 @@ under Proton or Wine.
    tools/lift_spu.sh
    ```
 
-6. **Compile.** Windows, from a plain command prompt (the script finds
-   Visual Studio, LLVM, CMake and vcpkg):
-
-   ```bat
-   tools\build_win.bat
-   ```
-
-   macOS:
+6. **Compile.**
 
    ```sh
-   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-   cmake --build build
+   cmake -S . -B build-native -G Ninja \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DPS3RECOMP_RSX_VULKAN=ON \
+       -DDOD3_LIBSRE_STUB=ON
+   cmake --build build-native -j3
    ```
 
-   A clean build takes about 15 minutes, nearly all of it the lifted code.
+   A clean build takes about 30 minutes, nearly all of it the lifted code.
+   Each lifted translation unit can need several gigabytes of memory, so keep
+   `-j` low; `-j4` or more can OOM-kill the compiler on a 16-32 GB machine.
 
 7. **Run** the game installed in the repository root:
 
    ```sh
-   DOD3_INSTALL_BASE=. build/dod3
+   DOD3_INSTALL_BASE=game ./build-native/dod3
    ```
 
 [docs/BUILDING.md](docs/BUILDING.md) has the CMake options, the developer
-run form, packaging a release and regenerating the committed tables;
-[docs/TECHNICAL.md](docs/TECHNICAL.md) how the port works;
-[docs/DEBUGGING.md](docs/DEBUGGING.md) the switches, profiling and the
-regression tests; [CONTRIBUTING.md](CONTRIBUTING.md) the layout of the tree
-and the conventions.
+run form, and regenerating the committed tables;
+[docs/BUILDING-LINUX-NATIVE.md](docs/BUILDING-LINUX-NATIVE.md) tracks the
+native Linux port in more detail; [docs/TECHNICAL.md](docs/TECHNICAL.md) how
+the port works; [docs/DEBUGGING.md](docs/DEBUGGING.md) the switches,
+profiling and the regression tests; [CONTRIBUTING.md](CONTRIBUTING.md) the
+layout of the tree and the conventions.
 
 ## Status
 
 | | |
 |---|---|
-| Windows 10/11, Direct3D 12 | Playable. 60 fps at 4K on an RTX 4090 / i9-13900K (chapter 1 through the heavy destruction scene, open areas, the village); 120 fps holds at lower resolutions |
-| Windows, Vulkan | Experimental (`RSX_BACKEND = vulkan`) |
-| macOS 13+, Apple silicon, Metal | Playable. 60 fps at 1080p in battle on an M1 Pro |
+| Linux x86-64, Vulkan | Playable: title, menus, save selection, New Game and gameplay; stage loads hold 25-45 fps while pipelines compile, then recover |
 | Game version | The 1.01 update (required) |
 | DLC | All 20 packs, including the Japanese voice pack |
 
@@ -178,15 +171,16 @@ included), windowed, borderless or full-screen display, wider screens (16:10,
 follows the scene, with the frames shown at even intervals, FXAA or MSAA,
 anisotropic filtering, a wider field of view, sharper shadows, a longer draw
 distance for scenery and for trees, skipping the intro logos and movie,
-pausing or muting when the window is in the background, keyboard and mouse,
-and the button prompts of the pad you hold -- set in the launcher, or in a
-Graphics Settings, a System Settings and an Advanced Graphics page added to
-the game's own Settings menu. The launcher also installs your DLC and two
-fan-made mods: the Spanish translation (the added pages are in Spanish with
-it) and the DLC Undub.
+pausing or muting when the window is in the background, and the button
+prompts of the pad you hold -- set in the launcher, or in a Graphics Settings,
+a System Settings and an Advanced Graphics page added to the game's own
+Settings menu. The launcher also installs your DLC and two fan-made mods: the
+Spanish translation (the added pages are in Spanish with it) and the DLC
+Undub.
 
 Known issues: the game has been tested on few machines, and at 16:10, 21:9
-and 32:9 some of the HUD is still out of place.
+and 32:9 some of the HUD is still out of place. Native keyboard and mouse
+input is not wired yet; use a controller.
 
 ## How it fits together
 
@@ -197,9 +191,9 @@ src/               --------------------------->  the port: the runner, native fa
 ps3recomp/         --------------------------->  runtime, HLE libraries, the RSX draw engine and its backends
 ```
 
-The executable `dod3` installs the game from your files (a Dear ImGui
-setup, `src/install/` and `src/ui/`), then opens a launcher for its mods,
-DLC and settings, and runs it.
+The executable `dod3-setup` installs the game from your files (a Dear ImGui
+setup, `src/install/` and `src/ui/`), and `dod3` opens a launcher for its
+mods, DLC and settings, and runs it.
 
 ## Legal
 

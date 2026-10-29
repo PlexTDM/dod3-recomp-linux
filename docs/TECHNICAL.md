@@ -4,20 +4,18 @@ Drakengard 3 is an Unreal Engine 3 game. Its PPU executable (30,134
 functions) is translated to C++ by ps3recomp's lifter and compiled into
 `dod3`; its 40 SPU programs and two raw SPURS jobs are lifted the same way.
 The PS3's system libraries are ps3recomp's HLE implementations, and the RSX
-command stream goes through the toolkit's draw engine to Direct3D 12, Metal
-or Vulkan. What this repository adds is the port: the runner, the pieces of
+command stream goes through the toolkit's draw engine to Vulkan (or the null
+headless backend). What this repository adds is the port: the runner, the pieces of
 the game's own code done natively where the lifted version was too slow, the
 settings menu, the installer, and the toolkit changes in the `ps3recomp/`
 fork.
 
 ## The runner (`src/main.cpp`)
 
-- **Boot.** The guest address space is one flat 4 GB mapping (reserved on
-  Windows and committed on first touch by a vectored exception handler, so
-  any 32-bit guest pointer is valid). The EBOOT's ELF is loaded, the lifted
-  function table and the HLE handlers registered, the title's defaults set,
-  and the entry OPD dispatched. On macOS the guest runs on its own thread
-  and the frame clock takes the main thread, which AppKit needs.
+- **Boot.** The guest address space is one flat 4 GB mapping, so any 32-bit
+  guest pointer is valid. The EBOOT's ELF is loaded, the lifted function
+  table and the HLE handlers registered, the title's defaults set, and the
+  entry OPD dispatched. The frame clock runs on its own host thread.
 - **The frame clock.** The RSX has no vblank interrupt here, so a host
   thread synthesises it: it ticks vblanks and flips at the vblank rate,
   drains the GCM FIFO on every tick (the FIFO walker; the sync labels the
@@ -88,9 +86,6 @@ leaves a compiler little to do. What is done about it is in the lifter
   branches as a loop over its bytes and is a table-driven shuffle; the
   collision tree walk (`func_012B32C8`), which is made of them, went from
   10,000 instructions to 3,700;
-- on Windows the lifted units are built without thread-local guards
-  (`/Zc:tlsGuards-`): the tail-call trampoline is a thread-local read after
-  a call.
 
 A lift can be made to check all of this while the game runs
 (`PPU_NV_VERIFY=1`, see [DEBUGGING.md](DEBUGGING.md)).
@@ -117,10 +112,10 @@ either does its work or falls through.
 ## Rendering
 
 The draw engine (`ps3recomp/libs/video/rsx_draw_engine.c`) decodes the RSX
-register file into draws and hands them to a backend: `rsx_d3d12_engine.c`,
-`rsx_metal_backend.m`, `rsx_vulkan_engine.c`. Shaders are decompiled to HLSL
-and compiled by each backend (DXBC with a disk cache; MSL through SPIR-V;
-SPIR-V). What this game needed from the engine:
+register file into draws and hands them to the Vulkan backend
+(`rsx_vulkan_backend.c`), or the null backend when Vulkan is not built in.
+Shaders are decompiled to HLSL and translated to SPIR-V through glslang. What
+this game needed from the engine:
 
 - **Snapshots** of a target that is read while it is drawn into (the heat
   haze samples the scene ~95 times a frame): kept incrementally, by
@@ -138,15 +133,12 @@ SPIR-V). What this game needed from the engine:
   settings; a new scale remakes every target under the same handle.
 - **Memory by the block**, for a level's first frame, which brings some 500
   textures and 25 MB of vertices at once. A texture is placed in a 64 MB
-  heap and a vertex-cache buffer is a range of a 32 MB mapped page (D3D12;
-  the Vulkan engine sub-allocates its device memory), where each used to be
-  an allocation in the driver; and what a submit stages is a chain of 16 MB
+  heap and a vertex-cache buffer is a range of a 32 MB mapped page, where each
+  used to be an allocation in the driver; and what a submit stages is a chain
+  of 16 MB
   chunks, where it used to be one arena grown by copying it out of
   write-combined memory. That frame went from 0.84 s to 0.2 s, the
   renderer's share of it from 0.68 s to 0.07 s.
-
-The replay tool (`rsx_replay`) replays captured command streams
-(`RSX_CAPTURE`) headlessly through the engine: the rendering regression.
 
 ## The settings menu
 
@@ -202,36 +194,22 @@ settings page, and the handful of messages that name a control in words.
 
 ## Keyboard, mouse and the camera
 
-The pad library takes port 0's state from the port as well as from a real
-pad (`cellPad_set_host_input`): `src/input/kbm.cpp` turns the keys and
-mouse buttons held into buttons and stick directions by a table of
-bindings read from `dod3.ini`. The two are merged, and whichever was
-touched last decides the button prompts; the keyboard's prompt atlas is
-made at start-up from a sheet of key caps, so it shows the keys bound.
+Native Linux keyboard and mouse input is not wired yet. `src/input/kbm.cpp`
+keeps the interface linkable and every entry point inert; the pad library
+still takes port 0's state from a real SDL2 controller. The camera scaling
+below remains in place for a future SDL2 implementation, but no mouse motion
+feeds it today.
 
-The mouse is not a stick. The script hands the pawn's native code the
-camera stick as two floats (`GetCameraMoveX`, `GetCameraMoveY`); the
-settings patch routes them, and the frame's time, through the port
-(`src/input/camera.cpp`). Measured frame by frame with constant values in
-their place, the native code turns the view by 3440 x value x dt squared
-degrees, with no dead zone, limit or easing. So the mouse's motion since
-the last frame, a turn in degrees, divided by that is the value that makes
-exactly the turn: the view follows the hand to within a percent. The
-pitch's constant falls away towards the ends of its range and is read off
-the view's own pitch, which the script reports each frame. The window's
-side is raw input and a hidden, confined cursor while the game has the
-focus (`ps3recomp/libs/video/rsx_host_mouse.c`). On macOS the Metal
-backend does it for its own window (`rsx_metal_backend.m`): the cursor is
-hidden and detached from the mouse, whose events still carry the motion,
-and the keys and mouse buttons the bindings read are that window's record
-of the events it was sent, so nothing is held unless the game is in front.
-
-The same measurement showed the stick's turn speed to be proportional to
-the frame time: right at the 30 frames a second the game was made for, a
-quarter of that at 120. The stick's value is scaled by (1/30)/dt above 30
-frames a second, so the camera turns as on the console at any rate
-(`DOD3_CAMERA_SPEED=original` for the game's own). The dragon's camera has
-not been measured and its stick is left alone.
+The script hands the pawn's native code the camera stick as two floats
+(`GetCameraMoveX`, `GetCameraMoveY`); the settings patch routes them, and the
+frame's time, through the port (`src/input/camera.cpp`). Measured frame by
+frame with constant values in their place, the native code turns the view by
+3440 x value x dt squared degrees, with no dead zone, limit or easing. The
+stick's turn speed is proportional to the frame time: right at the 30 frames
+a second the game was made for, a quarter of that at 120. The stick's value is
+scaled by (1/30)/dt above 30 frames a second, so the camera turns as on the
+console at any rate (`DOD3_CAMERA_SPEED=original` for the game's own). The
+dragon's camera has not been measured and its stick is left alone.
 
 ## The 1.01 update
 
@@ -260,8 +238,8 @@ writes itself from the installed files (`src/kernel/dlc.cpp`).
 
 `src/ui/wizard.cpp` is the first-run setup and `src/ui/launcher.cpp` the
 launcher every later start opens (Play, Mods, DLC, Settings): Dear ImGui
-over a small platform layer (`ui/ui.h`: Win32 + Direct3D 12, or Cocoa +
-Metal). Both are drawn with the same pieces (`ui/look.*`: the Inter fonts,
+over SDL2 + OpenGL (`src/ui/ui_linux.cpp`, through `ui/ui.h`). Both are drawn
+with the same pieces (`ui/look.*`: the Inter fonts,
 the colours, the game's key art from the player's own disc or package,
 buttons, cards) and share the file checks and the install job
 (`ui/setup_shared.*`). The launcher's Settings read and write `dod3.ini`
@@ -294,15 +272,15 @@ option switches them.
 
 ## Audio
 
-MultiStream runs on the SPUs as on the console; the mixer feeds WASAPI on
-Windows and CoreAudio through SDL on macOS, paced one block per 5.33 ms by
+MultiStream runs on the SPUs as on the console; the mixer feeds SDL2 audio
+(PulseAudio/PipeWire or whatever SDL selects), paced one block per 5.33 ms by
 the clock (pacing on buffer room mixed in bursts and lost blocks). The
 sound-driver threads and the mixer task run at high priority.
 
 ## What made the difference
 
-Measured in the chapter 1 battle on an i9-13900K / RTX 4090, from the first
-Windows run at 49 fps to the game's own 120 fps ceiling at 720p:
+Measured in the chapter 1 battle on an i9-13900K / RTX 4090, from the port's
+early runs at 49 fps to the game's own 120 fps ceiling at 720p:
 
 - guest loads and stores through the page table instead of four tests per
   access (45 → 81 fps); `sys_lwmutex` as a user-mode lock word instead of a
@@ -333,8 +311,4 @@ Measured as no gain, so nobody repeats them: pinning to the P-cores, EcoQoS
 opt-out, skipping the occlusion-query sync (`RSX_QUERY_NOSYNC`, also
 flickers), submitting partial batches early, parallel job-chain workers
 (`SPURS_JC_PAR`: the jobs are too small), vsync off at a cap, the five-test
-inline store path, `-O3` on the lifted units (byte-identical objects),
-profile-guided optimisation of the lifted units (`DOD3_PGO`, an IR profile
-of a battle run and an idle run: the idle scene 8% slower, the collision
-test 10% more cycles per call -- the layout the profile asks for does the
-huge units no good).
+inline store path and `-O3` on the lifted units (byte-identical objects).

@@ -90,7 +90,7 @@ void extra_rows(std::vector<Dod3RowSpec>& rows)
                      .choices = { { nullptr, "Console" }, { "original", "Original" } } });
     rows.push_back({ .key = "DOD3_LAUNCHER",
                      .label = "Launcher at Start",
-                     .desc = "Open this at start. Hold Shift (Option on a Mac) to open it anyway.",
+                     .desc = "Open this at start. Hold Shift to open it anyway.",
                      .choices = { { nullptr, "On" }, { "0", "Off" } } });
 }
 
