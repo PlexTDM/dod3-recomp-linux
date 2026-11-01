@@ -24,16 +24,23 @@ def main(argv):
     src = argv[1] if len(argv) > 1 else SRC
     size = int(argv[2]) if len(argv) > 2 else 256
 
-    with Image.open(src) as ico:
-        sizes = sorted(ico.info.get("sizes", {ico.size}), key=lambda s: s[0])
-        pick = next((s for s in sizes if s[0] >= size), sizes[-1])
-        ico.size = pick                # the ICO plugin keeps every entry; choose one
-        ico.load()
-        im = ico.convert("RGBA")
-    if im.size != (size, size):
-        im = im.resize((size, size), Image.Resampling.LANCZOS)
-    im.save(OUT)
-    print(f"{OUT}: {im.width}x{im.height} from {src} ({pick[0]}x{pick[1]})")
+    with Image.open(src) as im:
+        # An .ico keeps every size; take the smallest entry at least `size` (or
+        # the largest) through the ICO plugin's own accessor. Assigning
+        # Image.size to choose one works at run time, but Pillow's stubs mark
+        # it read-only.
+        ico = getattr(im, "ico", None)
+        if ico is None:
+            frame, picked = im, im.size
+        else:
+            entries = sorted(ico.sizes(), key=lambda s: s[0])
+            picked = next((s for s in entries if s[0] >= size), entries[-1])
+            frame = ico.getimage(picked)
+        image = frame.convert("RGBA")
+    if image.size != (size, size):
+        image = image.resize((size, size), Image.Resampling.LANCZOS)
+    image.save(OUT)
+    print(f"{OUT}: {image.width}x{image.height} from {src} ({picked[0]}x{picked[1]})")
     return 0
 
 
