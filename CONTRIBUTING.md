@@ -5,16 +5,19 @@ Start with [docs/BUILDING.md](docs/BUILDING.md) to get a build, then
 [docs/DEBUGGING.md](docs/DEBUGGING.md) for the switches and the regression
 tests.
 
-## The two repositories
+## The runtime
 
 - This repository holds the port: `src/`, `tools/`, the docs.
-- `ps3recomp/` is the sole runtime submodule:
-  [sp00nznet/ps3recomp](https://github.com/sp00nznet/ps3recomp). This project
-  builds for Linux and uses its Vulkan renderer. Runtime changes go to the
-  toolkit fork first; fixes of general use are offered upstream as
+- `ps3recomp-soyjxck/` is the runtime: the `linux-fixes` branch of
+  [PlexTDM/ps3recomp](https://github.com/PlexTDM/ps3recomp), a fork of
+  [sp00nznet/ps3recomp](https://github.com/sp00nznet/ps3recomp) carrying the
+  draw engine and Vulkan backend this port builds against. It is a separate
+  checkout, git-ignored and not a submodule; the port is tested against
+  `ee6d448`.
+- A runtime change goes to the fork first, and the port is built against the
+  new commit: `CMakeLists.txt` checks the checkout for what the port needs and
+  refuses one without it. Fixes of general use are offered upstream as
   single-change pull requests.
-- A change that spans both: commit and push the fork first, then commit
-  the new submodule pointer here together with the port's change.
 
 ## The tree
 

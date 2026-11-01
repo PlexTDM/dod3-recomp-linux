@@ -2,7 +2,7 @@
 
 A native Linux port of **Drakengard 3** (Drag-On Dragoon 3, PlayStation 3,
 BLUS31197), made by static recompilation of the game's code on the
-[ps3recomp](https://github.com/sp00nznet/ps3recomp) toolkit.
+[ps3recomp](https://github.com/sp00nznet/ps3recomp) toolkit. Linux only port of [Soyjxck's repo](https://github.com/soyjxck/dod3-recomp)
 
 The game's PowerPC and SPU code is translated to C++ ahead of time and built
 into a Linux executable, with the PS3's system libraries replaced by native
@@ -15,7 +15,7 @@ emulation at run time.
 Drakengard 3: the US disc and the game's 1.01 update, plus whatever DLC you
 own. The installer takes them from there.
 
-If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
+If this helped you, consider [buying soyjack a coffee](https://ko-fi.com/soyjack)
 
 ## Installing
 
@@ -34,13 +34,14 @@ What you need:
     licence files are needed.
 
   Other regions, the European PSN release among them, are refused.
+
 - The 1.01 update, as the package a PlayStation 3 downloads:
   `UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg`. This is the
   disc release's update; the PSN release takes it too.
 - Optionally, the DLC packages you own (`UP0082-NPUB31251_00-...`). No
   licence files are needed.
 - Optional mods can be installed manually; see
-  [docs/PLAYING.md](docs/PLAYING.md#mods).
+  [docs/PLAYING.md](docs/PLAYING.md#japanese-voices-and-mods).
 
 Linux:
 
@@ -66,7 +67,7 @@ the game's executable, so you need your own copy of the game first.
 
 1. **Linux toolchain.** GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python
    3.11+, SDL2, Vulkan, glslang, zlib and Git (for example `libsdl2-dev
-   libvulkan-dev glslang-dev zlib1g-dev` on Debian/Ubuntu).
+libvulkan-dev glslang-dev zlib1g-dev` on Debian/Ubuntu).
 
 2. **The sources.**
 
@@ -82,7 +83,7 @@ the game's executable, so you need your own copy of the game first.
    the fork, supplying the lifting tools, the runtime and the Vulkan renderer
    this port needs (colour-target snapshots, HDR/FP16 targets, batched
    submits) plus `runtime/ppu/ppu_vm_fast.h`. It is git-ignored, and the port
-   is tested against it at `16ef065`. Your own decrypted `libsre.prx` goes in
+   is tested against it at `ee6d448`. Your own decrypted `libsre.prx` goes in
    `fw_spu/`, also git-ignored.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another
@@ -137,11 +138,11 @@ and the conventions.
 
 ## Status
 
-| | |
-|---|---|
-| Linux, Vulkan | Native Linux build path; full gameplay verification requires the game's lifted outputs and assets |
-| Game version | The 1.01 update (required) |
-| DLC | All 20 packs, including the Japanese voice pack |
+|              |                                                 |
+| ------------ | ----------------------------------------------- |
+| Platform     | Linux, Vulkan                                   |
+| Game version | The 1.01 update (required)                      |
+| DLC          | All 20 packs, including the Japanese voice pack |
 
 What the port adds over the original: any internal resolution (supersampling
 included), windowed, borderless or full-screen display, wider screens (16:10,
@@ -163,7 +164,7 @@ and 32:9 some of the HUD is still out of place.
 elf/EBOOT_101.ELF  --ppu_loader/ppu_lifter-->  recompiled_101/*.cpp  (the game's PPU code as C++)
 SPU programs       --tools/lift_spu.sh------>  spu/                  (SPURS tasks, jobs, the audio DSP)
 src/               --------------------------->  the port: the runner, native fast paths, the settings menu, the installer
-ps3recomp/         --------------------------->  runtime, HLE libraries, the RSX draw engine and its backends
+ps3recomp-soyjxck/ --------------------------->  runtime, HLE libraries, the RSX draw engine and its Vulkan backend
 ```
 
 The native Linux executable `dod3` installs the game from your files through

@@ -4,20 +4,17 @@ Drakengard 3 is an Unreal Engine 3 game. Its PPU executable (30,134
 functions) is translated to C++ by ps3recomp's lifter and compiled into
 `dod3`; its 40 SPU programs and two raw SPURS jobs are lifted the same way.
 The PS3's system libraries are ps3recomp's HLE implementations, and the RSX
-command stream goes through the toolkit's draw engine to Direct3D 12, Metal
-or Vulkan. What this repository adds is the port: the runner, the pieces of
-the game's own code done natively where the lifted version was too slow, the
-settings menu, the installer, and the toolkit changes in the `ps3recomp/`
-fork.
+command stream goes through the toolkit's draw engine to Vulkan. What this
+repository adds is the port: the runner, the pieces of the game's own code
+done natively where the lifted version was too slow, the settings menu and the
+installer.
 
 ## The runner (`src/main.cpp`)
 
-- **Boot.** The guest address space is one flat 4 GB mapping (reserved on
-  Windows and committed on first touch by a vectored exception handler, so
-  any 32-bit guest pointer is valid). The EBOOT's ELF is loaded, the lifted
-  function table and the HLE handlers registered, the title's defaults set,
-  and the entry OPD dispatched. On macOS the guest runs on its own thread
-  and the frame clock takes the main thread, which AppKit needs.
+- **Boot.** The guest address space is one flat 4 GB mapping, committed on
+  first touch, so any 32-bit guest pointer is valid. The EBOOT's ELF is
+  loaded, the lifted function table and the HLE handlers registered, the
+  title's defaults set, and the entry OPD dispatched.
 - **The frame clock.** The RSX has no vblank interrupt here, so a host
   thread synthesises it: it ticks vblanks and flips at the vblank rate,
   drains the GCM FIFO on every tick (the FIFO walker; the sync labels the
@@ -73,7 +70,7 @@ was written (RPCS3's method). The vertex cache is validated the same way.
 As the lifter first writes it, every guest register is a slot of the
 register file in memory and every call goes through that memory, which
 leaves a compiler little to do. What is done about it is in the lifter
-(`ps3recomp/docs/PPU_RECOMP.md` has the detail and the switches):
+(`ps3recomp-soyjxck/docs/PPU_RECOMP.md` has the detail and the switches):
 
 - a function's registers are C locals, written back to the register file
   before a call only where they changed and something reads them: 10.1
@@ -87,10 +84,7 @@ leaves a compiler little to do. What is done about it is in the lifter
   each. The unaligned load, `lvlx`, was 190 instructions and a dozen
   branches as a loop over its bytes and is a table-driven shuffle; the
   collision tree walk (`func_012B32C8`), which is made of them, went from
-  10,000 instructions to 3,700;
-- on Windows the lifted units are built without thread-local guards
-  (`/Zc:tlsGuards-`): the tail-call trampoline is a thread-local read after
-  a call.
+  10,000 instructions to 3,700.
 
 A lift can be made to check all of this while the game runs
 (`PPU_NV_VERIFY=1`, see [DEBUGGING.md](DEBUGGING.md)).
@@ -115,15 +109,17 @@ either does its work or falls through.
 
 ## Rendering
 
-The draw engine (`ps3recomp/libs/video/rsx_draw_engine.c`) decodes the RSX
-register file into draws and hands them to a backend: `rsx_d3d12_engine.c`,
-`rsx_metal_backend.m`, `rsx_vulkan_engine.c`. Shaders are decompiled to HLSL
-and compiled by each backend (DXBC with a disk cache; MSL through SPIR-V;
-SPIR-V). What this game needed from the engine:
+The draw engine (`ps3recomp-soyjxck/libs/video/rsx_draw_engine.c`) decodes the
+RSX register file into draws and hands them to a backend; this port builds the
+Vulkan one (`rsx_vulkan_backend.c`), with the guest's shaders decompiled to
+HLSL, translated to SPIR-V by glslang and cached on disk. What this game needed
+from the engine:
 
 - **Snapshots** of a target that is read while it is drawn into (the heat
   haze samples the scene ~95 times a frame): kept incrementally, by
   redrawing only the draws since the last snapshot with a copy shader.
+  `vk_eng_color_snapshot` and `vk_eng_depth_snapshot_rgba8` are the Vulkan
+  side of this.
 - **Occlusion queries** with their GPU round trip before the fence the game
   waits on (without it, objects flicker and are culled).
 - **Internal resolution** (`RSX_SCALE`): every target is scaled except the
@@ -137,9 +133,9 @@ SPIR-V). What this game needed from the engine:
   settings; a new scale remakes every target under the same handle.
 - **Memory by the block**, for a level's first frame, which brings some 500
   textures and 25 MB of vertices at once. A texture is placed in a 64 MB
-  heap and a vertex-cache buffer is a range of a 32 MB mapped page (D3D12;
-  the Vulkan engine sub-allocates its device memory), where each used to be
-  an allocation in the driver; and what a submit stages is a chain of 16 MB
+  heap and a vertex-cache buffer is a range of a 32 MB mapped page, where each
+  used to be an allocation in the driver; and what a submit stages is a chain
+  of 16 MB
   chunks, where it used to be one arena grown by copying it out of
   write-combined memory. That frame went from 0.84 s to 0.2 s, the
   renderer's share of it from 0.68 s to 0.07 s.
@@ -218,12 +214,8 @@ the last frame, a turn in degrees, divided by that is the value that makes
 exactly the turn: the view follows the hand to within a percent. The
 pitch's constant falls away towards the ends of its range and is read off
 the view's own pitch, which the script reports each frame. The window's
-side is raw input and a hidden, confined cursor while the game has the
-focus (`ps3recomp/libs/video/rsx_host_mouse.c`). On macOS the Metal
-backend does it for its own window (`rsx_metal_backend.m`): the cursor is
-hidden and detached from the mouse, whose events still carry the motion,
-and the keys and mouse buttons the bindings read are that window's record
-of the events it was sent, so nothing is held unless the game is in front.
+side is raw input and a hidden, confined cursor while the game has the focus
+(`src/input/rsx_host_mouse_linux.cpp`).
 
 The same measurement showed the stick's turn speed to be proportional to
 the frame time: right at the 30 frames a second the game was made for, a
@@ -255,19 +247,16 @@ boot. Their content is plain UE3 packages; the few licence-bound files are
 not read, except the Japanese voice pack's two file lists, which the port
 writes itself from the installed files (`src/kernel/dlc.cpp`).
 
-## The setup, the launcher and mods
+## The installer and mods
 
-`src/ui/wizard.cpp` is the first-run setup and `src/ui/launcher.cpp` the
-launcher every later start opens (Play, Mods, DLC, Settings): Dear ImGui
-over a small platform layer (`ui/ui.h`: Win32 + Direct3D 12, or Cocoa +
-Metal). Both are drawn with the same pieces (`ui/look.*`: the Inter fonts,
-the colours, the game's key art from the player's own disc or package,
-buttons, cards) and share the file checks and the install job
-(`ui/setup_shared.*`). The launcher's Settings read and write `dod3.ini`
-with `ui/ini.*`, which reads it as the game does (the first of a key set
-twice counts).
-
-Each file the player adds is recognised by itself (`install/install.cpp`):
+`src/ui/wizard.cpp` is the first-run setup of the `dod3-setup` installer:
+Dear ImGui over a small SDL2 layer (`ui/ui_linux.cpp`), drawn with the Inter
+fonts and the game's key art from the player's own disc or package
+(`ui/look.*`), over the file checks and the install job
+(`ui/setup_shared.*`). The native game installs from the command line and
+reads `dod3.ini` itself (`src/ui/ini.cpp`, the same reader the settings pages
+write with). Each file the player adds is recognised by itself
+(`install/install.cpp`):
 the disc by its PARAM.SFO and the hash of its EBOOT.BIN (`install/iso.cpp`,
 an ISO 9660 reader), the update, the DLC and the PSN release's game by their
 package content IDs and footer checksums (`install/pkg.cpp`), a mod by its
@@ -285,23 +274,23 @@ hook. Only the files for the update's own folder, which the title lists, go
 into that folder, with the update's files they replace kept in
 `game/modfiles/<id>/orig/`. `game/modfiles/<id>.txt` lists every file a mod
 put in place, so Remove takes that mod alone out and puts the originals
-back without the update package. The launcher's switch moves the listed
-files to `game/modfiles/<id>/off/`, puts the originals back meanwhile and
-marks the mod off (`<id>.off`); on moves them back. The DLC Undub's voices
+back without the update package. Switching a mod off moves the listed files
+to `game/modfiles/<id>/off/`, puts the originals back meanwhile and marks the
+mod off (`<id>.off`); switching it on moves them back. The DLC Undub's voices
 go beside the voice pack's (`DLC_JPV/UNDUB`), and the game's own Voice
 option switches them.
 
 ## Audio
 
-MultiStream runs on the SPUs as on the console; the mixer feeds WASAPI on
-Windows and CoreAudio through SDL on macOS, paced one block per 5.33 ms by
-the clock (pacing on buffer room mixed in bursts and lost blocks). The
-sound-driver threads and the mixer task run at high priority.
+MultiStream runs on the SPUs as on the console; the mixer feeds SDL's audio
+output, paced one block per 5.33 ms by the clock (pacing on buffer room mixed
+in bursts and lost blocks). The sound-driver threads and the mixer task run at
+high priority.
 
 ## What made the difference
 
-Measured in the chapter 1 battle on an i9-13900K / RTX 4090, from the first
-Windows run at 49 fps to the game's own 120 fps ceiling at 720p:
+Measured in the chapter 1 battle, from the first run at 49 fps to the game's
+own 120 fps ceiling at 720p:
 
 - guest loads and stores through the page table instead of four tests per
   access (45 → 81 fps); `sys_lwmutex` as a user-mode lock word instead of a
@@ -325,12 +314,12 @@ run in turn with the build before): the hub 187 → 205 fps, its main thread
 chapter 1 battle 179 → 208 fps, main thread 4.6 → 2.9 ms, render thread
 3.6 → 2.3; from the start to the title 9.3 → 8.2 s; the executable 430 →
 293 MB. What did it: registers written back only where changed and read,
-the CR fields as locals, no thread-local guards, one page test for a run of
-accesses, SSE forms of the AltiVec loops.
+the CR fields as locals, one page test for a run of accesses, SSE forms of the
+AltiVec loops.
 
-Measured as no gain, so nobody repeats them: pinning to the P-cores, EcoQoS
-opt-out, skipping the occlusion-query sync (`RSX_QUERY_NOSYNC`, also
-flickers), submitting partial batches early, parallel job-chain workers
+Measured as no gain, so nobody repeats them: pinning to the P-cores,
+skipping the occlusion-query sync (`RSX_QUERY_NOSYNC`, also flickers),
+submitting partial batches early, parallel job-chain workers
 (`SPURS_JC_PAR`: the jobs are too small), vsync off at a cap, the five-test
 inline store path, `-O3` on the lifted units (byte-identical objects),
 profile-guided optimisation of the lifted units (`DOD3_PGO`, an IR profile

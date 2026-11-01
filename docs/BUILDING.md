@@ -8,8 +8,7 @@ the SPU programs are lifted, and the whole is compiled with CMake. Lifting
 needs the game's executable, so you need your own copy of the game first.
 
 Building the native recompiled game requires the game's lift and decrypted
-`libsre.prx`, as described below. The optional `DOD3_SETUP_ONLY` target builds
-the separate Linux installer without the game lift.
+`libsre.prx`, as described below.
 
 ## Prerequisites
 
@@ -32,7 +31,7 @@ python3 -m venv .venv
 
 Everything the build needs comes from `ps3recomp-soyjxck/`: the lifters, the
 package extractor, `runtime/ppu/ppu_vm_fast.h` and the Vulkan backend. It is
-git-ignored, and the port is tested against `linux-fixes` at `16ef065`. Your
+git-ignored, and the port is tested against `linux-fixes` at `ee6d448`. Your
 own decrypted `libsre.prx` goes in `fw_spu/`, also git-ignored. The build uses
 the venv's Python for the code it generates.
 
@@ -97,22 +96,19 @@ The build selects the Vulkan backend of the runtime in `PS3RECOMP_DIR`
 translate the game's guest shaders.
 
 A clean build is nearly all lifted translation units: 20-45 MB of generated
-C++ each, several minutes and several GiB of compiler memory apiece. A
-compiler process peaks at about 145 MiB of RAM per MB of its source whatever
-its `-O` level, so the build caps how many run at once to what the machine can
-hold (`DOD3_COMPILE_JOBS` below) and compiles them at `-O2`
-(`DOD3_RECOMP_OPT`); plain `cmake --build build` needs no `--parallel`, and
-more cores than the pool size will not make it faster. Measured with GCC 16,
-the largest unit takes 10 minutes at `-O2` (13.5 at `-O3`, 5.3 at `-O1`); a
-header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`) rebuilds
-all of them. Clang 23 compiles that unit in 6.6 minutes with 2.5 GiB instead
-of 5.6, so it is worth using for the build if it works for you: configure a
-fresh folder with `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
-(`clang++`, not `clang`: only the C++ driver links libstdc++), and keep the
-same compiler in a build folder (changing it means starting over).
-Stop any build already running before starting another: two ninja processes
-in one build folder overcommit the machine, and the kernel kills compilers.
-On repeat builds, ccache and lld are worth configuring once:
+C++ each, several minutes and several GiB of compiler memory apiece. The build
+caps how many compile at once to what the machine can hold
+(`DOD3_COMPILE_JOBS` below) and builds them at `-O2` (`DOD3_RECOMP_OPT`), so
+plain `cmake --build build` needs no `--parallel`, and more cores than the
+pool size will not make it faster. The largest unit takes about 10 minutes
+with GCC, and a header every lifted unit includes (`ppu_recomp.h`,
+`ppu_vm_fast.h`) rebuilds all of them. Clang builds it in about two thirds of
+the time and half the memory; configure a fresh folder with
+`-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` (`clang++`, not
+`clang`: only the C++ driver links libstdc++), and keep the same compiler in a
+build folder. Stop any build already running before starting another: two
+ninja processes in one folder overcommit the machine, and the kernel kills
+compilers. On repeat builds, ccache and lld are worth configuring once:
 
 ```sh
 cmake -S . -B build -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -120,10 +116,10 @@ cmake -S . -B build -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld
 ```
 
-A build folder keeps `RECOMP_DIR` in its cache, so one configured for the
-other version must be removed, or given `-DRECOMP_DIR=` explicitly (the
-scripts do); CMake refuses a lift that is not the version's.
-CMake options:
+A build folder keeps `RECOMP_DIR` in its cache: a folder configured for another
+lift must be removed, or given `-DRECOMP_DIR=` explicitly (the scripts do).
+
+Options:
 
 | Option | Default | |
 |---|---|---|
@@ -140,22 +136,13 @@ the default target: `cmake --build build --target rsx_replay`.
 
 ## Running
 
-After installing the game, running `dod3` starts it. The game data defaults
-to `$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`.
-`DOD3_INSTALL_BASE=<dir>` selects another install directory, such as the
-repository root for a developer tree:
+Running `dod3` starts the game. The data directory defaults to
+`$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`;
+`DOD3_INSTALL_BASE=<dir>` selects another, such as the repository root:
 
 ```sh
 DOD3_INSTALL_BASE=. build/dod3
-```
-
-Install from the command line, then start `dod3` from the same data directory.
-The native Linux game has no graphical launcher:
-
-```sh
-DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" \
-    build/dod3 --install /path/to/decrypted-disc-or-folder /path/to/update.pkg
-DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" build/dod3
+build/dod3 --install <decrypted-disc-or-folder> <update.pkg> [DLC.pkg ...]
 ```
 
 The developer form takes the executable to run, with the environment it
@@ -178,3 +165,20 @@ environment wins over it.
 | `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
 | `src/res/prompts/*.png` | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`) |
 | `src/patches/collision_native.cpp` | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |
+
+## The Linux installer (`dod3-setup`)
+
+`-DDOD3_SETUP_ONLY=ON` builds `dod3-setup` alone: a GUI installer for the
+Windows release, run under Wine or Proton, that needs none of the game's code.
+It is what a machine without a lift uses to lay out the game files, and it is
+not part of the native game.
+
+```sh
+tools/build_linux_setup.sh            # build-installer/dod3-setup
+tools/build_linux_setup.sh --run --base /path/to/release
+./build-installer/dod3-setup --check <file>...
+```
+
+`tools/build_linux_setup.sh` takes `--build-dir DIR`, `--debug`, `--clean`,
+`--run` and `--base DIR`. The file pickers use `zenity`, `kdialog` or `yad`
+when one is installed.
