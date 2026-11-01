@@ -134,7 +134,7 @@ const Bind kBinds[] = {
     { "KEY_L1", "L1", "Q Mouse3" },              { "KEY_R1", "R1", "Shift" },
     { "KEY_L2", "L2", "R" },                     { "KEY_R2", "R2", "F" },
     { "KEY_L3", "L3", "V C" },                   { "KEY_R3", "R3", "V X" },
-    { "KEY_START", "Start", "Esc Enter" },       { "KEY_SELECT", "Select", "Tab" },
+    { "KEY_START", "Start", "Enter" },           { "KEY_SELECT", "Select", "Tab" },
     { "KEY_UP", "D-Pad Up", "Up 1" },            { "KEY_DOWN", "D-Pad Down", "Down 3" },
     { "KEY_LEFT", "D-Pad Left", "Left 4" },      { "KEY_RIGHT", "D-Pad Right", "Right 2" },
     { "KEY_LOOK_UP", "Camera Up", "none" },      { "KEY_LOOK_DOWN", "Camera Down", "none" },

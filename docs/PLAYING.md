@@ -83,19 +83,21 @@ The game can also be played with keyboard and mouse.
 | Left mouse button | Square | Attack |
 | Right mouse button | Triangle | Strong attack |
 | Space | Cross | Jump; confirm in menus |
-| E, Backspace | Circle | Guard; back in menus |
+| E, Backspace, Esc | Circle | Guard; back in menus |
 | Shift | R1 | Evade |
 | Q, middle mouse button | L1 | Lock on |
 | Mouse wheel | Right stick left/right | Switch target |
 | R, F | L2, R2 | Weapon menus |
 | V | L3 and R3 together | Intoner Mode |
 | Arrow keys, 1 2 3 4 | D-pad | Menus; items |
-| Esc, Enter | Start | Pause |
+| Enter | Start | Pause |
 | Tab | Select | Select menu |
 
-Keys are configurable in `dod3.ini`. Escape pauses the game; use Alt+F4 to
-close it. When the game has focus the cursor is hidden and the mouse controls
-the camera.
+Keys are configurable in `dod3.ini`. Escape is always the back button: it
+closes a menu or steps back, and closes the window only if you ask it to
+(`PS3RECOMP_ESCAPE_QUITS=1` in `dod3.ini` or the environment). To quit, close
+the window or press Alt+F4. When the game has focus the cursor is hidden and
+the mouse controls the camera.
 
 ## Japanese voices and mods
 

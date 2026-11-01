@@ -15,7 +15,7 @@
  *   KEY_L1         Q, Mouse3          KEY_R1        Shift
  *   KEY_L2         R                  KEY_R2        F
  *   KEY_L3         V, C               KEY_R3        V, X
- *   KEY_START      Esc, Enter         KEY_SELECT    Tab
+ *   KEY_START      Enter              KEY_SELECT    Tab
  *   KEY_UP KEY_DOWN KEY_LEFT KEY_RIGHT              the arrows, and 1 3 4 2
  *   KEY_MOVE_UP _DOWN _LEFT _RIGHT                  W S A D (the left stick)
  *   KEY_LOOK_UP _DOWN _LEFT _RIGHT                  none none WheelUp WheelDown
@@ -27,8 +27,10 @@
  * Semicolon Quote Comma Period Slash Backslash Grave, Num0-Num9, Mouse1
  * (left) Mouse2 (right) Mouse3 (middle) Mouse4 Mouse5, WheelUp WheelDown.
  *
- * V presses both sticks in (Intoner Mode); Escape is Start, so the window no
- * longer closes on it (Alt+F4 does; Cmd+Q on macOS). With a pad plugged in
+ * V presses both sticks in (Intoner Mode). Escape is always the pad's back/
+ * cancel button -- Circle, the runtime presses it for the window -- so it
+ * closes a menu instead of the window (Alt+F4 does; Cmd+Q on macOS; the
+ * window's close button too). With a pad plugged in
  * as well, either can be used at any moment: the prompts follow the one
  * touched last.
  *
@@ -268,7 +270,7 @@ const struct {
     { "KEY_R2", "F", 1 << 9 },
     { "KEY_L3", "V C", 1 << 1 },
     { "KEY_R3", "V X", 1 << 2 },
-    { "KEY_START", "Esc Enter", 1 << 3 },
+    { "KEY_START", "Enter", 1 << 3 },
     { "KEY_SELECT", "Tab", 1 << 0 },
     { "KEY_UP", "Up 1", 1 << 4 },
     { "KEY_DOWN", "Down 3", 1 << 6 },
