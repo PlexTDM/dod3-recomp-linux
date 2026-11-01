@@ -71,14 +71,19 @@ the game's executable, so you need your own copy of the game first.
 2. **The sources.**
 
    ```sh
-   git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
-   cd dod3-recomp
+   git clone --recurse-submodules https://github.com/PlexTDM/dod3-recomp-linux.git
+   cd dod3-recomp-linux
+   git clone https://github.com/soyjxck/ps3recomp.git ps3recomp-soyjxck
+   git -C ps3recomp-soyjxck checkout 018024d483ec0e677a029a924cc3f154df528ff8
    python3 -m venv .venv
    .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
    ```
 
-   The checkout has one runtime submodule: sp00nznet/ps3recomp, selected for
-   the Linux Vulkan renderer.
+   The `ps3recomp` submodule supplies the lifting tools and `libsre.prx`.
+   The native runtime is soyjxck's `ps3recomp` fork in `ps3recomp-soyjxck/`;
+   it is not the v0.17.0 submodule, which lacks
+   `runtime/ppu/ppu_vm_fast.h`. CMake applies
+   `patches/soyjxck-vulkan-effects.patch` to that fork for the effects fixes.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another
    machine) installs the game into the repository root, which decrypts the
@@ -92,14 +97,7 @@ the game's executable, so you need your own copy of the game first.
    `recompiled_101/`):
 
    ```sh
-   .venv/bin/python ps3recomp/tools/ppu_loader.py elf/EBOOT_101.ELF -o out/v101/
-   .venv/bin/python ps3recomp/tools/ppu_lifter.py elf/EBOOT_101.ELF \
-       --functions out/v101/EBOOT_101.functions.json \
-       --hle-stubs out/v101/EBOOT_101.imports.json \
-       --code-end 0x157fc00 \
-       --nonvolatile-locals \
-       --hook 0x000C1E50 --hook 0x00EE7728 --hook 0x00272E58 \
-       -o recompiled_101/
+   sh tools/lift_ppu.sh
    ```
 
 5. **Lift the SPU programs** into `spu/`, with the native fast paths hooked
@@ -109,11 +107,13 @@ the game's executable, so you need your own copy of the game first.
    tools/lift_spu.sh
    ```
 
-6. **Compile.**
+6. **Compile** against the runtime fork:
 
    ```sh
-   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-   cmake --build build
+   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+       -DPS3RECOMP_DIR="$PWD/ps3recomp-soyjxck" \
+       -DLIBSRE_PRX="$PWD/ps3recomp/fw_spu/libsre.prx"
+   cmake --build build --parallel 2
    ```
 
    A clean build takes about 15 minutes, nearly all of it the lifted code.
@@ -124,8 +124,10 @@ the game's executable, so you need your own copy of the game first.
    DOD3_INSTALL_BASE=. build/dod3
    ```
 
-[docs/BUILDING.md](docs/BUILDING.md) has the Linux CMake options, developer
-run form and regenerating the committed tables;
+[docs/BUILDING-LINUX-NATIVE.md](docs/BUILDING-LINUX-NATIVE.md) has the
+step-by-step native Linux build, install and run guide;
+[docs/BUILDING.md](docs/BUILDING.md) has the CMake options, developer run
+form and regenerating the committed tables;
 [docs/TECHNICAL.md](docs/TECHNICAL.md) how the port works;
 [docs/DEBUGGING.md](docs/DEBUGGING.md) the switches, profiling and the
 regression tests; [CONTRIBUTING.md](CONTRIBUTING.md) the layout of the tree
@@ -145,10 +147,10 @@ included), windowed, borderless or full-screen display, wider screens (16:10,
 follows the scene, with the frames shown at even intervals, FXAA or MSAA,
 anisotropic filtering, a wider field of view, sharper shadows, a longer draw
 distance for scenery and for trees, skipping the intro logos and movie,
-pausing or muting when the window is in the background, keyboard and mouse,
-and the button prompts of the pad you hold -- set in `dod3.ini`, or in a
-Graphics Settings, a System Settings and an Advanced Graphics page added to
-the game's own Settings menu.
+auto-play for branch D's final song, pausing or muting when the window is in
+the background, keyboard and mouse, and the button prompts of the pad you
+hold -- set in `dod3.ini`, or in a Graphics Settings, a System Settings and
+an Advanced Graphics page added to the game's own Settings menu.
 
 Known issues: the game has been tested on few machines, and at 16:10, 21:9
 and 32:9 some of the HUD is still out of place.

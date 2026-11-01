@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(dod3
-    VERSION 0.4.0
+    VERSION 0.4.1
     LANGUAGES C CXX
     DESCRIPTION "Drakengard 3 (PS3) recompiled for Linux"
 )
 # The port's own version, apart from the game's (the 1.01 update).
-set(DOD3_VERSION_LABEL "0.4.0 alpha")
+set(DOD3_VERSION_LABEL "0.4.1 alpha")
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "dod3-recomp currently supports Linux builds only")
 endif()
@@ -185,6 +185,84 @@ if(NOT _spurs_tasksets_on)
     endif()
 endif()
 
+file(READ "${PS3RECOMP_DIR}/tools/ppu_lifter.py" _ppu_lifter_source)
+string(FIND "${_ppu_lifter_source}" "parser.add_argument(\"--hook\"" _ppu_hook_arg)
+if(_ppu_hook_arg EQUAL -1)
+    find_package(Git REQUIRED)
+    set(_ppu_hooks_patch
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-ppu-lifter-hooks.patch")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_ppu_hooks_patch}"
+        RESULT_VARIABLE _ppu_patch_check
+        OUTPUT_QUIET ERROR_VARIABLE _ppu_patch_error)
+    if(NOT _ppu_patch_check EQUAL 0)
+        message(FATAL_ERROR
+            "The selected ps3recomp lifter lacks the --hook support required by "
+            "Drakengard 3, and the compatibility patch cannot be applied:\n${_ppu_patch_error}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_ppu_hooks_patch}"
+        RESULT_VARIABLE _ppu_patch_result
+        ERROR_VARIABLE _ppu_patch_error)
+    if(NOT _ppu_patch_result EQUAL 0)
+        message(FATAL_ERROR "Could not apply the PPU lifter compatibility patch:\n${_ppu_patch_error}")
+    endif()
+endif()
+
+file(READ "${PS3RECOMP_DIR}/tools/build_spu_workloads.py" _spu_workload_source)
+string(FIND "${_spu_workload_source}" "ap.add_argument(\"--native-hook\"" _native_hook_arg)
+if(_native_hook_arg EQUAL -1)
+    find_package(Git REQUIRED)
+    set(_spu_hooks_patch
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-spu-native-hooks.patch")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_spu_hooks_patch}"
+        RESULT_VARIABLE _spu_patch_check
+        OUTPUT_QUIET ERROR_VARIABLE _spu_patch_error)
+    if(NOT _spu_patch_check EQUAL 0)
+        message(FATAL_ERROR
+            "The selected ps3recomp workload builder lacks the --native-hook support "
+            "required by Drakengard 3, and the compatibility patch cannot be applied:\n${_spu_patch_error}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_spu_hooks_patch}"
+        RESULT_VARIABLE _spu_patch_result
+        ERROR_VARIABLE _spu_patch_error)
+    if(NOT _spu_patch_result EQUAL 0)
+        message(FATAL_ERROR "Could not apply the SPU workload compatibility patch:\n${_spu_patch_error}")
+    endif()
+endif()
+
+# The Vulkan backend needs the port's effects work: colour-target snapshots
+# for the game's in-place post-process, depth-as-colour snapshots, HDR/FP16
+# targets, cached readback and pipelined draws. A plain soyjxck/ps3recomp
+# checkout does not have them yet, so apply the same patch the working tree
+# carries. The marker also matches newer forks that merged the work.
+file(READ "${PS3RECOMP_DIR}/libs/video/rsx_vulkan_backend.c" _vk_backend_source)
+string(FIND "${_vk_backend_source}" "vk_eng_color_snapshot" _vk_effects)
+if(_vk_effects EQUAL -1)
+    find_package(Git REQUIRED)
+    set(_vk_effects_patch
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/soyjxck-vulkan-effects.patch")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_vk_effects_patch}"
+        RESULT_VARIABLE _vk_patch_check
+        OUTPUT_QUIET ERROR_VARIABLE _vk_patch_error)
+    if(NOT _vk_patch_check EQUAL 0)
+        message(FATAL_ERROR
+            "The selected ps3recomp Vulkan backend lacks the port's effects fixes "
+            "(colour snapshots, depth-as-colour snapshots, HDR targets), and the "
+            "patch cannot be applied:\n${_vk_patch_error}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_vk_effects_patch}"
+        RESULT_VARIABLE _vk_patch_result
+        ERROR_VARIABLE _vk_patch_error)
+    if(NOT _vk_patch_result EQUAL 0)
+        message(FATAL_ERROR "Could not apply the Vulkan effects patch:\n${_vk_patch_error}")
+    endif()
+endif()
+
 option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer" ON)
 
 # The EBOOT the lift is from: 101 (the 1.01 update, lifted into
@@ -355,6 +433,22 @@ endif()
 # firmware-derived, so it is generated, never committed.
 set(LIBSRE_PRX "${PS3RECOMP_DIR}/fw_spu/libsre.prx" CACHE FILEPATH
     "Decrypted libsre.prx the SPURS queue paths are lifted from")
+if(NOT EXISTS "${LIBSRE_PRX}")
+    message(FATAL_ERROR
+        "The native Drakengard 3 build requires a decrypted PS3 firmware "
+        "module at ${LIBSRE_PRX}. Supply your own decrypted libsre.prx with "
+        "-DLIBSRE_PRX=/path/to/libsre.prx.")
+endif()
+file(READ "${LIBSRE_PRX}" _libsre_header HEX LIMIT 20)
+string(SUBSTRING "${_libsre_header}" 0 14 _libsre_ident)
+string(SUBSTRING "${_libsre_header}" 32 8 _libsre_type_machine)
+if(NOT _libsre_ident STREQUAL "7f454c46020201" OR
+   NOT _libsre_type_machine STREQUAL "ffa40015")
+    message(FATAL_ERROR
+        "${LIBSRE_PRX} is not a decrypted ELF64 big-endian PPC64 PRX "
+        "(expected ELF type 0xFFA4, machine 0x0015). SELF-wrapped SCE "
+        "firmware files are not accepted; provide the decrypted PRX.")
+endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
     set(DOD3_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
 else()
@@ -427,6 +521,7 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
     src/patches/menu_patch.cpp
     src/patches/prompts.cpp          # the button prompts in the pad's own glyphs
     src/patches/hud_aspect.cpp       # the HUD in a view wider or narrower than 16:9
+    src/patches/song_autoplay.cpp    # branch D's final song played for you (DOD3_SONG_AUTOPLAY)
     src/patches/sysset.cpp)
 set(PORT_UI_SOURCES                  # the in-game settings pages
     src/ui/settings_menu.cpp

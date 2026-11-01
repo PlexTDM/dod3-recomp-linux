@@ -10,11 +10,21 @@
 set -e
 cd "$(dirname "$0")/.."
 PY=.venv/bin/python
-[ -x "$PY" ] || PY=.venv/Scripts/python.exe   # a Windows venv (run this from Git Bash)
+[ -x "$PY" ] || PY=python3
 T=ps3recomp/tools
 ELF=${DOD3_ELF:-elf/EBOOT_101.ELF}
 [ -f "$ELF" ] || { echo "lift_spu: no $ELF (docs/BUILDING.md)"; exit 1; }
 [ "$(wc -c < "$ELF" | tr -d ' ')" = 26872424 ] || { echo "lift_spu: $ELF is not the 1.01 update's EBOOT"; exit 1; }
+
+WORKLOADS=$T/build_spu_workloads.py
+HOOK_PATCH=patches/sp00nznet-spu-native-hooks.patch
+if ! grep -Fq 'ap.add_argument("--native-hook"' "$WORKLOADS"; then
+    (
+        cd ps3recomp
+        git apply --check "../$HOOK_PATCH"
+        git apply "../$HOOK_PATCH"
+    )
+fi
 
 # Lifts already in spu/ are kept (build_spu_workloads.py skips them), so an
 # unchanged image is not recompiled. The overlays (the DSP plugin block, our

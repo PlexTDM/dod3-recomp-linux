@@ -1,5 +1,8 @@
 # Building
 
+For the complete native Linux workflow, including installing your game files
+before the first build, see [Building and running the native Linux game](BUILDING-LINUX-NATIVE.md).
+
 The Linux port is built in three steps: the game's PPU code is lifted to C++,
 the SPU programs are lifted, and the whole is compiled with CMake. Lifting
 needs the game's executable, so you need your own copy of the game first.
@@ -17,16 +20,22 @@ Linux (x86-64):
   glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
   Fedora), plus a Vulkan-capable driver.
 
-Clone and initialize the single runtime submodule:
+Clone and initialize the lifting submodule, then check out the runtime fork:
 
 ```sh
-git clone --recurse-submodules https://github.com/soyjxck/dod3-recomp
-cd dod3-recomp
+git clone --recurse-submodules https://github.com/PlexTDM/dod3-recomp-linux.git
+cd dod3-recomp-linux
+git clone https://github.com/soyjxck/ps3recomp.git ps3recomp-soyjxck
+git -C ps3recomp-soyjxck checkout 018024d483ec0e677a029a924cc3f154df528ff8
 python3 -m venv .venv
 .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
 ```
 
-CMake uses the venv's Python for code it generates at build time.
+The `ps3recomp` submodule is used for the lifters and `libsre.prx`; the
+native game is built against `ps3recomp-soyjxck/`, because the submodule's
+v0.17.0 lacks `runtime/ppu/ppu_vm_fast.h`. CMake applies
+`patches/soyjxck-vulkan-effects.patch` to that fork for the effects fixes,
+and uses the venv's Python for code it generates at build time.
 
 ## The game's files
 
@@ -48,26 +57,16 @@ Any other decrypted copy of the update's EBOOT.BIN with that hash works too
 ## Lifting the PPU code
 
 ```sh
-.venv/bin/python ps3recomp/tools/ppu_loader.py elf/EBOOT_101.ELF -o out/v101/
-.venv/bin/python ps3recomp/tools/ppu_lifter.py elf/EBOOT_101.ELF \
-    --functions out/v101/EBOOT_101.functions.json \
-    --hle-stubs out/v101/EBOOT_101.imports.json \
-    --code-end 0x157fc00 \
-    --nonvolatile-locals \
-    --hook 0x000C1E50 --hook 0x00EE7728 --hook 0x00272E58 \
-    -o recompiled_101/
+sh tools/lift_ppu.sh
 ```
 
 - `--code-end` is the end of the last executable section, so `.rodata` in the
   R-X segment is never promoted to functions.
-- `--nonvolatile-locals` keeps the guest registers in C locals, written back
-  to the register file only where they changed and something reads them
-  (`ps3recomp/docs/PPU_RECOMP.md`); the port is tuned for it.
-- The three `--hook`s are required: those functions are supplied natively
-  (the garbage collector and its reachability pass, `src/patches/gc.cpp` and
-  `src/patches/gc_native.cpp`; the collision test's timing wrapper,
-  `src/cpu/hot.cpp`) and the lifted bodies are emitted as
-  `func_<addr>_lifted`. A lift without them fails to link.
+- The helper applies the port's small compatibility patch to enable the three
+  `--hook`s required for native replacements: the garbage collector and its
+  reachability pass (`src/patches/gc.cpp`, `src/patches/gc_native.cpp`) and
+  the collision test's timing wrapper (`src/cpu/hot.cpp`). It emits the lifted
+  bodies as `func_<addr>_lifted`; a lift without these hooks fails to link.
 
 The lift takes a few minutes and writes about 600 MB of C++ (14 translation
 units). `recompiled_101/` is not in git.
@@ -87,13 +86,16 @@ already in `spu/` are kept, so a second run only redoes what changed.
 ## Compiling
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DPS3RECOMP_DIR="$PWD/ps3recomp-soyjxck" \
+    -DLIBSRE_PRX="$PWD/ps3recomp/fw_spu/libsre.prx"
+cmake --build build --parallel 2
 ```
 
-The build selects the sp00nznet runtime's Vulkan backend by default.
-Use `-DPS3RECOMP_RSX_VULKAN=OFF` only for a headless build. glslang is needed
-to translate the game's guest shaders.
+The build selects the Vulkan backend of the runtime in `PS3RECOMP_DIR`
+(soyjxck's fork, not the v0.17.0 submodule). Use
+`-DPS3RECOMP_RSX_VULKAN=OFF` only for a headless build. glslang is needed to
+translate the game's guest shaders.
 
 A clean build takes about 15 minutes, nearly all of it the lifted translation
 units; a header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`)

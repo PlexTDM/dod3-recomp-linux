@@ -188,8 +188,8 @@ const struct {
     { "Graphics Settings", "Ajustes gráficos" },
     { "Adjust settings related to graphics and the display.", "Ajustes relacionados con los gráficos y la pantalla." },
     { "System Settings", "Ajustes del sistema" },
-    { "Adjust the start-up, focus, prompt, mouse and renderer options.",
-      "Ajustes del inicio, el segundo plano, los botones y el ratón." },
+    { "Adjust the start-up, focus, final song, prompt, mouse and renderer options.",
+      "Ajustes del inicio, el segundo plano, la canción final, los botones y el ratón." },
     { "Advanced Graphics", "Gráficos avanzados" },
     { "Adjust the engine's shadows, motion blur and post-processing.",
       "Ajustes de sombras, desenfoque de movimiento y posprocesado." },
@@ -237,6 +237,9 @@ const struct {
     { "Keep Running", "Seguir" },
     { "Mute", "Silenciar" },
     { "Pause", "Pausar" },
+    { "Final Song Auto-Play", "Canción final automática" },
+    { "Branch D's final song presses every note for you, on its time.",
+      "La canción final de la rama D pulsa cada nota por ti, a su tiempo." },
     { "Button Prompts", "Iconos de botones" },
     { "The buttons the game shows. Auto follows the pad you hold.", "Los botones que muestra el juego. Auto sigue a tu mando." },
     { "Keyboard", "Teclado" },
@@ -491,6 +494,16 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      true,
                      nullptr,
                      PAGE_SYSTEM });
+#ifdef DOD3_FN_SONG_JUDGE
+    rows.push_back({ "DOD3_SONG_AUTOPLAY",
+                     "Final Song Auto-Play",
+                     "Branch D's final song presses every note for you, on its time.",
+                     { { NULL, "Off" }, { "1", "On" } },
+                     0,
+                     false,
+                     nullptr,
+                     PAGE_SYSTEM });
+#endif
     rows.push_back({ "DOD3_PROMPTS",
                      "Button Prompts",
                      "The buttons the game shows. Auto follows the pad you hold.",
@@ -527,8 +540,10 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      "The graphics API the game is drawn with.",
 #ifdef _WIN32
                      { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
+#elif defined(PS3RECOMP_RSX_VULKAN)
+                     { { NULL, "Vulkan" } },
 #else
-                     { { NULL, "Metal" } },
+                     { { NULL, "Headless" } },
 #endif
                      0,
                      false,
@@ -579,7 +594,7 @@ bool menu_text(int i, std::string& out)
     const Row* r = row_at(k % 100);
     static const char* const kRoot[] = {   /* the Settings root's entries: label, description */
         "Graphics Settings", "Adjust settings related to graphics and the display.",
-        "System Settings",   "Adjust the start-up, focus, prompt, mouse and renderer options.",
+        "System Settings",   "Adjust the start-up, focus, final song, prompt, mouse and renderer options.",
         "Advanced Graphics", "Adjust the engine's shadows, motion blur and post-processing.",
     };
     if (k >= 0 && k < (int)std::size(kRoot))

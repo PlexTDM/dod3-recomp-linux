@@ -39,9 +39,10 @@ Wine or Proton; it is not needed for the native game.
 
 In the game, Settings > Graphics Settings sets resolution, display mode,
 frame rate, v-sync, anti-aliasing, texture filtering and field of view.
-System Settings controls intro skipping, behavior when unfocused, controller
-prompts and mouse sensitivity. Advanced Graphics controls aspect ratio,
-shadows, motion blur, post-processing, draw distance and tree detail.
+System Settings controls intro skipping, behavior when unfocused, the final
+song's auto-play, controller prompts and mouse sensitivity. Advanced Graphics
+controls aspect ratio, shadows, motion blur, post-processing, draw distance
+and tree detail.
 
 Settings can also be changed in `dod3.ini` in the install directory:
 
@@ -63,6 +64,7 @@ Settings can also be changed in `dod3.ini` in the install directory:
 | `DOD3_TREE_LOD` | `2`, `3`, `5` or `10` for increased tree distance and detail |
 | `DOD3_SKIP_INTRO` | `1` skips the logos and opening movie; `0` keeps them |
 | `DOD3_UNFOCUSED` | `mute` silences audio when unfocused; `pause` also pauses the game |
+| `DOD3_SONG_AUTOPLAY` | `1` plays branch D's final song for you: every note is pressed on its time (the RPCS3 patch "Auto Play Song of The D Branch Final Mission", by bucanero). In the game: Settings > System Settings > Final Song Auto-Play; unset is off |
 | `DOD3_PROMPTS` | `ps3`, `ps4`, `ps5`, `xbox`, `switch` or `keyboard`; unset follows the active controller |
 | `DOD3_MOUSE_SENS` | Mouse camera sensitivity; `DOD3_MOUSE=0` disables mouse camera control |
 | `KEY_CROSS`, `KEY_MOVE_UP`, ... | Keys for each pad button and stick direction; the file lists all supported keys |

@@ -90,6 +90,7 @@ int dod3_setup_mac(const char* base_dir, int force);
 
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
 void dod3_hud_aspect_install();     /* src/patches/hud_aspect.cpp */
+void dod3_song_autoplay_install();  /* src/patches/song_autoplay.cpp */
 void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's file lists */
 void dod3_mods_prepare();           /* src/kernel/mods.cpp: the mods' files, the DLC chapters' voices */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
@@ -2024,6 +2025,11 @@ int main(int argc, char** argv)
      * thread, and the threads contend for the FILE lock. Quiet unless asked
      * (PS3_VERBOSE=1); the port's own milestone lines are not gated by it. */
     dod3_setenv("PS3_VERBOSE", "0", 0);
+    /* The console language. With PS3_LANG unset the toolkit answers the host's
+     * UI language; this title has always been told English (US), and the DLC
+     * English switch and the Spanish mod were made for that answer. An explicit
+     * PS3_LANG still picks another. */
+    dod3_setenv("PS3_LANG", "en", 0);
     /* The one firmware file the title loads: MultiStream fetches its MP3
      * decoder from /dev_flash/sys/external/flashMP3.pic when the first MP3
      * stream starts (without it the audio SPU task dies and the game hangs on
@@ -2147,6 +2153,7 @@ int main(int argc, char** argv)
     dod3_settings_menu_install();   /* the Graphics Settings page's two natives */
     dod3_sysset_install();          /* the tree detail row's hook */
     dod3_hud_aspect_install();      /* the HUD's markers in a view of another shape */
+    dod3_song_autoplay_install();   /* branch D's final song, if DOD3_SONG_AUTOPLAY=1 */
     dod3_kbm_install();
     dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */

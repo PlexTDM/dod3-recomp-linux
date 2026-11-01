@@ -1,0 +1,62 @@
+diff --git a/tools/ppu_lifter.py b/tools/ppu_lifter.py
+index 9d9df71..c493b55 100644
+--- a/tools/ppu_lifter.py
++++ b/tools/ppu_lifter.py
+@@ -835,7 +835,8 @@ def _last_line_is_terminator(body_lines: list[str]) -> bool:
+ class PPULifter:
+     """Translates PPU instructions into C source."""
+ 
+-    def __init__(self, prefix: str = "", weak_emit: bool = False):
++    def __init__(self, prefix: str = "", weak_emit: bool = False,
++                 hooks: set[int] | None = None):
+         self.functions: list[LiftedFunction] = []
+         self.call_targets: set[int] = set()
+         self.branch_targets: set[int] = set()  # all func_X references (b/bc trampolines)
+@@ -896,6 +897,7 @@ class PPULifter:
+             prefix += "_"
+         self.prefix = prefix
+         self.weak_emit = bool(weak_emit)
++        self.hooks = set(hooks or ())
+         # Cache for _range_insns: (instructions, len, ordered, addrs). Keyed by
+         # the instruction-list identity so the FULL list (mid-function / serial
+         # lift) is sorted+indexed once, not rescanned per call.
+@@ -3791,6 +3793,8 @@ class PPULifter:
+         # Forward declarations
+         for func in self.functions:
+             lines.append(f"void {func.name}(ppu_context* ctx);")
++            if func.start_addr in self.hooks:
++                lines.append(f"void {func.name}_lifted(ppu_context* ctx);")
+         # Also declare any call targets that aren't defined
+         defined = {f.start_addr for f in self.functions}
+         for target in sorted((self.call_targets | self.branch_targets) - defined):
+@@ -3964,8 +3968,9 @@ class PPULifter:
+         lines: list[str] = []
+         label = self.name_map.get(func.start_addr)
+         if label:
+             lines.append(f"/* {label} */")
++        hooked = "_lifted" if func.start_addr in self.hooks else ""
+         weak = "__attribute__((weak)) " if getattr(self, "weak_emit", False) else ""
+-        lines.append(f"void {weak}{func.name}(ppu_context* ctx) {{")
++        lines.append(f"void {weak}{func.name}{hooked}(ppu_context* ctx) {{")
+         for bline in _fuse_cr(func.body_lines):
+             lines.append(f"    {bline}" if not bline.endswith(":") else bline)
+@@ -4804,6 +4809,9 @@ def main() -> None:
+                         help="Emit lifted function definitions as weak symbols "
+                              "so a port's idiomatic overrides (strong symbols "
+                              "of the same name) shadow them at link time")
++    parser.add_argument("--hook", action="append", default=[], metavar="ADDR",
++                        help="Emit ADDR's lifted body as func_ADDR_lifted so "
++                             "the port can provide the native func_ADDR")
+     parser.add_argument("--hle-stubs", metavar="FILE", default=None,
+                         help="EBOOT.imports.json ([{library,nid,stub}]). Each "
+                              "import stub address is lifted as ps3_hle_call(nid) "
+@@ -5244,7 +5252,8 @@ def main() -> None:
+ 
+     print(f"Lifting {len(func_bounds)} functions...")
+ 
+-    lifter = PPULifter(prefix=args.symbol_prefix, weak_emit=args.weak)
++    hooks = {int(addr, 0) for addr in args.hook}
++    lifter = PPULifter(prefix=args.symbol_prefix, weak_emit=args.weak, hooks=hooks)
+     lifter.header_name = args.header_name
+     # A single-module executable keeps r2 (TOC) constant, so an `ld r2, N(r1)` TOC
+     # restore can be lowered to this literal instead of a stack read (the recomp has
