@@ -19,6 +19,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
+# Build resources
+# ---------------------------------------------------------------------------
+# The lifted translation units are machine-generated and run to hundreds of
+# thousands of lines each, so one compiler process takes minutes and several
+# gigabytes. How many of them may run at once is worked out where the lift is
+# globbed, below; the optimization level is chosen here.
+#
+# Mostly build time, not memory, is what the level buys: measured on the
+# 1.01 lift's 46 MB unit with GCC 16, -O3 takes 13.5 minutes, -O2 10 and
+# -O1 5.3, while all three peak at ~5.6 GiB. -O2 is the middle ground and
+# the default; -O1 is for iterating on the runtime, at a few percent of game
+# performance. Clang 23 compiles the same unit in 6.6 minutes with 2.5 GiB,
+# so a Clang build wants more concurrent units (the pool accounts for it).
+set(DOD3_RECOMP_OPT "-O2" CACHE STRING
+    "Optimization level for the lifted PPU sources (empty: the build type's)")
+
+# ---------------------------------------------------------------------------
 # The Linux installer alone (dod3-setup)
 # ---------------------------------------------------------------------------
 # Optional Linux installer-only target; the native game target is the default.
@@ -28,11 +45,15 @@ if(DOD3_SETUP_ONLY)
         set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     endif()
     if(NOT DEFINED PS3RECOMP_DIR)
-        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
+        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp-soyjxck")
     endif()
     get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
     if(NOT EXISTS "${PS3RECOMP_DIR}/tools/pkg_extract.py")
-        message(FATAL_ERROR "ps3recomp is not checked out. Run: git submodule update --init")
+        message(FATAL_ERROR
+            "The ps3recomp runtime checkout is missing. Clone it beside the "
+            "project: git clone --branch linux-fixes "
+            "https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck "
+            "(docs/BUILDING-LINUX-NATIVE.md)")
     endif()
 
     set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
@@ -46,7 +67,7 @@ if(DOD3_SETUP_ONLY)
     endif()
     string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _pkgkey_c "${CMAKE_MATCH_1}")
     file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/ps3recomp_pkg_key.h" CONTENT
-"/* Generated from ps3recomp/tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
+"/* Generated from the ps3recomp checkout's tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
 static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 ")
 
@@ -157,110 +178,51 @@ endif()
 #         -DRECOMP_DIR=/path/to/my_game/recompiled
 #
 if(NOT DEFINED PS3RECOMP_DIR)
-    set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp")
+    set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp-soyjxck")
 endif()
 get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
 
 file(STRINGS "${PS3RECOMP_DIR}/libs/spurs/spurs_taskset.c"
      _spurs_tasksets_on REGEX "int spurs_tasksets_on\\(")
 if(NOT _spurs_tasksets_on)
-    find_package(Git REQUIRED)
-    set(_spurs_compat_patch
-        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-spurs-taskset-registry.patch")
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --unidiff-zero --check "${_spurs_compat_patch}"
-        RESULT_VARIABLE _spurs_patch_check
-        OUTPUT_QUIET ERROR_VARIABLE _spurs_patch_error)
-    if(NOT _spurs_patch_check EQUAL 0)
-        message(FATAL_ERROR
-            "The selected ps3recomp runtime lacks the SPURS taskset registry used by "
-            "Drakengard 3, and the compatibility patch cannot be applied:\n${_spurs_patch_error}")
-    endif()
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --unidiff-zero "${_spurs_compat_patch}"
-        RESULT_VARIABLE _spurs_patch_result
-        ERROR_VARIABLE _spurs_patch_error)
-    if(NOT _spurs_patch_result EQUAL 0)
-        message(FATAL_ERROR "Could not apply the SPURS runtime compatibility patch:\n${_spurs_patch_error}")
-    endif()
+    message(FATAL_ERROR
+        "${PS3RECOMP_DIR} lacks the SPURS taskset registry Drakengard 3 needs. "
+        "Point PS3RECOMP_DIR at a checkout of "
+        "https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
 file(READ "${PS3RECOMP_DIR}/tools/ppu_lifter.py" _ppu_lifter_source)
 string(FIND "${_ppu_lifter_source}" "parser.add_argument(\"--hook\"" _ppu_hook_arg)
 if(_ppu_hook_arg EQUAL -1)
-    find_package(Git REQUIRED)
-    set(_ppu_hooks_patch
-        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-ppu-lifter-hooks.patch")
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_ppu_hooks_patch}"
-        RESULT_VARIABLE _ppu_patch_check
-        OUTPUT_QUIET ERROR_VARIABLE _ppu_patch_error)
-    if(NOT _ppu_patch_check EQUAL 0)
-        message(FATAL_ERROR
-            "The selected ps3recomp lifter lacks the --hook support required by "
-            "Drakengard 3, and the compatibility patch cannot be applied:\n${_ppu_patch_error}")
-    endif()
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_ppu_hooks_patch}"
-        RESULT_VARIABLE _ppu_patch_result
-        ERROR_VARIABLE _ppu_patch_error)
-    if(NOT _ppu_patch_result EQUAL 0)
-        message(FATAL_ERROR "Could not apply the PPU lifter compatibility patch:\n${_ppu_patch_error}")
-    endif()
+    message(FATAL_ERROR
+        "${PS3RECOMP_DIR}/tools/ppu_lifter.py has no --hook option, which the "
+        "port's lift needs. Point PS3RECOMP_DIR at a checkout of "
+        "https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
 file(READ "${PS3RECOMP_DIR}/tools/build_spu_workloads.py" _spu_workload_source)
 string(FIND "${_spu_workload_source}" "ap.add_argument(\"--native-hook\"" _native_hook_arg)
 if(_native_hook_arg EQUAL -1)
-    find_package(Git REQUIRED)
-    set(_spu_hooks_patch
-        "${CMAKE_CURRENT_SOURCE_DIR}/patches/sp00nznet-spu-native-hooks.patch")
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_spu_hooks_patch}"
-        RESULT_VARIABLE _spu_patch_check
-        OUTPUT_QUIET ERROR_VARIABLE _spu_patch_error)
-    if(NOT _spu_patch_check EQUAL 0)
-        message(FATAL_ERROR
-            "The selected ps3recomp workload builder lacks the --native-hook support "
-            "required by Drakengard 3, and the compatibility patch cannot be applied:\n${_spu_patch_error}")
-    endif()
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_spu_hooks_patch}"
-        RESULT_VARIABLE _spu_patch_result
-        ERROR_VARIABLE _spu_patch_error)
-    if(NOT _spu_patch_result EQUAL 0)
-        message(FATAL_ERROR "Could not apply the SPU workload compatibility patch:\n${_spu_patch_error}")
-    endif()
+    message(FATAL_ERROR
+        "${PS3RECOMP_DIR}/tools/build_spu_workloads.py has no --native-hook "
+        "option, which the port's SPU workloads need. Point PS3RECOMP_DIR at a "
+        "checkout of https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
-# The Vulkan backend needs the port's effects work: colour-target snapshots
-# for the game's in-place post-process, depth-as-colour snapshots, HDR/FP16
-# targets, cached readback and pipelined draws. A plain soyjxck/ps3recomp
-# checkout does not have them yet, so apply the same patch the working tree
-# carries. The marker also matches newer forks that merged the work.
+# The Vulkan backend's effects work -- colour-target snapshots for the game's
+# in-place post-process, depth-as-colour snapshots, HDR/FP16 targets, cached
+# readback and pipelined draws -- lives in the fork's linux-fixes branch, which
+# is what PS3RECOMP_DIR points at. vk_eng_color_snapshot and the rest are that
+# branch's own code; there is no patch to apply here.
 file(READ "${PS3RECOMP_DIR}/libs/video/rsx_vulkan_backend.c" _vk_backend_source)
 string(FIND "${_vk_backend_source}" "vk_eng_color_snapshot" _vk_effects)
 if(_vk_effects EQUAL -1)
-    find_package(Git REQUIRED)
-    set(_vk_effects_patch
-        "${CMAKE_CURRENT_SOURCE_DIR}/patches/soyjxck-vulkan-effects.patch")
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply --check "${_vk_effects_patch}"
-        RESULT_VARIABLE _vk_patch_check
-        OUTPUT_QUIET ERROR_VARIABLE _vk_patch_error)
-    if(NOT _vk_patch_check EQUAL 0)
-        message(FATAL_ERROR
-            "The selected ps3recomp Vulkan backend lacks the port's effects fixes "
-            "(colour snapshots, depth-as-colour snapshots, HDR targets), and the "
-            "patch cannot be applied:\n${_vk_patch_error}")
-    endif()
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PS3RECOMP_DIR}" apply "${_vk_effects_patch}"
-        RESULT_VARIABLE _vk_patch_result
-        ERROR_VARIABLE _vk_patch_error)
-    if(NOT _vk_patch_result EQUAL 0)
-        message(FATAL_ERROR "Could not apply the Vulkan effects patch:\n${_vk_patch_error}")
-    endif()
+    message(FATAL_ERROR
+        "${PS3RECOMP_DIR} is not the ps3recomp fork this port builds against: "
+        "its Vulkan backend has no colour-target snapshots, so the game's "
+        "in-place post-process would draw from stale guest memory. Point "
+        "PS3RECOMP_DIR at a checkout of https://github.com/PlexTDM/ps3recomp "
+        "(branch linux-fixes).")
 endif()
 
 option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer" ON)
@@ -322,6 +284,64 @@ if(NOT RECOMP_SOURCES)
 endif()
 list(LENGTH RECOMP_SOURCES RECOMP_SOURCE_COUNT)
 message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
+
+# ---------------------------------------------------------------------------
+# Build parallelism
+# ---------------------------------------------------------------------------
+# One compiler process for a lifted unit peaks at roughly 145 MiB of RSS per
+# MB of generated C++ with GCC 16 and about 70 with Clang 23 (measured on the
+# 22 and 46 MB units of the 1.01 lift), independently of the optimization
+# level. Ninja's default, cores + 2, therefore oversubscribes RAM with either
+# compiler, and the swap thrash that follows is slower than compiling fewer
+# units at a time.
+#
+# The pool is sized from the largest unit, leaving 4 GiB to the rest of the
+# system (the desktop and the linker want memory too), with the physical core
+# count as the ceiling.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(_dod3_mib_per_mb 70)
+else()
+    set(_dod3_mib_per_mb 145)
+endif()
+set(_dod3_max_src 0)
+foreach(_dod3_src IN LISTS RECOMP_SOURCES)
+    file(SIZE "${_dod3_src}" _dod3_src_size)
+    if(_dod3_src_size GREATER _dod3_max_src)
+        set(_dod3_max_src "${_dod3_src_size}")
+    endif()
+endforeach()
+math(EXPR _dod3_tu_mb "(${_dod3_max_src} / 1048576 + 1) * ${_dod3_mib_per_mb}")
+
+cmake_host_system_information(RESULT _dod3_cores QUERY NUMBER_OF_PHYSICAL_CORES)
+cmake_host_system_information(RESULT _dod3_mem_mb QUERY TOTAL_PHYSICAL_MEMORY)
+if(NOT _dod3_cores)
+    set(_dod3_cores 2)
+endif()
+# 0, the default, sizes it automatically on every configure; a positive
+# number pins it. A cache default of its own would instead keep a job count
+# that no longer suits a different machine or a bigger lift.
+set(DOD3_COMPILE_JOBS 0 CACHE STRING
+    "Lifted translation units compiled at once (0: sized from the lift and the machine)")
+if(DOD3_COMPILE_JOBS GREATER 0)
+    set(_dod3_jobs "${DOD3_COMPILE_JOBS}")
+else()
+    set(_dod3_jobs "${_dod3_cores}")
+    if(_dod3_mem_mb)
+        math(EXPR _dod3_jobs_by_memory "(${_dod3_mem_mb} - 4096) / ${_dod3_tu_mb}")
+        if(_dod3_jobs_by_memory LESS 1)
+            set(_dod3_jobs_by_memory 1)
+        endif()
+        if(_dod3_jobs_by_memory LESS _dod3_jobs)
+            set(_dod3_jobs "${_dod3_jobs_by_memory}")
+        endif()
+    endif()
+endif()
+# A normal variable, set on every configure, so that changing the job count
+# reconfigures the pool instead of keeping a stale size in the cache.
+set(CMAKE_JOB_POOLS "dod3_compile=${_dod3_jobs}")
+set(CMAKE_JOB_POOL_COMPILE dod3_compile)
+message(STATUS "Build jobs:      ${_dod3_jobs} lifted unit(s) at once "
+               "(${_dod3_tu_mb} MiB for the largest)")
 
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
@@ -431,7 +451,7 @@ endif()
 # src/kernel/spurs_lfqueue.cpp and src/kernel/spurs_queue.cpp drive Sony's own code out of
 # libsre.prx; tools/gen_libsre.py lifts it into the build tree. The result is
 # firmware-derived, so it is generated, never committed.
-set(LIBSRE_PRX "${PS3RECOMP_DIR}/fw_spu/libsre.prx" CACHE FILEPATH
+set(LIBSRE_PRX "${CMAKE_CURRENT_SOURCE_DIR}/fw_spu/libsre.prx" CACHE FILEPATH
     "Decrypted libsre.prx the SPURS queue paths are lifted from")
 if(NOT EXISTS "${LIBSRE_PRX}")
     message(FATAL_ERROR
@@ -493,7 +513,7 @@ if(NOT CMAKE_MATCH_1)
 endif()
 string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _pkgkey_c "${CMAKE_MATCH_1}")
 file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/ps3recomp_pkg_key.h" CONTENT
-"/* Generated from ps3recomp/tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
+"/* Generated from the ps3recomp checkout's tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
 static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 ")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_pkg_py}")
@@ -556,9 +576,11 @@ endif()
 # changes the compile command of every lifted PPU TU, and those are large enough
 # that the needless rebuild is measured in tens of minutes.
 #   SPU_USE_DISPATCH_MT -- route SPU_IB_DISPATCH through the musttail path.
-#   -O2                 -- the target-wide -O1 exists for the huge PPU TUs; the
-#                          SPU sources are small and decode-hot, so they get
-#                          full optimization. The last -O on the line wins.
+#   -O2                 -- the lifted PPU TUs build at DOD3_RECOMP_OPT (see
+#                          "Build resources": -O2 by default) to keep their
+#                          compile cost down; the SPU sources are small and
+#                          decode-hot, so they are pinned at -O2 explicitly.
+#                          The last -O on the command line wins.
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
@@ -666,6 +688,11 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 #     whether the module's dynamic TLS initialisers have run on this thread,
 #     which an executable's always have. The check and its call were 20 of
 #     the 43 instructions of a call-and-drain.
+#   - the optimization level from DOD3_RECOMP_OPT (default -O2), added after
+#     the build type's flags so that it is the -O that takes effect. These
+#     units are the build's long pole: the largest takes 13.5 minutes and
+#     ~5.6 GiB at -O3, 10 minutes at -O2, and 5.3 at -O1, with the same
+#     memory at each level.
 set(_recomp_opts "-w;-ffp-contract=off")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
     set(DOD3_X86_LEVEL "x86-64-v3" CACHE STRING
@@ -676,6 +703,11 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
             set_property(SOURCE src/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS DOD3_X86_V3)
         endif()
     endif()
+endif()
+# A source's COMPILE_OPTIONS come after CMAKE_CXX_FLAGS_<CONFIG> on the
+# command line, so this is the -O that wins over the build type's.
+if(DOD3_RECOMP_OPT)
+    list(APPEND _recomp_opts "${DOD3_RECOMP_OPT}")
 endif()
 set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
     COMPILE_OPTIONS "${_recomp_opts}")

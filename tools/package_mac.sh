@@ -131,7 +131,7 @@ codesign --verify --deep --strict "$app"
 cp docs/PLAYING.md "$out/README.txt"
 cp LICENSE "$out/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$out/THIRD_PARTY_NOTICES.txt"
-cp ps3recomp/LICENSE "$out/LICENSE-ps3recomp.txt"
+cp ps3recomp-soyjxck/LICENSE "$out/LICENSE-ps3recomp.txt"
 cp third_party/imgui/LICENSE.txt "$out/LICENSE-imgui.txt"
 cp third_party/fonts/inter/LICENSE.txt "$out/LICENSE-inter.txt"
 {

@@ -34,7 +34,7 @@ if [ -d cache/dxbc ]; then mkdir -p "$out/cache"; cp -r cache/dxbc "$out/cache/"
 sed 's/$/\r/' docs/PLAYING.md > "$out/README.txt"
 sed 's/$/\r/' LICENSE > "$out/LICENSE.txt"
 sed 's/$/\r/' THIRD_PARTY_NOTICES.md > "$out/THIRD_PARTY_NOTICES.txt"
-sed 's/$/\r/' ps3recomp/LICENSE > "$out/LICENSE-ps3recomp.txt"
+sed 's/$/\r/' ps3recomp-soyjxck/LICENSE > "$out/LICENSE-ps3recomp.txt"
 sed 's/$/\r/' third_party/imgui/LICENSE.txt > "$out/LICENSE-imgui.txt"
 sed 's/$/\r/' third_party/fonts/inter/LICENSE.txt > "$out/LICENSE-inter.txt"
 

@@ -44,7 +44,7 @@ installer itself does not need Wine or Proton; those are only for the game.
 From the Linux integration branch:
 
 ```sh
-git clone --recurse-submodules --branch linux-vulkan-integration \
+git clone --branch linux-vulkan-integration \
     https://github.com/PlexTDM/dod3-recomp-linux.git
 cd dod3-recomp-linux
 ```
@@ -54,8 +54,8 @@ repository's `main` branch.
 
 ## Build
 
-The helper script initializes the `ps3recomp` submodule when needed,
-configures a release build in `build-installer`, and builds `dod3-setup`:
+The helper script checks for the runtime checkout, configures a release
+build in `build-installer`, and builds `dod3-setup`:
 
 ```sh
 tools/build_linux_setup.sh
@@ -67,7 +67,7 @@ and ignored by Git; it is not in the repository.
 By hand:
 
 ```sh
-git submodule update --init --depth 1
+git clone --branch linux-fixes https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck
 cmake -S . -B build-installer -G Ninja \
     -DDOD3_SETUP_ONLY=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-installer

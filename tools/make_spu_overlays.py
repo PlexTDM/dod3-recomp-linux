@@ -220,7 +220,7 @@ def overlays(root):
 
 
 def wrap(root):
-    sys.path.insert(0, str(root / "ps3recomp/tools"))
+    sys.path.insert(0, str(root / "ps3recomp-soyjxck/tools"))
     from wrap_spu_elf import wrap as wrap_elf
     images = root / "spu/images"
     args = []

@@ -71,19 +71,19 @@ the game's executable, so you need your own copy of the game first.
 2. **The sources.**
 
    ```sh
-   git clone --recurse-submodules https://github.com/PlexTDM/dod3-recomp-linux.git
+   git clone https://github.com/PlexTDM/dod3-recomp-linux.git
    cd dod3-recomp-linux
-   git clone https://github.com/soyjxck/ps3recomp.git ps3recomp-soyjxck
-   git -C ps3recomp-soyjxck checkout 018024d483ec0e677a029a924cc3f154df528ff8
+   git clone --branch linux-fixes https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck
    python3 -m venv .venv
-   .venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
+   .venv/bin/pip install -r ps3recomp-soyjxck/tools/requirements.txt -r tools/requirements.txt
    ```
 
-   The `ps3recomp` submodule supplies the lifting tools and `libsre.prx`.
-   The native runtime is soyjxck's `ps3recomp` fork in `ps3recomp-soyjxck/`;
-   it is not the v0.17.0 submodule, which lacks
-   `runtime/ppu/ppu_vm_fast.h`. CMake applies
-   `patches/soyjxck-vulkan-effects.patch` to that fork for the effects fixes.
+   `ps3recomp-soyjxck/` is the runtime checkout: the `linux-fixes` branch of
+   the fork, supplying the lifting tools, the runtime and the Vulkan renderer
+   this port needs (colour-target snapshots, HDR/FP16 targets, batched
+   submits) plus `runtime/ppu/ppu_vm_fast.h`. It is git-ignored, and the port
+   is tested against it at `c1cf38f`. Your own decrypted `libsre.prx` goes in
+   `fw_spu/`, also git-ignored.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another
    machine) installs the game into the repository root, which decrypts the
@@ -112,11 +112,13 @@ the game's executable, so you need your own copy of the game first.
    ```sh
    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
        -DPS3RECOMP_DIR="$PWD/ps3recomp-soyjxck" \
-       -DLIBSRE_PRX="$PWD/ps3recomp/fw_spu/libsre.prx"
-   cmake --build build --parallel 2
+       -DLIBSRE_PRX="$PWD/fw_spu/libsre.prx"
+   cmake --build build
    ```
 
-   A clean build takes about 15 minutes, nearly all of it the lifted code.
+   A clean build is nearly all lifted code. CMake caps how many lifted
+   translation units compile at once to fit the machine's memory
+   (`DOD3_COMPILE_JOBS`), so no `--parallel` is needed.
 
 7. **Run** the game installed in the repository root:
 

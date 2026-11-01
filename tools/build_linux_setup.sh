@@ -72,11 +72,9 @@ for tool in cmake git ninja; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found"
 done
 
-if [ ! -f ps3recomp/tools/pkg_extract.py ]; then
-    echo "== ps3recomp submodule"
-    git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
-        die "ps3recomp is missing; clone with --recurse-submodules"
-    git submodule update --init --depth 1
+if [ ! -f ps3recomp-soyjxck/tools/pkg_extract.py ]; then
+    die "the runtime checkout is missing: git clone --branch linux-fixes \
+https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck (docs/BUILDING-LINUX-NATIVE.md)"
 fi
 
 if [ "$clean" = 1 ]; then

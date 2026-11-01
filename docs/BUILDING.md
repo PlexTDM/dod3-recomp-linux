@@ -20,22 +20,21 @@ Linux (x86-64):
   glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
   Fedora), plus a Vulkan-capable driver.
 
-Clone and initialize the lifting submodule, then check out the runtime fork:
+Clone the project, then the runtime fork beside it:
 
 ```sh
-git clone --recurse-submodules https://github.com/PlexTDM/dod3-recomp-linux.git
+git clone https://github.com/PlexTDM/dod3-recomp-linux.git
 cd dod3-recomp-linux
-git clone https://github.com/soyjxck/ps3recomp.git ps3recomp-soyjxck
-git -C ps3recomp-soyjxck checkout 018024d483ec0e677a029a924cc3f154df528ff8
+git clone --branch linux-fixes https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck
 python3 -m venv .venv
-.venv/bin/pip install -r ps3recomp/tools/requirements.txt -r tools/requirements.txt
+.venv/bin/pip install -r ps3recomp-soyjxck/tools/requirements.txt -r tools/requirements.txt
 ```
 
-The `ps3recomp` submodule is used for the lifters and `libsre.prx`; the
-native game is built against `ps3recomp-soyjxck/`, because the submodule's
-v0.17.0 lacks `runtime/ppu/ppu_vm_fast.h`. CMake applies
-`patches/soyjxck-vulkan-effects.patch` to that fork for the effects fixes,
-and uses the venv's Python for code it generates at build time.
+Everything the build needs comes from `ps3recomp-soyjxck/`: the lifters, the
+package extractor, `runtime/ppu/ppu_vm_fast.h` and the Vulkan backend. It is
+git-ignored, and the port is tested against `linux-fixes` at `c1cf38f`. Your
+own decrypted `libsre.prx` goes in `fw_spu/`, also git-ignored. The build uses
+the venv's Python for the code it generates.
 
 ## The game's files
 
@@ -88,20 +87,42 @@ already in `spu/` are kept, so a second run only redoes what changed.
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS3RECOMP_DIR="$PWD/ps3recomp-soyjxck" \
-    -DLIBSRE_PRX="$PWD/ps3recomp/fw_spu/libsre.prx"
-cmake --build build --parallel 2
+    -DLIBSRE_PRX="$PWD/fw_spu/libsre.prx"
+cmake --build build
 ```
 
 The build selects the Vulkan backend of the runtime in `PS3RECOMP_DIR`
-(soyjxck's fork, not the v0.17.0 submodule). Use
+(the fork's `linux-fixes` branch). Use
 `-DPS3RECOMP_RSX_VULKAN=OFF` only for a headless build. glslang is needed to
 translate the game's guest shaders.
 
-A clean build takes about 15 minutes, nearly all of it the lifted translation
-units; a header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`)
-rebuilds all of them. A build folder keeps `RECOMP_DIR` in its cache, so one
-configured for the other version must be removed, or given `-DRECOMP_DIR=`
-explicitly (the scripts do); CMake refuses a lift that is not the version's.
+A clean build is nearly all lifted translation units: 20-45 MB of generated
+C++ each, several minutes and several GiB of compiler memory apiece. A
+compiler process peaks at about 145 MiB of RAM per MB of its source whatever
+its `-O` level, so the build caps how many run at once to what the machine can
+hold (`DOD3_COMPILE_JOBS` below) and compiles them at `-O2`
+(`DOD3_RECOMP_OPT`); plain `cmake --build build` needs no `--parallel`, and
+more cores than the pool size will not make it faster. Measured with GCC 16,
+the largest unit takes 10 minutes at `-O2` (13.5 at `-O3`, 5.3 at `-O1`); a
+header every lifted unit includes (`ppu_recomp.h`, `ppu_vm_fast.h`) rebuilds
+all of them. Clang 23 compiles that unit in 6.6 minutes with 2.5 GiB instead
+of 5.6, so it is worth using for the build if it works for you: configure a
+fresh folder with `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
+(`clang++`, not `clang`: only the C++ driver links libstdc++), and keep the
+same compiler in a build folder (changing it means starting over).
+Stop any build already running before starting another: two ninja processes
+in one build folder overcommit the machine, and the kernel kills compilers.
+On repeat builds, ccache and lld are worth configuring once:
+
+```sh
+cmake -S . -B build -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld
+```
+
+A build folder keeps `RECOMP_DIR` in its cache, so one configured for the
+other version must be removed, or given `-DRECOMP_DIR=` explicitly (the
+scripts do); CMake refuses a lift that is not the version's.
 CMake options:
 
 | Option | Default | |
@@ -110,7 +131,9 @@ CMake options:
 | `RECOMP_DIR` | `recompiled_101` | the lifted PPU C++ |
 | `DOD3_X86_LEVEL` | x86-64-v3 | the lifted code's x86 level; empty for the baseline. The default needs AVX2, FMA and BMI2, and the executable checks for them at start |
 | `DOD3_INLINE_VM` | ON | inline the guest-memory fast path into the lifted code |
-| `LIBSRE_PRX` | the submodule's | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`) |
+| `DOD3_RECOMP_OPT` | `-O2` | optimization of the lifted PPU sources. Compile time is what it changes, not memory: the largest unit takes 13.5 minutes at `-O3`, 10 at `-O2` and 5.3 at `-O1` with GCC, and game performance moves the other way |
+| `DOD3_COMPILE_JOBS` | 0 (automatic) | lifted units compiled at once (the `dod3_compile` job pool), sized from the lift's largest unit, the machine's RAM and the compiler; a positive number pins it. Raise it if the machine has RAM to spare, lower it if the build swaps |
+| `LIBSRE_PRX` | `fw_spu/libsre.prx` | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`) |
 
 The replay tool (`rsx_replay`, for the rendering regression) is not part of
 the default target: `cmake --build build --target rsx_replay`.

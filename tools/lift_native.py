@@ -9,7 +9,7 @@ The lifted body (func_<addr>_lifted, as ps3recomp's lifter writes it with
 a local, all of them written back at every call -- not the form the game is
 built from, so lift it into a folder of its own) is rewritten in two steps:
 
-  1. ps3recomp/tools/ppu_frame_locals.py promotes the frame's own slots --
+  1. ps3recomp-soyjxck/tools/ppu_frame_locals.py promotes the frame's own slots --
      callee-saved register saves and restores, the LR word, the compiler's
      spill slots -- to host locals, with its must-define dataflow deciding
      what is safe (a slot read before it is written on some path, or shared
@@ -38,7 +38,7 @@ ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
 ap.add_argument("lifted", help="the lifted translation unit holding the function")
 ap.add_argument("func", help="function name, e.g. func_00272E58 (its _lifted body is used)")
 ap.add_argument("--name", required=True, help="the native function's name")
-ap.add_argument("--lifter", default="ps3recomp/tools/ppu_lifter.py", help="where the FP helpers are copied from")
+ap.add_argument("--lifter", default="ps3recomp-soyjxck/tools/ppu_lifter.py", help="where the FP helpers are copied from")
 ap.add_argument("--inline-zero", metavar="CALLEE", default="",
                 help="a callee that zeroes r4, stores it to the four words at r3 and returns (the title's "
                      "16-byte clear): its call, with the register-file round trip a lifted call costs, becomes "

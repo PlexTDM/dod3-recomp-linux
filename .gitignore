@@ -34,6 +34,8 @@ __pycache__/
 .venv/
 /ps3recomp-soyjxck/
 /libsre.prx
+# Your own decrypted libsre.prx: lifted from at build time, never committed
+/fw_spu/
 
 # Captures and frame grabs
 *.rsxcap

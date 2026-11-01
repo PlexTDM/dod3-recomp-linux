@@ -27,37 +27,33 @@ or PlayStation firmware data.
   It must be a plain decrypted ELF64 big-endian PPC64 PRX (ELF type `0xFFA4`,
   machine `0x0015`), not the SELF-wrapped `SCE` firmware file. Firmware files
   are not included; see
-  [ps3recomp's firmware notes](../ps3recomp/docs/FIRMWARE_LLE.md) for
-  requirements. You can put it at `ps3recomp/fw_spu/libsre.prx`, or pass its
-  path to CMake as shown below.
-- A checkout of soyjxck's `ps3recomp` fork at base commit `018024d`, with this
-  port's Vulkan renderer changes in `libs/video/rsx_vulkan_backend.c` and
-  `libs/video/rsx_draw_engine.c`. This is the runtime and Vulkan backend the
-  native game is built from. CMake applies
-  `patches/soyjxck-vulkan-effects.patch` automatically when the checkout
-  lacks them. The pinned `ps3recomp` submodule is **not** the runtime: it is
-  v0.17.0, which lacks `runtime/ppu/ppu_vm_fast.h`. The submodule is still
-  used for the lifting tools, the package extractor and `libsre.prx`.
+  [ps3recomp's firmware notes](https://github.com/PlexTDM/ps3recomp/blob/linux-fixes/docs/FIRMWARE_LLE.md)
+  for requirements. Put it at `fw_spu/libsre.prx`, or pass its path to CMake
+  as shown below.
+- A checkout of the `linux-fixes` branch of
+  [PlexTDM/ps3recomp](https://github.com/PlexTDM/ps3recomp). This is the
+  runtime and Vulkan backend the native game is built from: colour-target
+  snapshots, depth-as-colour snapshots, HDR/FP16 targets, batched submits,
+  and the `<prefix>.req` frame grab the tools drive. It also supplies the
+  lifting tools, the package extractor and `runtime/ppu/ppu_vm_fast.h`.
 
 ## Prepare the source and Python tools
 
-Clone this project with its `ps3recomp` submodule, then clone the runtime fork
-next to it:
+Clone the project, then the runtime fork beside it:
 
 ```sh
-git clone --recurse-submodules https://github.com/PlexTDM/dod3-recomp-linux.git
+git clone https://github.com/PlexTDM/dod3-recomp-linux.git
 cd dod3-recomp-linux
-git clone https://github.com/soyjxck/ps3recomp.git ps3recomp-soyjxck
-git -C ps3recomp-soyjxck checkout 018024d483ec0e677a029a924cc3f154df528ff8
+git clone --branch linux-fixes https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck
 python3 -m venv .venv
-.venv/bin/python -m pip install -r ps3recomp/tools/requirements.txt \
+.venv/bin/python -m pip install -r ps3recomp-soyjxck/tools/requirements.txt \
     -r tools/requirements.txt
 ```
 
 `ps3recomp-soyjxck/` is git-ignored on purpose: it is a separate source
-checkout, not a submodule of this repository. If you already have this
-checkout, initialize the lifting submodule with `git submodule update --init`
-and make sure `ps3recomp-soyjxck/` is at `018024d` or newer.
+checkout, not part of this repository. If you already have one, make sure it
+is on `linux-fixes` (tested at `c1cf38f`); nothing else is checked out
+alongside the project.
 
 `tools/lift_ppu.sh` and `tools/lift_spu.sh` use the tools in `ps3recomp/`.
 If those tools predate the `--hook` and `--native-hook` options, the helpers
@@ -123,13 +119,15 @@ Configure against the runtime fork and point CMake at your decrypted
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS3RECOMP_DIR="$PWD/ps3recomp-soyjxck" \
-    -DLIBSRE_PRX="$PWD/ps3recomp/fw_spu/libsre.prx"
-cmake --build build --parallel 2
+    -DLIBSRE_PRX="$PWD/fw_spu/libsre.prx"
+cmake --build build
 ```
 
 The result is `build/dod3`. CMake uses the runtime's Vulkan renderer by
-default. `--parallel 2` limits memory use; increase it if your machine has
-enough available RAM.
+default. The build limits itself to what the machine can hold:
+`DOD3_COMPILE_JOBS` sets the `dod3_compile` job pool from the lift's largest
+translation unit and the machine's RAM, so no `--parallel` is needed. Raise
+it if the machine has memory to spare, lower it if the build swaps.
 
 The build cache records the runtime selection:
 
@@ -140,22 +138,17 @@ grep PS3RECOMP_DIR build/CMakeCache.txt
 
 ### Which `ps3recomp` is used
 
-Two checkouts are involved and they are not interchangeable:
+One checkout is involved:
 
-- `ps3recomp/` (submodule `a6d76c8`, v0.17.0): the PPU lifter, package
-  extractor, SPU workload builder and `fw_spu/libsre.prx`. The working-tree
-  changes kept here are only the lifter and workload-builder hooks the lift
-  helpers need.
-- `ps3recomp-soyjxck/` (soyjxck's fork, base `018024d` plus this port's
-  working-tree changes): the runtime, RSX draw engine and Vulkan backend
-  compiled into `build/dod3`. Pass it as `PS3RECOMP_DIR`.
+- `ps3recomp-soyjxck/` (the fork's `linux-fixes` branch): the runtime, RSX
+  draw engine and Vulkan backend compiled into `build/dod3`. Pass it as
+  `PS3RECOMP_DIR`.
 
-The renderer changes are not in upstream `018024d`; a fresh checkout gets
-them from `patches/soyjxck-vulkan-effects.patch` at configure time. The
-working tree in this repository already has the same patch applied. An
-earlier attempt used the v0.17.0 submodule as the runtime. It cannot build
-the native game because `runtime/ppu/ppu_vm_fast.h` is missing, so its
-unused runtime changes are not part of this build.
+The renderer work is that branch's own code, so a checkout of `linux-fixes`
+is all the build needs: no patch is applied at configure time. The project
+used to carry the upstream v0.17.0 toolkit as a submodule; it was removed
+when the fork took over every job it had (lifters, package extractor,
+`ppu_vm_fast.h`), leaving only `libsre.prx`, which now lives in `fw_spu/`.
 
 ## Renderer fixes that make the effects work
 
@@ -175,7 +168,7 @@ not renderer fixes.
   post-process layer. `vk_eng_color_snapshot` copies an owned colour target
   to a sampleable twin before the draw and binds the twin. This is the
   Vulkan implementation of the runtime's `color_snapshot` op
-  (`ps3recomp-soyjxck` commits `46fcdb0` and `76bb522`).
+  (`ps3recomp-soyjxck`, `linux-fixes`).
 - **Depth-as-colour snapshots (`depth_snapshot_rgba8`).**
   `vk_eng_depth_snapshot_rgba8` reads the D32 depth target back and packs it
   as `R = depth[15:8]`, `G = depth[7:0]`, `B = stencil`,
