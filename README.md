@@ -82,7 +82,7 @@ the game's executable, so you need your own copy of the game first.
    the fork, supplying the lifting tools, the runtime and the Vulkan renderer
    this port needs (colour-target snapshots, HDR/FP16 targets, batched
    submits) plus `runtime/ppu/ppu_vm_fast.h`. It is git-ignored, and the port
-   is tested against it at `c1cf38f`. Your own decrypted `libsre.prx` goes in
+   is tested against it at `16ef065`. Your own decrypted `libsre.prx` goes in
    `fw_spu/`, also git-ignored.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another

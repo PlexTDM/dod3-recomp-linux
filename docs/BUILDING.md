@@ -32,7 +32,7 @@ python3 -m venv .venv
 
 Everything the build needs comes from `ps3recomp-soyjxck/`: the lifters, the
 package extractor, `runtime/ppu/ppu_vm_fast.h` and the Vulkan backend. It is
-git-ignored, and the port is tested against `linux-fixes` at `c1cf38f`. Your
+git-ignored, and the port is tested against `linux-fixes` at `16ef065`. Your
 own decrypted `libsre.prx` goes in `fw_spu/`, also git-ignored. The build uses
 the venv's Python for the code it generates.
 

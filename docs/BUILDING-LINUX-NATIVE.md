@@ -52,7 +52,7 @@ python3 -m venv .venv
 
 `ps3recomp-soyjxck/` is git-ignored on purpose: it is a separate source
 checkout, not part of this repository. If you already have one, make sure it
-is on `linux-fixes` (tested at `c1cf38f`); nothing else is checked out
+is on `linux-fixes` (tested at `16ef065`); nothing else is checked out
 alongside the project.
 
 `tools/lift_ppu.sh` and `tools/lift_spu.sh` use the tools in `ps3recomp/`.
