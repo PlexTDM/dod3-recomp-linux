@@ -28,6 +28,11 @@ mkdir -p "$out"
 cp "$build/dod3" "$out/"
 # the default settings as committed (a local dod3.ini may hold your own)
 git show HEAD:dod3.ini > "$out/dod3.ini"
+# Our own version of the title's post-processing composite (Post-Processing
+# Quality, High, and the HDR highlight plane: src/main.cpp finds it beside
+# the executable).
+mkdir -p "$out/shaders/override"
+cp shaders/override/*.hlsl "$out/shaders/override/"
 cp docs/PLAYING.md "$out/README.md"
 cp LICENSE "$out/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$out/THIRD_PARTY_NOTICES.md"

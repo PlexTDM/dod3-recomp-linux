@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 project(dod3
     VERSION 0.5.0
     LANGUAGES C CXX
@@ -209,20 +211,20 @@ if(_native_hook_arg EQUAL -1)
         "checkout of https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
-# The Vulkan backend's effects work -- colour-target snapshots for the game's
-# in-place post-process, depth-as-colour snapshots, HDR/FP16 targets, cached
-# readback and pipelined draws -- lives in the fork's linux-fixes branch, which
-# is what PS3RECOMP_DIR points at. vk_eng_color_snapshot and the rest are that
-# branch's own code; there is no patch to apply here.
-file(READ "${PS3RECOMP_DIR}/libs/video/rsx_vulkan_backend.c" _vk_backend_source)
-string(FIND "${_vk_backend_source}" "vk_eng_color_snapshot" _vk_effects)
-if(_vk_effects EQUAL -1)
+# The renderer is the draw engine's Vulkan backend, rsx_vulkan_engine.c: the
+# one the Windows build runs with RSX_BACKEND=vulkan, with HDR output, the
+# host's keyboard and mouse, and the guest's programs translated to SPIR-V.
+# It is built when PS3RECOMP_RSX_VULKAN is on (and glslang is found); the
+# runtime then defines PS3RECOMP_VULKAN_ENGINE_SDL for the port, checked after
+# add_subdirectory.
+file(READ "${PS3RECOMP_DIR}/libs/video/rsx_vulkan_engine.c" _vk_engine_source)
+string(FIND "${_vk_engine_source}" "rsx_vulkan_engine_init" _vk_engine)
+if(_vk_engine EQUAL -1)
     message(FATAL_ERROR
-        "${PS3RECOMP_DIR} is not the ps3recomp fork this port builds against: "
-        "its Vulkan backend has no colour-target snapshots, so the game's "
-        "in-place post-process would draw from stale guest memory. Point "
-        "PS3RECOMP_DIR at a checkout of https://github.com/PlexTDM/ps3recomp "
-        "(branch linux-fixes).")
+        "${PS3RECOMP_DIR} is not a ps3recomp with the draw engine's Vulkan "
+        "backend (libs/video/rsx_vulkan_engine.c), which is the renderer this "
+        "port boots on Linux. Point PS3RECOMP_DIR at a checkout of "
+        "https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
 option(PS3RECOMP_RSX_VULKAN "Use the runtime's Vulkan renderer" ON)
@@ -361,6 +363,16 @@ if(PS3RECOMP_RSX_VULKAN AND
         "Install the glslang development package or configure with "
         "-DPS3RECOMP_RSX_VULKAN=OFF for a headless build.")
 endif()
+# The runtime says the engine is built and its window is SDL2's: the port's
+# main.cpp selects rsx_vulkan_engine on this definition, and the engine needs
+# the guest's programs (glslang), so a runtime without it cannot run here.
+get_target_property(_rt_defs ps3recomp_runtime INTERFACE_COMPILE_DEFINITIONS)
+if(PS3RECOMP_RSX_VULKAN AND NOT "PS3RECOMP_VULKAN_ENGINE_SDL=1" IN_LIST _rt_defs)
+    message(FATAL_ERROR
+        "The ps3recomp runtime built without the Vulkan engine's SDL2 window "
+        "and the guest's programs (glslang with SPIRV-Tools). Debian/Ubuntu: "
+        "apt install glslang-dev glslang-tools spirv-tools libvulkan-dev")
+endif()
 
 # ---------------------------------------------------------------------------
 # The HLE NID table
@@ -494,8 +506,9 @@ add_custom_command(
     COMMENT "Lifting libsre's SPURS queue paths")
 set_source_files_properties("${LIBSRE_LIFTED_CPP}" PROPERTIES COMPILE_OPTIONS "-w;-ffp-contract=off")
 
-list(APPEND PORT_PLATFORM_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/input/rsx_host_mouse_linux.cpp")
+# The Vulkan engine brings the mouse with its own SDL2 window
+# (rsx_host_mouse.c), so the port has no platform source of its own here.
+set(PORT_PLATFORM_SOURCES "")
 
 # The installer (src/install/install.h): the core on every platform; the pages
 # (src/ui/wizard.cpp) in Dear ImGui (third_party/imgui, v1.92.9b), in a
@@ -554,7 +567,12 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
     src/patches/sysset.cpp)
 set(PORT_UI_SOURCES                  # the in-game settings pages
     src/ui/settings_menu.cpp
+    src/ui/overlay.cpp               # the in-game layer: the trophies' listener
     src/ui/ini.cpp)                  # dod3.ini, edited in place
+# The trophies (trophy_host.h, trophy_pack.h): only for the file that reads
+# them, so the lifted code's command lines stay as they are.
+set_property(SOURCE src/ui/overlay.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+             "${PS3RECOMP_DIR}/libs/network")
 set(PORT_SOURCES
     src/main.cpp
     src/util.cpp
@@ -605,6 +623,9 @@ endif()
 # "cpu/eboot.h"): src/ is their include root. Scoped to them, as the SPU
 # include directory is above, so the lifted TUs' compile commands stay as
 # they are.
+# main.cpp lists the trophies (--trophies): the runtime's trophy_pack.h.
+set_property(SOURCE src/main.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+             "${PS3RECOMP_DIR}/libs/network")
 set_property(SOURCE ${PORT_SOURCES} ${PORT_PLATFORM_SOURCES} ${SETUP_SOURCES}
              "${CMAKE_CURRENT_SOURCE_DIR}/src/patches/spu_hooks.c"
              "${CMAKE_CURRENT_SOURCE_DIR}/src/apu/msdsp_hooks.c"
@@ -727,12 +748,15 @@ set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
 set_property(SOURCE src/patches/collision_native.cpp APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
 # PPU_INLINE_VM: the lifted code's loads and stores inline the runtime's fast
 # path (ps3recomp/runtime/ppu/ppu_vm_fast.h) instead of calling vm_read*/
-# vm_write*. The render thread spent ~60% of its time in those calls.
+# vm_write*. The render thread spent ~60% of its time in those calls. The
+# lifted libsre too: it includes the game's ppu_recomp.h, and since the v0.18
+# lifter, code lifted without PPU_INLINE_VM needs that header's per-function
+# memory model, which a header from an older lift does not have.
 option(DOD3_INLINE_VM "Inline the guest-memory fast path into the lifted code" ON)
 if(DOD3_INLINE_VM)
-    set_property(SOURCE ${RECOMP_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS PPU_INLINE_VM)
+    set_property(SOURCE ${RECOMP_SOURCES} "${LIBSRE_LIFTED_CPP}" APPEND PROPERTY COMPILE_DEFINITIONS PPU_INLINE_VM)
 endif()
-set_property(SOURCE ${RECOMP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/ppu")
+set_property(SOURCE ${RECOMP_SOURCES} "${LIBSRE_LIFTED_CPP}" APPEND PROPERTY INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/ppu")
 
 # ---------------------------------------------------------------------------
 # Install

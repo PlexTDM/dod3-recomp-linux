@@ -83,7 +83,7 @@ libvulkan-dev glslang-dev zlib1g-dev` on Debian/Ubuntu).
    the fork, supplying the lifting tools, the runtime and the Vulkan renderer
    this port needs (colour-target snapshots, HDR/FP16 targets, batched
    submits) plus `runtime/ppu/ppu_vm_fast.h`. It is git-ignored, and the port
-   is tested against it at `ee6d448`. Your own decrypted `libsre.prx` goes in
+   is tested against it at `042e13a5`. Your own decrypted `libsre.prx` goes in
    `fw_spu/`, also git-ignored.
 
 3. **The game's files.** Any built `dod3` (a release's, or one from another
@@ -149,14 +149,17 @@ included), windowed, borderless or full-screen display, wider screens (16:10,
 21:9, 32:9), a frame-rate cap of your choice (60 and 120 tested) or one that
 follows the scene, with the frames shown at even intervals, FXAA or MSAA,
 anisotropic filtering, a wider field of view, sharper shadows, a longer draw
-distance for scenery and for trees, depth of field on its own and the blood on
-the screen on, border-only or off, skipping the intro logos and movie,
-auto-play for branch D's final song, cheats (full health, a full Intoner
-gauge, items kept, time limits stopped), pausing or muting when the window is
+distance for scenery and for trees, HDR where the display and compositor
+offer it, a depth of field and bloom drawn smoothly at high resolutions, depth
+of field and the blood on the screen each on or off, skipping the intro logos
+and movie, auto-play for branch D's final song, cheats (full health, a full
+Intoner gauge, items kept, time limits stopped), trophies (kept with your
+saves, and `dod3 --trophies` lists them), pausing or muting when the window is
 in the background, keyboard and mouse (the mouse moves the dragon's shooting
 cursor in the sky too), and the button prompts of the pad you
-hold -- set in `dod3.ini`, or in a Graphics Settings, a System Settings and
-an Advanced Graphics page added to the game's own Settings menu.
+hold -- set in `dod3.ini`, or in a Graphics Settings, a System Settings, an
+Advanced Graphics and a Picture Settings page added to the game's own
+Settings menu.
 
 Known issues: the game has been tested on few machines, and at 16:10, 21:9
 and 32:9 some of the HUD is still out of place.

@@ -42,7 +42,8 @@ frame rate, v-sync, anti-aliasing, texture filtering and field of view.
 System Settings controls intro skipping, behavior when unfocused, the final
 song's auto-play, controller prompts, mouse sensitivity and the blood on
 screen. Advanced Graphics controls aspect ratio, shadows, motion blur,
-post-processing, depth of field, draw distance and tree detail.
+post-processing, depth of field, draw distance and tree detail. Picture
+Settings controls HDR and the post-processing quality.
 
 Settings can also be changed in `dod3.ini` in the install directory:
 
@@ -61,6 +62,12 @@ Settings can also be changed in `dod3.ini` in the install directory:
 | `DOD3_MOTION_BLUR` | `0` disables motion blur |
 | `DOD3_POSTFX` | `0` disables depth of field, bloom and color grading |
 | `DOD3_DOF` | `0` disables only the depth of field; the bloom stays |
+| `RSX_HDR` | `1` shows the game in HDR where the display and compositor offer an HDR surface |
+| `DOD3_POSTFX_QUALITY` | `high` draws the depth of field and bloom smoothly above 720p, with the port's own version of the game's post-processing shader; from the next start |
+| `RSX_HDR_WHITE` | White in HDR, in nits: `100` to `400`; unset is 200 |
+| `RSX_HDR_PEAK` | The brightest highlight, in nits; unset is 1000 |
+| `RSX_HDR_HIGHLIGHTS` | `0` keeps the HDR picture within white |
+| `RSX_HDR_GAMMA` | `srgb` uses the sRGB curve instead of a 2.2 power |
 | `DOD3_SCREEN_BLOOD` | `border` leaves out the blood splashes and keeps the low-health border; `0` leaves out both |
 | `DOD3_DRAW_DISTANCE` | `2`, `3`, `5` or `10` for increased scenery distance |
 | `DOD3_TREE_LOD` | `2`, `3`, `5` or `10` for increased tree distance and detail |
@@ -97,6 +104,63 @@ DOD3_CHEAT_TIME = 1
 - **Time limits**: a mission's time limit does not count down.
 
 `DOD3_CHEAT_LOG=1` says what each wrapped call was asked for.
+
+## HDR
+
+On a display that can show HDR, and a compositor that offers an HDR surface
+(on Wayland, one that exports HDR or gamescope; many X11 desktops offer only
+SDR), the game can use it: Settings > Picture Settings > HDR in the game, or
+`RSX_HDR = 1` in `dod3.ini`. The log says which was picked:
+
+```sh
+grep 'HDR:' dod3.log     # "scRGB FP16" or "HDR10 (10-bit PQ)", or why it stays SDR
+```
+
+The game's picture is made for an SDR screen; in HDR it is shown as an SDR
+screen would show it -- the same colours and the same dark shadows -- at the
+brightness HDR Brightness sets for white, and the light the game itself clips
+at white (the sky, fire, embers, glints on blades) can go on above it, up to
+your display's peak, rolled off smoothly instead of cut. The HUD, menus and
+movies stay at the white you set.
+
+- HDR Brightness: Auto is 200 nits. A lower white leaves the highlights more
+  room above it; 200 to 300 nits is a good start in a dim room.
+- `RSX_HDR_PEAK` caps the highlights at your display's peak, in nits.
+- Switching HDR on changes the picture at once; the brighter highlights come
+  from the port's own version of the game's post-processing shader
+  (`shaders/override`), which also writes the highlight plane. They need HDR
+  on when the game starts; switched on later, the picture is HDR without
+  them until the next start. `RSX_HDR_HIGHLIGHTS = 0` keeps the picture
+  within white.
+- HDR is new here, and untested on an HDR display: reports are welcome.
+
+## Post-processing quality
+
+Settings > Picture Settings > Post-Processing Quality, or
+`DOD3_POSTFX_QUALITY = high` in `dod3.ini` (from the next start): above
+1280x720 the depth of field and bloom are drawn smoothly, and what is out of
+focus stays soft instead of showing sharp detail through the blur. It is the
+port's own version of the game's post-processing shader
+(`shaders/override/a3e8d0b0476b7c09.hlsl`). At 1280x720 the picture is the
+original's; unset is the original at any resolution.
+
+## Trophies
+
+The game's 72 trophies are earned as on the console, read from your copy's own
+trophy list, and kept in `gamedata/trophies` (NPWR04682.json) with your saves:
+back that folder up with them. Nothing goes to PSN or anywhere else.
+
+- In the game, trophies are unlocked and saved; the pop-up over the game is
+  drawn on Windows with Direct3D 12 only so far.
+- On the command line, `dod3 --trophies` lists them all -- grade, the date you
+  earned each and its name (a hidden trophy keeps its secret until earned):
+
+  ```sh
+  DOD3_INSTALL_BASE=. build/dod3 --trophies
+  ```
+
+- `PS3_TROPHY_PREVIEW=<id>[,<id>]` shows those pop-ups at boot without
+  recording anything (on a platform that draws them).
 
 ## Controls
 

@@ -1,5 +1,5 @@
-/* The Graphics Settings, System Settings and Advanced Graphics pages in the
- * title's own Settings menu.
+/* The Graphics Settings, System Settings, Advanced Graphics and Picture
+ * Settings pages in the title's own Settings menu.
  *
  * tools/menu_patch.py rewrites a few script functions in SQEX03GAME.XXX (the
  * copy served through PS3_VFS_OVERLAY): the Settings root gets two more
@@ -14,6 +14,7 @@
  *     MAGIC+0 / +1         Graphics Settings: the root entry's label / description
  *     MAGIC+2 / +3         System Settings: the same
  *     MAGIC+4 / +5         Advanced Graphics (rows from src/patches/sysset.cpp)
+ *     MAGIC+6 / +7         Picture Settings
  *     MAGIC+100+row        a row's label (of the open page)
  *     MAGIC+200+row        its value (the one being edited)
  *     MAGIC+300+row        its description
@@ -24,7 +25,8 @@
  *     page then hands straight to "Press START": no company, middleware
  *     or UE3 logos, no opening movie; DOD3_SKIP_INTRO=0 keeps them)
  *     7 open(root entry): 3 Graphics, 4 System, 5 Advanced Graphics,
- *     6 Restore Defaults (the reset and apply that follow cover every page)
+ *     6 Picture, 7 Restore Defaults (the reset and apply that follow cover
+ *     every page)
  *     8 the page's rows
  *     9 the camera's FOV   10 is the Graphics page on screen? (in play,
  *     the pause screen's dimming and frost are then left out)
@@ -81,8 +83,9 @@ bool dod3_menus_spanish();                                        /* src/kernel/
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
-#if defined(_WIN32) || defined(__APPLE__)
-extern "C" int g_rsx_aniso;         /* the live anisotropy level: rsx_d3d12_engine.c, rsx_metal_backend.m */
+#if defined(_WIN32) || defined(__APPLE__) || defined(PS3RECOMP_VULKAN_ENGINE_SDL)
+extern "C" int g_rsx_aniso;         /* the live anisotropy level: rsx_d3d12_engine.c, rsx_metal_backend.m,
+                                       rsx_vulkan_engine.c */
 #endif
 extern "C" int g_rsx_aa;            /* rsx_draw_engine.c: 1 = FXAA at present */
 
@@ -193,6 +196,17 @@ const struct {
     { "Advanced Graphics", "Gráficos avanzados" },
     { "Adjust the engine's shadows, motion blur and post-processing.",
       "Ajustes de sombras, desenfoque de movimiento y posprocesado." },
+    { "Picture Settings", "Ajustes de imagen" },
+    { "Adjust the HDR picture.", "Ajustes de la imagen HDR." },
+    { "HDR", "HDR" },
+    { "On a display with HDR (the compositor offers an HDR surface).",
+      "En una pantalla con HDR (el compositor ofrece una superficie HDR)." },
+    { "HDR Brightness", "Brillo del HDR" },
+    { "How bright white is in HDR. Auto: the display's SDR white.",
+      "El brillo del blanco en HDR. Auto: el blanco SDR de la pantalla." },
+    { "Post-Processing Quality", "Calidad del posprocesado" },
+    { "High: depth of field and bloom drawn smoothly above 720p.",
+      "Alta: profundidad de campo y resplandor suaves por encima de 720p." },
     /* what rows add */
     { " Applies after a restart.", " Se aplica al reiniciar." },
     { " (next start)", " (al reiniciar)" },
@@ -300,7 +314,7 @@ struct Row {
 };
 
 std::vector<Row> s_rows;            /* every page's */
-const int NPAGES = 3;
+const int NPAGES = 4;
 std::vector<int> s_page_rows[NPAGES];   /* each page's, in order */
 int s_page;                         /* the page open; -1: every page (Restore Defaults) */
 bool s_init;
@@ -384,7 +398,7 @@ void read_current(Row& r, int& idx)
 /* The renderer applies RSX_DISPLAY / RSX_VSYNC / RSX_SCALE changes at its
  * next window pump (g_rsx_display_reload); the Direct3D 12, Vulkan and
  * Metal engines do. */
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || defined(PS3RECOMP_VULKAN_ENGINE_SDL)
 #define LIVE_DISPLAY true
 #else
 #define LIVE_DISPLAY false
@@ -556,6 +570,41 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
                      PAGE_SYSTEM });
     /* Advanced Graphics: the engine's own switches (src/patches/sysset.cpp) */
     dod3_sysset_rows(rows);
+    /* Picture Settings. HDR is the renderer's: the swap chain becomes scRGB
+     * (or HDR10 where the driver offers no scRGB) when the compositor's
+     * surface has HDR, and the present pass maps the frame to the paper
+     * white set below. RSX_HDR_PEAK (dod3.ini) caps the highlights at the
+     * display's peak. Takes effect at once: the engine re-reads it. */
+    rows.push_back({ "RSX_HDR",
+                     "HDR",
+                     "On a display with HDR (the compositor offers an HDR surface).",
+                     { { NULL, "Off" }, { "1", "On" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     PAGE_PICTURE });
+    rows.push_back({ "RSX_HDR_WHITE",
+                     "HDR Brightness",
+                     "How bright white is in HDR. Auto: the display's SDR white.",
+                     { { NULL, "Auto" },
+                       { "100", "100 nits" },
+                       { "150", "150 nits" },
+                       { "200", "200 nits" },
+                       { "250", "250 nits" },
+                       { "300", "300 nits" },
+                       { "400", "400 nits" } },
+                     0,
+                     LIVE_DISPLAY,
+                     nullptr,
+                     PAGE_PICTURE });
+    rows.push_back({ "DOD3_POSTFX_QUALITY",
+                     "Post-Processing Quality",
+                     "High: depth of field and bloom drawn smoothly above 720p.",
+                     { { NULL, "Original" }, { "high", "High" } },
+                     0,
+                     false,
+                     nullptr,
+                     PAGE_PICTURE });
 }
 
 void init_rows()
@@ -601,6 +650,7 @@ bool menu_text(int i, std::string& out)
         "Graphics Settings", "Adjust settings related to graphics and the display.",
         "System Settings",   "Adjust the start-up, focus, final song, prompt, mouse and renderer options.",
         "Advanced Graphics", "Adjust the engine's shadows, motion blur and post-processing.",
+        "Picture Settings",  "Adjust the HDR picture.",
     };
     if (k >= 0 && k < (int)std::size(kRoot))
         out = tr(kRoot[k]);
@@ -648,7 +698,8 @@ void apply()
                                                  : 0;
                 display = true;   /* the renderer makes or drops its MSAA targets at the reload */
             }
-            if (!strcmp(r.key, "RSX_DISPLAY") || !strcmp(r.key, "RSX_VSYNC") || !strcmp(r.key, "RSX_SCALE"))
+            if (!strcmp(r.key, "RSX_DISPLAY") || !strcmp(r.key, "RSX_VSYNC") || !strcmp(r.key, "RSX_SCALE") ||
+                !strcmp(r.key, "RSX_HDR") || !strcmp(r.key, "RSX_HDR_WHITE") || !strcmp(r.key, "RSX_HDR_PEAK"))
                 display = true;
             if (!strcmp(r.key, "DOD3_FPS")) fps = true;
             if (!strcmp(r.key, "DOD3_UNFOCUSED")) unfocused = true;
@@ -711,7 +762,7 @@ int bridge(int cmd, int a, int b)
     }
     case CMD_GRAPHICS_SHOWN:   /* is a graphics page on screen? The pause screen's dimming and
                                 * frost are left out while it is, so changes can be seen. */
-        return ((s_page == PAGE_GRAPHICS || s_page == PAGE_ADVANCED) &&
+        return ((s_page == PAGE_GRAPHICS || s_page == PAGE_ADVANCED || s_page == PAGE_PICTURE) &&
                 std::chrono::steady_clock::now() - s_page_drawn < std::chrono::milliseconds(250))
                    ? 1
                    : 0;

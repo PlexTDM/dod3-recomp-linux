@@ -94,15 +94,15 @@ A lift can be made to check all of this while the game runs
 Where the lifted code was the bottleneck, the function runs natively, with a
 check mode that runs both and compares:
 
-| What | Where | Check |
-|---|---|---|
-| The garbage collector's reachability pass (`func_00EE6538`): a statement-for-statement translation; phase 2 on 8 worker threads; the periodic purge moved into the frame limiter's sleep | `src/patches/gc.cpp`, `src/patches/gc_native.cpp` | `DOD3_GC_NATIVE=check` |
-| ShaderPatching's LZF decoder (an SPU job run ~200 times a frame on the render thread): the copy loops, whole tokens, and a memo of decoded shaders | `src/patches/spu_hooks.c` | `DOD3_SPU_NATIVE_CHECK=1` |
-| MultiStream's DSP biquads (half of the audio SPU task) | `src/apu/msdsp_hooks.c` | `DOD3_SPU_NATIVE_CHECK=1` |
-| The MP3 decoder MultiStream loads from the console's firmware: a native decoder (`src/apu/mp3dec.c`) behind a stand-in image of our own that the runtime serves in its place | `src/apu/mp3_native.c`, `tools/make_spu_overlays.py` | `DOD3_MP3_CHECK=1` |
-| Unreal's package loader reads (`FArchiveAsync::Serialize`): a copy out of the archive's precache buffer when the bytes are there, the lifted function otherwise; the linker's Serialize goes straight to it, and a name is one read | `src/patches/archive_native.cpp` | `DOD3_ARCHIVE_NATIVE=0`; `DOD3_LOAD_LOG` splits native and lifted reads |
-| The package inflate the game sends to an SPU zlib task through a SPURS LFQueue | `src/patches/edgezlib.cpp` | each chunk's Adler-32 |
-| The SPURS queue and LFQueue paths, lifted from libsre at build time (the HLE's own were not enough for this game) | `src/kernel/spurs_queue.cpp`, `src/kernel/spurs_lfqueue.cpp`, `tools/gen_libsre.py` | |
+| What                                                                                                                                                                                                                                | Where                                                                               | Check                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| The garbage collector's reachability pass (`func_00EE6538`): a statement-for-statement translation; phase 2 on 8 worker threads; the periodic purge moved into the frame limiter's sleep                                            | `src/patches/gc.cpp`, `src/patches/gc_native.cpp`                                   | `DOD3_GC_NATIVE=check`                                                  |
+| ShaderPatching's LZF decoder (an SPU job run ~200 times a frame on the render thread): the copy loops, whole tokens, and a memo of decoded shaders                                                                                  | `src/patches/spu_hooks.c`                                                           | `DOD3_SPU_NATIVE_CHECK=1`                                               |
+| MultiStream's DSP biquads (half of the audio SPU task)                                                                                                                                                                              | `src/apu/msdsp_hooks.c`                                                             | `DOD3_SPU_NATIVE_CHECK=1`                                               |
+| The MP3 decoder MultiStream loads from the console's firmware: a native decoder (`src/apu/mp3dec.c`) behind a stand-in image of our own that the runtime serves in its place                                                        | `src/apu/mp3_native.c`, `tools/make_spu_overlays.py`                                | `DOD3_MP3_CHECK=1`                                                      |
+| Unreal's package loader reads (`FArchiveAsync::Serialize`): a copy out of the archive's precache buffer when the bytes are there, the lifted function otherwise; the linker's Serialize goes straight to it, and a name is one read | `src/patches/archive_native.cpp`                                                    | `DOD3_ARCHIVE_NATIVE=0`; `DOD3_LOAD_LOG` splits native and lifted reads |
+| The package inflate the game sends to an SPU zlib task through a SPURS LFQueue                                                                                                                                                      | `src/patches/edgezlib.cpp`                                                          | each chunk's Adler-32                                                   |
+| The SPURS queue and LFQueue paths, lifted from libsre at build time (the HLE's own were not enough for this game)                                                                                                                   | `src/kernel/spurs_queue.cpp`, `src/kernel/spurs_lfqueue.cpp`, `tools/gen_libsre.py` |                                                                         |
 
 Hooks into lifted SPU code are declared in `tools/lift_spu.sh`
 (`--native-hook`): a hook is called first thing in a lifted function and
@@ -111,16 +111,15 @@ either does its work or falls through.
 ## Rendering
 
 The draw engine (`ps3recomp-soyjxck/libs/video/rsx_draw_engine.c`) decodes the
-RSX register file into draws and hands them to a backend; this port builds the
-Vulkan one (`rsx_vulkan_backend.c`), with the guest's shaders decompiled to
-HLSL, translated to SPIR-V by glslang and cached on disk. What this game needed
-from the engine:
+RSX register file into draws and hands them to a backend; this port uses the
+Vulkan engine (`rsx_vulkan_engine.c`, the runtime's own: "the register-file
+draw engine's Vulkan backend", the path Windows runs with `RSX_BACKEND=vulkan`)
+in an SDL2 window, with the guest's shaders decompiled to HLSL, translated to
+SPIR-V by glslang and cached on disk. What this game needed from the engine:
 
 - **Snapshots** of a target that is read while it is drawn into (the heat
   haze samples the scene ~95 times a frame): kept incrementally, by
   redrawing only the draws since the last snapshot with a copy shader.
-  `vk_eng_color_snapshot` and `vk_eng_depth_snapshot_rgba8` are the Vulkan
-  side of this.
 - **Occlusion queries** with their GPU round trip before the fence the game
   waits on (without it, objects flicker and are culled).
 - **Internal resolution** (`RSX_SCALE`): every target is scaled except the
@@ -136,19 +135,39 @@ from the engine:
   textures and 25 MB of vertices at once. A texture is placed in a 64 MB
   heap and a vertex-cache buffer is a range of a 32 MB mapped page, where each
   used to be an allocation in the driver; and what a submit stages is a chain
-  of 16 MB
-  chunks, where it used to be one arena grown by copying it out of
+  of 16 MB chunks, where it used to be one arena grown by copying it out of
   write-combined memory. That frame went from 0.84 s to 0.2 s, the
   renderer's share of it from 0.68 s to 0.07 s.
+- **HDR** (`RSX_HDR`): on Linux the engine asks the compositor's Vulkan
+  surface for an HDR format (scRGB FP16, else HDR10 where the driver offers
+  no scRGB), shows the frame at the paper white `RSX_HDR_WHITE` sets, and
+  reads the highlight plane the port's post-processing override writes
+  (`rsx_hdr_plane`) to brighten what the title clipped, rolled off toward
+  `RSX_HDR_PEAK`. The plane is a host-only FP16 target a pass into one target
+  gets as a second attachment only while HDR is on.
+- **The title's own version of a shader** (`RSX_FP_OVERRIDE_DIR`): a fragment
+  program with a file named after its structural id (`<fp-struct>.hlsl`) is
+  drawn with that file instead of its translation. The draw engine does the
+  substitution, so every backend gets it; the port ships
+  `shaders/override/a3e8d0b0476b7c09.hlsl`, the UberPostProcessEffect
+  composite, which above 1280x720 under `POSTFX_HIGH` reads the quarter-size
+  blur and bloom smoothly and softens the scene by how far it is out of
+  focus, and always writes the HDR highlight plane.
+- **Trophies**: the runtime's `sceNpTrophy` reads the disc's own
+  `PS3_GAME/TROPDIR/NPWR04682_00/TROPHY.TRP`, keeps the unlocks in
+  `gamedata/trophies/NPWR04682.json` and reports each through
+  `trophy_host.h`; `src/ui/overlay.cpp` listens (its pop-up is drawn on
+  Windows with Direct3D 12 only). `src/main.cpp --trophies` prints the list
+  from the same pack and file.
 
 The replay tool (`rsx_replay`) replays captured command streams
 (`RSX_CAPTURE`) headlessly through the engine: the rendering regression.
 
 ## The settings menu
 
-The game's own Settings menu gains Graphics Settings, System Settings and
-Advanced Graphics. The menu is UnrealScript in `SQEX03GAME.XXX`;
-`tools/menu_patch.py` rewrites 18 script functions (the root list, an unused
+The game's own Settings menu gains Graphics Settings, System Settings,
+Advanced Graphics and Picture Settings. The menu is UnrealScript in
+`SQEX03GAME.XXX`; `tools/menu_patch.py` rewrites 18 script functions (the root list, an unused
 page the title shipped with its layout, the title's page chain for skip
 intro, the camera for the field of view) and records them as edits of the
 original functions in `src/patches/menu_patch_data*.h`: ranges copied from the

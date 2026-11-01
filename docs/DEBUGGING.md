@@ -84,6 +84,23 @@ has no console; the previous run is `dod3.prev.log`.
   walker's GPU waits), `RSX_PIPE_LOG=1` (pipelines built),
   `RSX_SURF_DUMP_DIR=<dir>` (every surface). `RSX_VK_VALIDATION=1` enables the
   Vulkan validation layer.
+- `RSX_HDR=1` with `RSX_HDR_DEBUG=1`: the HDR highlight plane shown within
+  SDR's range -- the frame dimmed, red as far as a pixel is brightened (full
+  red at 4 stops), blue where something was drawn over the composite's
+  picture (the HUD should be blue). Window captures of an HDR window come
+  out clipped; this view survives them. `RSX_HDR_WHITE`, `RSX_HDR_PEAK`
+  (nits) and `RSX_HDR_GAMMA=srgb` as in `dod3.ini`.
+- `RSX_FP_OVERRIDE_DIR=<dir>`: fragment programs drawn from
+  `<dir>/<fp-struct>.hlsl` where such a file exists (the game sets it to
+  `shaders/override` when Post-Processing Quality is High or HDR is on at
+  start); `RSX_FP_OVERRIDE_DEFINES=NAME[,NAME]` puts `#define NAME 1` above
+  each file. `RSX_PIPE_LOG=1` names each pipeline's fp-struct and the dump
+  (`PS3RECOMP_SHADER_DUMP`) of its translation, which
+  `tools/make_postfx_override.py <translation.hlsl>` turns into the
+  composite's override again.
+- `PS3_TROPHY_PREVIEW=<id>[,<id>]`: those trophies' pop-ups at boot, nothing
+  recorded (with `PS3_GAMEDATA_ROOT` at an empty folder, your own unlocks
+  are not read either).
 
 ## Loads
 

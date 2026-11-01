@@ -13,7 +13,7 @@ tests.
   [sp00nznet/ps3recomp](https://github.com/sp00nznet/ps3recomp) carrying the
   draw engine and Vulkan backend this port builds against. It is a separate
   checkout, git-ignored and not a submodule; the port is tested against
-  `ee6d448`.
+  `042e13a5`.
 - A runtime change goes to the fork first, and the port is built against the
   new commit: `CMakeLists.txt` checks the checkout for what the port needs and
   refuses one without it. Fixes of general use are offered upstream as

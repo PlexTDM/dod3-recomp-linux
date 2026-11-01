@@ -47,7 +47,7 @@ python3 -m venv .venv
 
 `ps3recomp-soyjxck/` is git-ignored on purpose: it is a separate source
 checkout, not part of this repository. Stay on `linux-fixes`; the port is
-tested against `ee6d448`. Everything the build needs comes from it: the
+tested against `042e13a5`. Everything the build needs comes from it: the
 lifters, the package extractor, `runtime/ppu/ppu_vm_fast.h` and the Vulkan
 backend.
 

@@ -56,6 +56,7 @@
 #include "app_version.h"              /* generated: the port's version label */
 #include "install/crypto.h"
 #include "install/install.h"           /* the release layout (the installer) */
+#include "trophy_pack.h"               /* --trophies: the disc's pack, the unlocks */
 #include "ui/ini.h"                    /* dod3.ini */
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
@@ -91,6 +92,10 @@ const char* dod3_mac_data_dir(void);
 void dod3_mac_log_to_file(void);
 int dod3_setup_mac(const char* base_dir, int force);
 }
+/* the host thread's name for debuggers and profilers (15 characters at most) */
+#define dod3_name_thread(n) pthread_setname_np(n)
+#elif defined(__linux__)
+#define dod3_name_thread(n) pthread_setname_np(pthread_self(), n)
 #endif
 
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
@@ -99,6 +104,7 @@ void dod3_song_autoplay_install();  /* src/patches/song_autoplay.cpp */
 void dod3_cheats_install();         /* src/patches/cheats.cpp */
 void dod3_dragon_cursor_install();  /* src/patches/dragon_cursor.cpp */
 void dod3_archive_native_install(); /* src/patches/archive_native.cpp */
+void dod3_overlay_install();        /* src/ui/overlay.cpp: the trophies' listener */
 void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's file lists */
 void dod3_mods_prepare();           /* src/kernel/mods.cpp: the mods' files, the DLC chapters' voices */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
@@ -185,13 +191,18 @@ extern "C" int rsx_metal_backend_pump_messages(void);
 #define rsx_backend_present rsx_metal_backend_present
 #define rsx_backend_pump    rsx_metal_backend_pump_messages
 #define RSX_BACKEND_NAME    "Metal"
-#elif defined(PS3RECOMP_RSX_VULKAN)
-extern "C" int rsx_vulkan_backend_init(uint32_t w, uint32_t h, const char* title);
-extern "C" void rsx_vulkan_backend_present(void);
-extern "C" int rsx_vulkan_backend_pump_messages(void);
-#define rsx_backend_init    rsx_vulkan_backend_init
-#define rsx_backend_present rsx_vulkan_backend_present
-#define rsx_backend_pump    rsx_vulkan_backend_pump_messages
+#elif defined(PS3RECOMP_VULKAN_ENGINE_SDL)
+/* Linux: the register-file draw engine over Vulkan 1.3 in an SDL2 window
+ * (ps3recomp/libs/video/rsx_vulkan_engine.c), the renderer the Windows build
+ * runs with RSX_BACKEND=vulkan. A present shows the buffer cellGcmSys says
+ * the guest flipped to, as rsx_d3d12_backend_present does under an engine. */
+#include "rsx_vulkan_engine.h"
+extern "C" void rsx_draw_engine_present_buffer(uint32_t buffer_id);
+extern "C" uint32_t cellGcmGetCurrentDisplayBufferId(void);
+static void rsx_vulkan_present(void) { rsx_draw_engine_present_buffer(cellGcmGetCurrentDisplayBufferId()); }
+#define rsx_backend_init    rsx_vulkan_engine_init
+#define rsx_backend_present rsx_vulkan_present
+#define rsx_backend_pump    rsx_vulkan_engine_pump_messages
 #define RSX_BACKEND_NAME    "Vulkan"
 #else
 extern "C" int rsx_null_backend_init(uint32_t w, uint32_t h, const char* title);
@@ -676,6 +687,9 @@ static bool window_focused(void)
     return pid == GetCurrentProcessId();
 #elif defined(__APPLE__)
     return !s_window_up || rsx_metal_backend_window_focused();   /* no window: nothing to leave */
+#elif defined(PS3RECOMP_VULKAN_ENGINE_SDL)
+    /* the SDL window has the keyboard (rsx_vulkan_engine.h) */
+    return !s_window_up || rsx_vulkan_engine_window_focused();
 #else
     return true;
 #endif
@@ -1110,7 +1124,26 @@ extern "C" int g_rsx_query_nosync;
 static void ab_querysync(int on) { g_rsx_query_nosync = on ? 0 : 1; }
 extern "C" int g_spurs_jc_par;
 static void ab_jcpar(int on) { g_spurs_jc_par = on ? 4 : 0; }
-#ifdef _WIN32   /* the D3D12 engine's buffer pool (rsx_d3d12_engine.c is Windows-only) */
+#ifdef _WIN32   /* rsx_d3d12_engine.c */
+extern "C" int g_eng_submit_every;
+/* earlysubmit: RSX_SUBMIT_EVERY when set, else 256 records (the default). */
+static void ab_earlysubmit(int on)
+{
+    static int n = -1;
+    if (n < 0) { const char* e = getenv("RSX_SUBMIT_EVERY"); n = e && atoi(e) > 0 ? atoi(e) : 256; }
+    g_eng_submit_every = on ? n : 0;
+}
+#elif defined(PS3RECOMP_VULKAN_ENGINE_SDL)   /* rsx_vulkan_engine.c: off by default there */
+extern "C" int g_vk_submit_every;
+static void ab_earlysubmit(int on)
+{
+    static int n = -1;
+    if (n < 0) { const char* e = getenv("RSX_VK_SUBMIT_EVERY"); n = e && atoi(e) > 0 ? atoi(e) : 256; }
+    g_vk_submit_every = on ? n : 0;
+}
+#endif
+#ifdef _WIN32
+/* the D3D12 engine's buffer pool (rsx_d3d12_engine.c is Windows-only) */
 extern "C" int g_eng_buf_pool;
 static void ab_bufpool(int on) { g_eng_buf_pool = on; }
 #endif
@@ -1174,6 +1207,9 @@ static const struct {
 #ifdef _WIN32
     { "snapincr", ab_snapincr }, { "mstwin", ab_mstwin }, { "usleepspin", ab_usleepspin },
     { "kickhr", ab_kickhr },
+#endif
+#if defined(_WIN32) || defined(PS3RECOMP_VULKAN_ENGINE_SDL)
+    { "earlysubmit", ab_earlysubmit },
 #endif
 #if defined(_WIN32) || defined(__APPLE__)
     { "aniso", ab_aniso },
@@ -1434,7 +1470,7 @@ static DWORD WINAPI frame_clock(LPVOID)
     dod3_boot_mark("the renderer up");
     s_window_up = rsx_ok != 0;
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME, rsx_ok ? "OK -- window open" : "FAILED");
-#if defined(PS3RECOMP_RSX_VULKAN)
+#if defined(PS3RECOMP_VULKAN_ENGINE_SDL)
     if (!rsx_ok) {
         fflush(stderr);
         _exit(1);
@@ -1717,14 +1753,17 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1, uint64_
     ppu_guest_call(opd, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
 static uint32_t s_boot_entry;
 
 /* The guest's half of the Apple split in main(): run the entry OPD, then end
- * the process the way the non-Apple path's return from main() would. */
+ * the process the way the non-Apple path's return from main() would. Linux
+ * splits the same way: the guest's main thread wants the 256 MB stack the
+ * other guest threads get, where the process's own has the 8 MB of
+ * `ulimit -s` (Windows links dod3.exe with a large one). */
 static void* guest_main(void*)
 {
-    pthread_setname_np("main");
+    dod3_name_thread("main");
     int rc = ppu_run(s_boot_entry, STACK_TOP);
     printf("\n[boot] ppu_run returned %d (entry function unwound)\n", rc);
     fflush(stdout);
@@ -1954,6 +1993,49 @@ static std::filesystem::path linux_install_base(const char* executable)
     const auto path = std::filesystem::absolute(std::filesystem::u8path(executable), ec);
     return (ec ? std::filesystem::current_path() : path).parent_path();
 }
+
+/* --trophies: the install's trophy list and what has been earned, read from
+ * the disc's own pack (PS3_GAME/TROPDIR) and gamedata/trophies (the file the
+ * runtime's sceNpTrophy keeps). The native game has no launcher page for
+ * them, so this is where a player sees them. */
+static int trophies_list(const std::filesystem::path& base)
+{
+    const std::filesystem::path disc = base / "game" / "disc";
+    char trp[1024];
+    if (trophy_pack_find(dod3::utf8(disc).c_str(), nullptr, trp, sizeof trp) != 0) {
+        fprintf(stderr, "no trophy pack under %s (PS3_GAME/TROPDIR)\n", dod3::utf8(disc).c_str());
+        return 1;
+    }
+    TrophyPack* pack = trophy_pack_load(trp, TROPHY_LANG_ENGLISH_US);
+    if (!pack) {
+        fprintf(stderr, "cannot read the trophy pack %s\n", trp);
+        return 1;
+    }
+    std::filesystem::path dir = base / "gamedata" / "trophies";
+    if (const char* g = getenv("PS3_GAMEDATA_ROOT"))
+        if (*g) dir = std::filesystem::u8path(g) / "trophies";
+    char json[1024];
+    trophy_unlocks_path(dod3::utf8(dir).c_str(), pack->np_comm_id, json, sizeof json);
+    TrophyUnlocks u{};
+    trophy_unlocks_load(json, &u);
+    int earned = 0;
+    for (int i = 0; i < pack->end; i++) earned += pack->trophies[i].valid && u.unlocked[i];
+    printf("%s (%s): %d of %d trophies earned\n", pack->title, pack->np_comm_id, earned, pack->count);
+    for (int i = 0; i < pack->end; i++) {
+        const TrophyPackTrophy& t = pack->trophies[i];
+        if (!t.valid) continue;
+        char when[32] = "";
+        if (u.unlocked[i]) {
+            const time_t at = (time_t)u.at[i];
+            struct tm tmv;
+            if (localtime_r(&at, &tmv)) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
+        }
+        printf("  %-9s %-16s %s\n", trophy_grade_name(t.grade), when,
+               t.hidden && !u.unlocked[i] ? "Hidden trophy" : t.name);
+    }
+    trophy_pack_free(pack);
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv)
@@ -1961,10 +2043,6 @@ int main(int argc, char** argv)
     dod3_boot_mark("main");
 #ifdef _WIN32
     win_stdio_init();
-#endif
-#if defined(PS3RECOMP_RSX_VULKAN)
-    dod3_setenv("PS3RECOMP_VK_WINDOW", "1", 0);
-    dod3_setenv("PS3RECOMP_VK_GUEST_PROGRAMS", "1", 0);
 #endif
 #if defined(DOD3_X86_V3) && defined(_WIN32)
     /* Before anything else, setup included: the lifted code uses these. */
@@ -2001,6 +2079,10 @@ int main(int argc, char** argv)
     static char s_release_elf[64];
     snprintf(s_release_elf, sizeof s_release_elf, "%s", dod3setup::eboot_path());   /* per version */
     static char* s_release_argv[3];
+    /* --trophies: the install's trophies and what has been earned (the
+     * native game has no launcher page for them). */
+    if (argc >= 2 && !strcmp(argv[1], "--trophies"))
+        return trophies_list(linux_install_base(argv[0]));
     /* --check <file>...: what the installer makes of each file (the disc,
      * the update, DLC), installing nothing (support, and tests). */
     if (argc >= 3 && (!strcmp(argv[1], "--check") || !strcmp(argv[1], "--check-disc"))) {
@@ -2213,11 +2295,54 @@ int main(int argc, char** argv)
      * resolution, at any scale. With 640x360 left alone as well (400) a seam
      * runs down the foliage of the open levels, so that one still scales. */
     dod3_setenv("RSX_SCALE_MIN", "200", 0);
+    /* Our own version of the title's depth-of-field and bloom composite
+     * (fp-struct a3e8d0b0476b7c09), shaders/override (RSX_FP_OVERRIDE_DIR),
+     * in place of its translation for two settings:
+     *   Post-Processing Quality, High (DOD3_POSTFX_QUALITY=high; its
+     *   POSTFX_HIGH): the composite's blur and bloom are quarter-size
+     *   targets stretched over the picture -- three times as far at 4K,
+     *   where one bilinear tap shows their texels -- and it keeps the
+     *   full-size picture where a pixel is half out of focus: at 4K sharp
+     *   detail laid over the blur, at 1280x720 a picture as soft as its
+     *   pixels. Ours reads the two smoothly and softens the picture as far
+     *   as the pixel is out of focus; at 1280x720 it is the title's own.
+     *   HDR (RSX_HDR, from the start): it also writes the renderer's
+     *   highlight plane, how much brighter each pixel was before the title
+     *   clipped it, which the HDR present shows (switched on later in the
+     *   game, HDR has no highlights until the next start).
+     * The folder: beside the executable, else the working folder's. */
+    const char* pq = getenv("DOD3_POSTFX_QUALITY");
+    const char* hdr = getenv("RSX_HDR");
+    const bool postfx_high = pq && !strcmp(pq, "high");
+    if (postfx_high || (hdr && *hdr && hdr[0] != '0')) {
+        static std::string dir = "shaders/override";
+        std::vector<std::string> where;
+        /* the data folder's (where the game was installed), then the
+         * executable's own (where a release unpacks), then working folder's */
+        const size_t slash = s_exe_path.find_last_of("/\\");
+        if (slash != std::string::npos) where.push_back(s_exe_path.substr(0, slash + 1) + "shaders/override");
+        if (argv[0]) {
+            const std::string exe = argv[0];
+            const size_t es = exe.find_last_of("/\\");
+            if (es != std::string::npos) where.push_back(exe.substr(0, es + 1) + "shaders/override");
+        }
+        std::error_code ec;
+        for (const std::string& w : where)
+            if (std::filesystem::is_directory(std::filesystem::u8path(w), ec)) { dir = w; break; }
+        dod3_setenv("RSX_FP_OVERRIDE_DIR", dir.c_str(), 0);
+        if (postfx_high) dod3_setenv("RSX_FP_OVERRIDE_DEFINES", "POSTFX_HIGH", 0);
+    }
     /* Translated shaders survive between runs (see rsx_metal_backend.m). */
     dod3_setenv("PS3RECOMP_MSL_CACHE", "cache/msl", 0);
     /* ...and compiled DXBC on Windows (rsx_d3d12_engine.c). */
     dod3_setenv("PS3RECOMP_DXBC_CACHE", "cache/dxbc", 0);
     mkdir("cache", 0755);
+#ifdef PS3RECOMP_VULKAN_ENGINE_SDL
+    /* ...and the SPIR-V the guest's programs translate to (rsx_shader_spirv.cpp;
+     * the directory has to exist). */
+    mkdir("cache/spirv", 0755);
+    dod3_setenv("PS3RECOMP_SPIRV_CACHE", "cache/spirv", 0);
+#endif
     /* The sound driver (CDevSd's MultiStream threads and the MultiStream SPU
      * task, image 1 = spu_0000) at user-interactive QoS: at default QoS a
      * busy moment wrote its blocks late, 88 gaps (3.9 s of sound) in a
@@ -2294,6 +2419,7 @@ int main(int argc, char** argv)
     dod3_cheats_install();          /* DOD3_CHEAT_* (cheats.cpp) */
     dod3_dragon_cursor_install();   /* the mouse moves the dragon's shooting cursor */
     dod3_archive_native_install();  /* the package loader's reads, natively */
+    dod3_overlay_install();         /* the trophies' listener (ui/overlay.cpp) */
     dod3_kbm_install();
     dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
@@ -2308,7 +2434,7 @@ int main(int argc, char** argv)
 
     printf("\n[boot] dispatching entry OPD 0x%08X (stack top 0x%08X)\n\n", entry, STACK_TOP);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     /* AppKit only creates windows on the main thread, and the Metal backend's
      * init dispatch_syncs onto the main queue when called from anywhere else.
      * With the guest occupying the main thread nothing drains that queue and
@@ -2316,7 +2442,9 @@ int main(int argc, char** argv)
      * spins on GCM get forever. So on Apple the roles swap: the guest runs on
      * a thread with the same 256 MB host stack guest PPU threads get, and the
      * frame clock owns the main thread. A guest exit ends the process from
-     * its own thread. */
+     * its own thread. Linux splits the same way: the guest's main thread wants
+     * the 256 MB stack, and the SDL2 window the Vulkan engine opens is pumped
+     * from the main thread. */
     s_boot_entry = entry;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
