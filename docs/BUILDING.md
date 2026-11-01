@@ -166,7 +166,8 @@ player guide, the window icon with `install-desktop-entry.sh`, and the
 licences. Nothing of the game goes in it -- players run the launcher's Game
 Files page or `dod3 --install` in the folder the archive unpacks to. It
 refuses a binary
-that needs more than glibc, libstdc++, zlib and SDL2, and prints the newest
+that needs more than glibc, libstdc++, zlib, SDL2 and the system's OpenGL
+(libglvnd), and prints the newest
 glibc it asks for. The shader translators (glslang, SPIRV-Tools) are linked
 in where the distribution ships them static and copied into `lib/` where it
 ships them shared only (`Arch`, Fedora): `CMakeLists.txt` puts `$ORIGIN/lib`

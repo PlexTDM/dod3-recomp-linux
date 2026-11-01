@@ -15,7 +15,9 @@
 # dod3 needs from the system either way is glibc, libstdc++, zlib and SDL2
 # (sdl2, or sdl2-compat as SteamOS has it), plus a Vulkan-capable driver at
 # run time. The libstdc++ is the system's on purpose: a bundled one older than
-# the system's breaks Mesa's drivers, which load into the same process. Build
+# the system's breaks Mesa's drivers, which load into the same process. The
+# same goes for libglvnd's libGLX/libOpenGL, which the launcher's window
+# draws through (the vendor's GL lives behind them). Build
 # in the oldest distribution the release is for (tools: Ubuntu 24.04, glibc
 # 2.39) and check build/dod3 is the one you mean to ship. The second argument
 # picks another build folder.
@@ -53,7 +55,7 @@ cp third_party/fonts/inter/LICENSE.txt "$out/LICENSE-inter.txt"
 # and the shader translators, which travel with the release (below). Nothing
 # else may be needed, or the release only runs where that library happens to
 # be installed.
-allowed='^(libc\.so\.6|libm\.so\.6|libstdc\+\+\.so\.6|libgcc_s\.so\.1|libz\.so\.1|libSDL2-2\.0\.so\.0|ld-linux-x86-64\.so\.2|libdl\.so\.2|libpthread\.so\.0)$'
+allowed='^(libc\.so\.6|libm\.so\.6|libstdc\+\+\.so\.6|libgcc_s\.so\.1|libz\.so\.1|libSDL2-2\.0\.so\.0|libGLX\.so\.0|libOpenGL\.so\.0|libGLdispatch\.so\.0|ld-linux-x86-64\.so\.2|libdl\.so\.2|libpthread\.so\.0)$'
 bundled='^lib(glslang|SPIRV)'
 needed=$(readelf -d "$out/dod3" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
 bad=''; ship=''
