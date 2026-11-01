@@ -4,9 +4,10 @@
 #
 #   bash tools/package_linux.sh v0.5.0-alpha [build folder]
 #
-# Contents: dod3, the default dod3.ini, the player guide as README.md, and
-# the licences. Nothing from the game: players install their own files with
-# dod3 --install, into the folder the archive unpacks to.
+# Contents: dod3, the default dod3.ini, the player guide as README.md, the
+# window icon with install-desktop-entry.sh, and the licences. Nothing from
+# the game: players install their own files with the launcher's Game Files
+# page or dod3 --install, into the folder the archive unpacks to.
 #
 # glslang and SPIRV-Tools: where the distribution ships them static (Ubuntu's
 # glslang-dev) they are linked in; where it ships them shared only (Arch,
@@ -37,6 +38,11 @@ git show HEAD:dod3.ini > "$out/dod3.ini"
 mkdir -p "$out/shaders/override"
 cp shaders/override/*.hlsl "$out/shaders/override/"
 cp docs/PLAYING.md "$out/README.md"
+# The window icon and the desktop entry's installer: the dock and the menu
+# find the icon by the name the entry gives, which main.cpp's SDL_VIDEO_*
+# WMCLASS agrees with.
+cp src/res/icon.png "$out/icon.png"
+cp tools/install_desktop_entry.sh "$out/install-desktop-entry.sh"
 cp LICENSE "$out/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$out/THIRD_PARTY_NOTICES.md"
 cp "$runtime/LICENSE" "$out/LICENSE-ps3recomp.txt"
@@ -88,8 +94,7 @@ for bad in EBOOT.ELF EBOOT_101.ELF EBOOT.BIN flashMP3.pic PARAM.SFO keys.txt gue
 done
 
 tar -C dist -czf "dist/$name.tar.gz" "$name"
-# The same tree as a .zip: upstream ships Linux as a tar.gz and Windows and
-# macOS as zips, and a .zip unpacks on every desktop without a word.
+# The same tree as a .zip: a .zip unpacks on every desktop without a word.
 python3 - "$name" <<'PY'
 import os, sys, zipfile
 name = sys.argv[1]

@@ -19,14 +19,7 @@ struct File {
     File(const File&) = delete;
     File& operator=(const File&) = delete;
 
-    bool seek(uint64_t o)
-    {
-#ifdef _WIN32
-        return _fseeki64(f, (long long)o, SEEK_SET) == 0;
-#else
-        return fseeko(f, (off_t)o, SEEK_SET) == 0;
-#endif
-    }
+    bool seek(uint64_t o) { return fseeko(f, (off_t)o, SEEK_SET) == 0; }
     bool read(void* p, size_t n) { return fread(p, 1, n, f) == n; }
 };
 

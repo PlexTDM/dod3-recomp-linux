@@ -1,14 +1,11 @@
 /*
  * Small helpers shared by the port's sources, C and C++:
  *   dod3_be16/32/64, dod3_put_be32   big-endian access to a byte buffer
- *   dod3_now_us                      a monotonic microsecond clock (the frame
- *                                    clock's, and the profiler's)
- *   dod3_setenv, dod3_unsetenv       POSIX setenv/unsetenv, also on Windows
+ *   dod3_now_us                      a monotonic microsecond clock
+ *   dod3_setenv, dod3_unsetenv       a thin POSIX setenv/unsetenv wrapper
  * and, from C++:
  *   dod3::utf8(path)                 a path as UTF-8
- *   dod3::open_file(path, mode)      fopen that takes any path on Windows too
- *                                    (path::string() throws there for names
- *                                    outside the ANSI code page)
+ *   dod3::open_file(path, mode)      fopen on a filesystem::path
  */
 #pragma once
 #include <stdint.h>

@@ -112,8 +112,8 @@ either does its work or falls through.
 
 The draw engine (`ps3recomp-soyjxck/libs/video/rsx_draw_engine.c`) decodes the
 RSX register file into draws and hands them to a backend; this port uses the
-Vulkan engine (`rsx_vulkan_engine.c`, the runtime's own: "the register-file
-draw engine's Vulkan backend", the path Windows runs with `RSX_BACKEND=vulkan`)
+Vulkan engine (`rsx_vulkan_engine.c`, the runtime's own register-file draw
+engine's Vulkan backend)
 in an SDL2 window, with the guest's shaders decompiled to HLSL, translated to
 SPIR-V by glslang and cached on disk. What this game needed from the engine:
 
@@ -156,8 +156,8 @@ SPIR-V by glslang and cached on disk. What this game needed from the engine:
 - **Trophies**: the runtime's `sceNpTrophy` reads the disc's own
   `PS3_GAME/TROPDIR/NPWR04682_00/TROPHY.TRP`, keeps the unlocks in
   `gamedata/trophies/NPWR04682.json` and reports each through
-  `trophy_host.h`; `src/ui/overlay.cpp` listens (its pop-up is drawn on
-  Windows with Direct3D 12 only). `src/main.cpp --trophies` prints the list
+  `trophy_host.h`; `src/ui/overlay.cpp` listens (the unlock is logged; there
+  is no present-time overlay yet). `src/main.cpp --trophies` prints the list
   from the same pack and file.
 
 The replay tool (`rsx_replay`) replays captured command streams
@@ -287,13 +287,30 @@ boot. Their content is plain UE3 packages; the few licence-bound files are
 not read, except the Japanese voice pack's two file lists, which the port
 writes itself from the installed files (`src/kernel/dlc.cpp`).
 
-## The installer and mods
+## The launcher, the installer and mods
 
-`src/ui/wizard.cpp` is the first-run setup of the `dod3-setup` installer:
+`src/ui/launcher.cpp` is what the player sees at each start once the game is
+installed (unless `dod3.ini`'s `DOD3_LAUNCHER` is 0): Play, Mods, DLC,
+Trophies, Settings and Quit over the game's own key art, in the same window
+layer as the
+installer (`ui/ui_linux.cpp`, SDL2 + OpenGL). The settings it shows are the
+in-game Settings pages' rows (`src/ui/settings_menu.cpp`) plus the ones only
+the file has.
+
+`src/ui/trophies.cpp` is the Trophies page: the disc's pack
+(`trophy_pack.h`: the list, each one's icon and what it is for) and the
+unlocks the game keeps in `gamedata/trophies`, read on a thread of its own;
+the rows are grouped by the pack's chapters, with the four grades' counts, the
+All / Earned / Not Earned filter and Show Hidden. A hidden trophy keeps its
+secret until it is earned. The cups and the grades' colours are `ui/look.h`'s
+(`grade_colour`, `trophy_cup`), as in the overlay's pop-up.
+
+`src/ui/wizard.cpp` is the installer, behind the launcher's Game Files and
+`--setup`:
 Dear ImGui over a small SDL2 layer (`ui/ui_linux.cpp`), drawn with the Inter
 fonts and the game's key art from the player's own disc or package
 (`ui/look.*`), over the file checks and the install job
-(`ui/setup_shared.*`). The native game installs from the command line and
+(`ui/setup_shared.*`). The native game also installs from the command line and
 reads `dod3.ini` itself (`src/ui/ini.cpp`, the same reader the settings pages
 write with). Each file the player adds is recognised by itself
 (`install/install.cpp`):

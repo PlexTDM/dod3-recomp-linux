@@ -48,10 +48,22 @@ Linux:
 1. Build the native Linux game or follow [the build guide](docs/BUILDING.md).
 2. Install with `dod3 --install <decrypted disc folder or ISO> <1.01 update.pkg>`.
    Add any DLC packages after the update. By default, game files are stored in
-   `$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`.
-3. Run `dod3` from a terminal to start the Vulkan-rendered game. The native
-   game build has no graphical launcher; edit `dod3.ini` in the install
-   directory for settings.
+   `$XDG_DATA_HOME/dod3-recomp` or `~/.local/share/dod3-recomp`; wherever they
+   go -- `DOD3_INSTALL_BASE=<dir>` picks another folder -- the install folder is
+   recorded in `dod3.ini` (`DOD3_INSTALL_BASE`) and found again on every start,
+   from any directory.
+3. Run `dod3` to start. A launcher opens first -- Play, Mods, DLC, Settings,
+   Quit -- and its Game Files page runs the installer, so you can also install
+   from there instead of step 2. Settings can also be edited in `dod3.ini` in
+   the install directory, or in the game's own Settings menu.
+
+   To start straight into the game, set `DOD3_LAUNCHER = 0` in `dod3.ini` (or
+   `DOD3_LAUNCHER=0 dod3`); `dod3 --launcher` opens it again without touching
+   the file, and `dod3 --setup` goes straight to the installer.
+
+4. Optional: `tools/install_desktop_entry.sh` adds the game to the desktop's
+   menu with its icon, so the dock and the taskbar show it instead of a blank.
+   Run it once from the folder `dod3` is in; `--remove` takes it out again.
 
 Settings (resolution, display mode, frame-rate cap, anti-aliasing, field of
 view, draw distance, skipping the intro and keyboard keys) are in the game's
@@ -66,8 +78,8 @@ SPU programs are lifted, and the whole is compiled with CMake. Lifting needs
 the game's executable, so you need your own copy of the game first.
 
 1. **Linux toolchain.** GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python
-   3.11+, SDL2, Vulkan, glslang, zlib and Git (for example `libsdl2-dev
-libvulkan-dev glslang-dev zlib1g-dev` on Debian/Ubuntu).
+   3.11+, SDL2, Vulkan, OpenGL, glslang, zlib and Git (for example `libsdl2-dev
+libvulkan-dev libgl1-mesa-dev glslang-dev zlib1g-dev` on Debian/Ubuntu).
 
 2. **The sources.**
 
@@ -154,12 +166,13 @@ offer it, a depth of field and bloom drawn smoothly at high resolutions, depth
 of field and the blood on the screen each on or off, skipping the intro logos
 and movie, auto-play for branch D's final song, cheats (full health, a full
 Intoner gauge, items kept, time limits stopped), trophies (kept with your
-saves, and `dod3 --trophies` lists them), pausing or muting when the window is
+saves, listed in the launcher with their icons and dates, and `dod3 --trophies`
+lists them on the command line), pausing or muting when the window is
 in the background, keyboard and mouse (the mouse moves the dragon's shooting
 cursor in the sky too), and the button prompts of the pad you
-hold -- set in `dod3.ini`, or in a Graphics Settings, a System Settings, an
-Advanced Graphics and a Picture Settings page added to the game's own
-Settings menu.
+hold -- set in `dod3.ini`, in the launcher that opens at start, or in a
+Graphics Settings, a System Settings, an Advanced Graphics and a Picture
+Settings page added to the game's own Settings menu.
 
 Known issues: the game has been tested on few machines, and at 16:10, 21:9
 and 32:9 some of the HUD is still out of place.
@@ -173,10 +186,9 @@ src/               --------------------------->  the port: the runner, native fa
 ps3recomp-soyjxck/ --------------------------->  runtime, HLE libraries, the RSX draw engine and its Vulkan backend
 ```
 
-The native Linux executable `dod3` installs the game from your files through
-its command-line installer, then runs it. The optional `dod3-setup` target is
-a Linux GUI installer for the Windows release under Wine or Proton; it is not
-part of the native game executable.
+The native Linux executable `dod3` is the whole program: it opens the
+launcher, installs the game from your files (the launcher's Game Files page,
+or `dod3 --install` on a command line) and runs it.
 
 ## Legal
 

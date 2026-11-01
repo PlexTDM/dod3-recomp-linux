@@ -31,8 +31,11 @@
 #include "imgui.h"
 #include "backends/imgui_impl_sdl2.h"
 #include "backends/imgui_impl_opengl3.h"
+#include "window_icon.h"   /* generated: kWindowIconPng, from src/res/icon.png */
 
 namespace dod3setup {
+/* ui/png.cpp: a PNG file to RGBA, the way the key art is decoded. */
+bool png_rgba(const std::vector<uint8_t>& file, std::vector<uint8_t>* rgba, int* w, int* h);
 
 namespace {
 
@@ -42,6 +45,8 @@ bool g_closed = false;
 float g_dpi = 1.0f;
 float g_dpi_applied = 1.0f;
 const char* g_glsl = "#version 130";
+
+void set_window_icon();   /* below make_window: the icon the window carries */
 
 const char* grab_prefix()
 {
@@ -113,7 +118,27 @@ bool make_window(const char* title, int width, int height)
         return false;
     }
     g_dpi = scale;
+    set_window_icon();
     return true;
+}
+
+/* The window manager's icon (src/res/icon.png, embedded): the launcher's
+ * window carries it, and the desktop entry's StartupWMClass ties the game's
+ * window (the Vulkan engine's) to the same icon in the dock. */
+void set_window_icon()
+{
+    std::vector<uint8_t> png(kWindowIconPng, kWindowIconPng + sizeof kWindowIconPng), rgba;
+    int w = 0, h = 0;
+    if (!g_window || !png_rgba(png, &rgba, &w, &h) || w <= 0 || h <= 0) return;
+    SDL_Surface* icon = SDL_CreateRGBSurfaceFrom(rgba.data(), w, h, 32, w * 4,
+#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+                                                 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff);
+#else
+                                                 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+#endif
+    if (!icon) return;
+    SDL_SetWindowIcon(g_window, icon);    /* SDL copies it */
+    SDL_FreeSurface(icon);
 }
 
 void split_lines(const std::string& s, std::vector<std::string>* out)

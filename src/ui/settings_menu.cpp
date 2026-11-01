@@ -43,8 +43,8 @@
  *
  * The values are dod3.ini keys (build_rows lists them, and the launcher shows
  * the same list); Apply writes the open page's to dod3.ini and applies the
- * live rows at once -- the display rows too, on Direct3D 12, Vulkan and
- * Metal (LIVE_DISPLAY). The others wait for the next start, and a row whose
+ * live rows at once -- the display rows too, on Vulkan (LIVE_DISPLAY). The
+ * others wait for the next start, and a row whose
  * saved value differs from the running one says so.
  *
  * With the Spanish fan translation's menus installed and on, the pages speak
@@ -83,9 +83,8 @@ bool dod3_menus_spanish();                                        /* src/kernel/
 void dod3_fps_reload();             /* main.cpp: DOD3_FPS again */
 void dod3_unfocused_reload();       /* main.cpp: DOD3_UNFOCUSED again */
 extern "C" volatile int g_rsx_display_reload;   /* rsx_draw_engine.c: the renderer re-reads its display settings */
-#if defined(_WIN32) || defined(__APPLE__) || defined(PS3RECOMP_VULKAN_ENGINE_SDL)
-extern "C" int g_rsx_aniso;         /* the live anisotropy level: rsx_d3d12_engine.c, rsx_metal_backend.m,
-                                       rsx_vulkan_engine.c */
+#ifdef PS3RECOMP_VULKAN_ENGINE_SDL
+extern "C" int g_rsx_aniso;         /* the live anisotropy level: rsx_vulkan_engine.c */
 #endif
 extern "C" int g_rsx_aa;            /* rsx_draw_engine.c: 1 = FXAA at present */
 
@@ -307,10 +306,10 @@ struct Row {
     std::vector<Choice> choices;   /* value NULL: the key unset */
     int def;                  /* index of the default */
     bool live;                /* applied at once (else on the next start) */
-    int running, saved, pending;   /* choice indices; -1 = a value not in the list */
-    std::string other;        /* that value */
-    int page;                 /* PAGE_GRAPHICS, PAGE_SYSTEM, PAGE_ADVANCED */
-    void (*apply_fn)(const char* value);   /* a live row's own apply (src/patches/sysset.cpp) */
+    int running = -1, saved = -1, pending = -1;   /* choice indices; -1 = a value not in the list */
+    std::string other = {};   /* that value */
+    int page = 0;             /* PAGE_GRAPHICS, PAGE_SYSTEM, PAGE_ADVANCED, PAGE_PICTURE */
+    void (*apply_fn)(const char* value) = nullptr;   /* a live row's own apply (src/patches/sysset.cpp) */
 };
 
 std::vector<Row> s_rows;            /* every page's */
@@ -396,9 +395,8 @@ void read_current(Row& r, int& idx)
 }
 
 /* The renderer applies RSX_DISPLAY / RSX_VSYNC / RSX_SCALE changes at its
- * next window pump (g_rsx_display_reload); the Direct3D 12, Vulkan and
- * Metal engines do. */
-#if defined(_WIN32) || defined(__APPLE__) || defined(PS3RECOMP_VULKAN_ENGINE_SDL)
+ * next window pump (g_rsx_display_reload); the Vulkan engine does. */
+#ifdef PS3RECOMP_VULKAN_ENGINE_SDL
 #define LIVE_DISPLAY true
 #else
 #define LIVE_DISPLAY false
@@ -557,9 +555,7 @@ void build_rows(std::vector<Dod3RowSpec>& rows)
     rows.push_back({ "RSX_BACKEND",
                      "Renderer",
                      "The graphics API the game is drawn with.",
-#ifdef _WIN32
-                     { { NULL, "Direct3D 12" }, { "vulkan", "Vulkan" } },
-#elif defined(PS3RECOMP_RSX_VULKAN)
+#if defined(PS3RECOMP_RSX_VULKAN)
                      { { NULL, "Vulkan" } },
 #else
                      { { NULL, "Headless" } },
@@ -686,7 +682,7 @@ void apply()
             else
                 dod3_unsetenv(r.key);
             r.running = r.pending;
-#if defined(_WIN32) || defined(__APPLE__)
+#ifdef PS3RECOMP_VULKAN_ENGINE_SDL
             if (!strcmp(r.key, "RSX_ANISO")) g_rsx_aniso = v ? atoi(v) : 16;
 #endif
             if (!strcmp(r.key, "RSX_AA")) {

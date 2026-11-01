@@ -15,9 +15,11 @@ Building the native recompiled game requires the game's lift and decrypted
 Linux (x86-64):
 
 - GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python 3.11+, Git and zlib.
-- SDL2, Vulkan and glslang development packages (`libsdl2-dev libvulkan-dev
-glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
-  Fedora), plus a Vulkan-capable driver.
+- SDL2, Vulkan, OpenGL and glslang development packages (`libsdl2-dev
+libvulkan-dev libgl1-mesa-dev glslang-dev` on Debian/Ubuntu; `SDL2-devel
+vulkan-headers mesa-libGL-devel glslang-devel` on Fedora), plus a
+  Vulkan-capable driver. OpenGL is for the launcher's window, which draws
+  with Dear ImGui.
 
 Clone the project, then the runtime fork beside it:
 
@@ -160,8 +162,10 @@ environment wins over it.
 
 `tools/package_linux.sh` writes `dist/dod3-recomp-<version>-linux-x86_64.tar.gz`
 and the same tree as a `.zip`: the executable, the default `dod3.ini`, the
-player guide and the licences. Nothing of the game goes in it -- players run
-`dod3 --install` in the folder the archive unpacks to. It refuses a binary
+player guide, the window icon with `install-desktop-entry.sh`, and the
+licences. Nothing of the game goes in it -- players run the launcher's Game
+Files page or `dod3 --install` in the folder the archive unpacks to. It
+refuses a binary
 that needs more than glibc, libstdc++, zlib and SDL2, and prints the newest
 glibc it asks for. The shader translators (glslang, SPIRV-Tools) are linked
 in where the distribution ships them static and copied into `lib/` where it
@@ -183,19 +187,39 @@ bash tools/package_linux.sh v0.5.0-alpha build-linux  # another build folder
 | `src/res/prompts/*.png`             | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`)                                                                                                                                                                                                                                                                                         |
 | `src/patches/collision_native.cpp`  | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |
 
-## The Linux installer (`dod3-setup`)
+## The launcher and the installer
 
-`-DDOD3_SETUP_ONLY=ON` builds `dod3-setup` alone: a GUI installer for the
-Windows release, run under Wine or Proton, that needs none of the game's code.
-It is what a machine without a lift uses to lay out the game files, and it is
-not part of the native game.
+Both are part of `dod3`: `src/ui/launcher.cpp` (Play, Mods, DLC, Settings) and
+`src/ui/wizard.cpp` (the installer, behind Game Files and `--setup`), drawn in
+Dear ImGui (vendored, `third_party/imgui`) in an SDL2 + OpenGL window
+(`src/ui/ui_linux.cpp`), with the Inter fonts and the window icon embedded at
+configure time (`gen/setup_fonts.h`, `gen/window_icon.h`). They need
+`libsdl2-dev`, OpenGL (`libgl1-mesa-dev`) and nothing else; the game's own
+Vulkan window opens after the launcher closes.
+
+The lift needs the game's files, so a machine that has never had them installs
+them with a release's binary first -- `dod3 --install <disc> <update.pkg>
+[DLC.pkg ...]`, or the launcher's Game Files page -- and then builds.
 
 ```sh
-tools/build_linux_setup.sh            # build-installer/dod3-setup
-tools/build_linux_setup.sh --run --base /path/to/release
-./build-installer/dod3-setup --check <file>...
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/dod3 --launcher            # the launcher, without the game
 ```
 
-`tools/build_linux_setup.sh` takes `--build-dir DIR`, `--debug`, `--clean`,
-`--run` and `--base DIR`. The file pickers use `zenity`, `kdialog` or `yad`
-when one is installed.
+The launcher and the installer keep their own test hooks (the header comment
+of `src/ui/launcher.cpp` lists them): `DOD3_LAUNCHER_AUTO=quit` closes the
+launcher at once, `DOD3_LAUNCHER_OPEN=settings` opens a page, and
+`DOD3_SETUP_GRAB=<prefix>` saves the window as a PPM (touch `<prefix>.req` for
+the next frame).
+
+## The window icon
+
+`src/res/icon.png` is the 256x256 entry of `src/res/icon.ico`, extracted by
+`tools/make_window_icon.py` (Pillow, developer side only); CMakeLists.txt
+embeds it as `gen/window_icon.h` and `src/ui/ui_linux.cpp` sets it on the
+launcher's window. `main.cpp` names the app `dod3-recomp` to SDL
+(`SDL_VIDEO_X11_WMCLASS`, `SDL_VIDEO_WAYLAND_WMCLASS`, `SDL_APP_NAME`), and
+`tools/install_desktop_entry.sh` writes a desktop entry whose
+`StartupWMClass` is the same, so the dock and the taskbar show the icon for
+the game's window too.

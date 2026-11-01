@@ -338,7 +338,7 @@ void dod3_hud_aspect(int phase, uint32_t canvas, bool on)
 {
     switch (phase) {
     case 1: {
-        int w, h;
+        int w = 0, h = 0;
         const float ar = on ? canvas_aspect(canvas, &w, &h) : 0.0f;
         rsx_present_set_content_aspect(ar);
         static float told = -1.0f;

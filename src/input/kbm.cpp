@@ -29,19 +29,13 @@
  *
  * V presses both sticks in (Intoner Mode). Escape is always the pad's back/
  * cancel button -- Circle, the runtime presses it for the window -- so it
- * closes a menu instead of the window (Alt+F4 does; Cmd+Q on macOS; the
- * window's close button too). With a pad plugged in
+ * closes a menu instead of the window (Alt+F4 does; the window's close button
+ * too). With a pad plugged in
  * as well, either can be used at any moment: the prompts follow the one
  * touched last.
  *
- * Where the keys' state comes from is the one part that differs by platform
- * (a table of names and key_held, below). Windows asks the system for a
- * virtual key. macOS has the Metal window's own record of the key and mouse
- * button events it was sent (ps3recomp/libs/video/rsx_metal_backend.m), by
- * virtual keycode -- a place on the keyboard, whatever the layout prints on
- * it -- so a key is only ever held while the game is in front; Alt is the
- * Option key, and CapsLock cannot be bound (it reports its lock, not the
- * key).
+ * The keys' state comes from SDL, kept updated as the Vulkan backend pumps
+ * events; a key is only ever held while the game is in front.
  *
  *   DOD3_KEYBOARD=0   the toolkit's built-in keys instead (no mouse)
  *   DOD3_KBM_LOG=1    a line whenever what the keys hold changes
@@ -57,24 +51,10 @@
 #include "rsx_host_mouse.h"
 #include "util.h"
 
-#if defined(__linux__)
 #include <SDL.h>
 #include <strings.h>
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
-#endif
-
-#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <strings.h>
-#define _stricmp strcasecmp
-#define _strnicmp strncasecmp
-#endif
 
 extern "C" {
 /* ps3recomp/libs/input/cellPad.h */
@@ -85,78 +65,12 @@ typedef struct CellPadHostInput {
 } CellPadHostInput;
 typedef int (*cellPad_host_input_fn)(void* user, int focused, CellPadHostInput* out);
 void cellPad_set_host_input(cellPad_host_input_fn fn, void* user);
-#ifdef __APPLE__
-/* ps3recomp/libs/video/rsx_metal_backend.h */
-int rsx_metal_backend_key_down(unsigned keycode);
-int rsx_metal_backend_mouse_button_down(unsigned button);
-#endif
 }
 
 namespace {
 
 const int kWheelUp = -1, kWheelDown = -2;   /* not keys: notches, each a short press */
 
-#ifdef __APPLE__
-/* A key is its macOS virtual keycode (kVK_* in HIToolbox/Events.h). Above
- * those: the names that mean either of two keys, the mouse's buttons, and
- * the one key that cannot be read. */
-const int kEitherShift = 0x100, kEitherCtrl = 0x101, kEitherAlt = 0x102, kEitherEnter = 0x103;
-const int kMouseButton = 0x200;   /* + 0 left, 1 right, 2 middle, 3, 4 */
-const int kNoSuchKey = 0x300;
-
-const struct {
-    const char* name;
-    int vk;
-} kKeys[] = {
-    { "Space", 0x31 },         { "Enter", kEitherEnter },   { "Tab", 0x30 },
-    { "Esc", 0x35 },           { "Backspace", 0x33 },       { "Shift", kEitherShift },
-    { "Ctrl", kEitherCtrl },   { "Alt", kEitherAlt },       { "LShift", 0x38 },
-    { "RShift", 0x3C },        { "LCtrl", 0x3B },           { "RCtrl", 0x3E },
-    { "LAlt", 0x3A },          { "RAlt", 0x3D },            { "Up", 0x7E },
-    { "Down", 0x7D },          { "Left", 0x7B },            { "Right", 0x7C },
-    { "Insert", 0x72 },        { "Delete", 0x75 },          { "Home", 0x73 },
-    { "End", 0x77 },           { "PageUp", 0x74 },          { "PageDown", 0x79 },
-    { "CapsLock", kNoSuchKey }, { "Minus", 0x1B },          { "Equals", 0x18 },
-    { "LBracket", 0x21 },      { "RBracket", 0x1E },        { "Semicolon", 0x29 },
-    { "Quote", 0x27 },         { "Comma", 0x2B },           { "Period", 0x2F },
-    { "Slash", 0x2C },         { "Backslash", 0x2A },       { "Grave", 0x32 },
-    { "Mouse1", kMouseButton + 0 }, { "Mouse2", kMouseButton + 1 }, { "Mouse3", kMouseButton + 2 },
-    { "Mouse4", kMouseButton + 3 }, { "Mouse5", kMouseButton + 4 }, { "WheelUp", kWheelUp },
-    { "WheelDown", kWheelDown },
-};
-
-/* 'A'-'Z' and '0'-'9': the ANSI layout's places. */
-int letter_key(char c)
-{
-    static const uint8_t az[26] = { 0x00, 0x0B, 0x08, 0x02, 0x0E, 0x03, 0x05, 0x04, 0x22, 0x26, 0x28, 0x25, 0x2E,
-                                    0x2D, 0x1F, 0x23, 0x0C, 0x0F, 0x01, 0x11, 0x20, 0x09, 0x0D, 0x07, 0x10, 0x06 };
-    static const uint8_t digit[10] = { 0x1D, 0x12, 0x13, 0x14, 0x15, 0x17, 0x16, 0x1A, 0x1C, 0x19 };
-    return c >= 'A' ? az[c - 'A'] : digit[c - '0'];
-}
-int function_key(int n)   /* 1-12 */
-{
-    static const uint8_t f[12] = { 0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F };
-    return f[n - 1];
-}
-int numpad_key(int n)   /* 0-9 */
-{
-    static const uint8_t num[10] = { 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C };
-    return num[n];
-}
-bool key_held(int k)
-{
-    const auto key = [](unsigned kc) { return rsx_metal_backend_key_down(kc) != 0; };
-    switch (k) {
-    case kEitherShift: return key(0x38) || key(0x3C);
-    case kEitherCtrl: return key(0x3B) || key(0x3E);
-    case kEitherAlt: return key(0x3A) || key(0x3D);
-    case kEitherEnter: return key(0x24) || key(0x4C);   /* Return, and the keypad's Enter */
-    case kNoSuchKey: return false;
-    }
-    if (k >= kMouseButton) return rsx_metal_backend_mouse_button_down((unsigned)(k - kMouseButton)) != 0;
-    return key((unsigned)k);
-}
-#elif defined(__linux__)
 /* SDL keeps its keyboard state updated as the Vulkan backend pumps events. */
 const int kNoSuchKey = -3;
 const int kMouseButton = 0x200;
@@ -225,35 +139,6 @@ const struct {
     { "Mouse5", kMouseButton + 4 }, { "WheelUp", kWheelUp },
     { "WheelDown", kWheelDown },
 };
-#else
-/* A key is its Windows virtual-key code. */
-const int kNoSuchKey = -3;   /* every key here can be read */
-int letter_key(char c) { return c; }   /* 'A'-'Z' and '0'-'9' are their own codes */
-int function_key(int n) { return VK_F1 + n - 1; }
-int numpad_key(int n) { return VK_NUMPAD0 + n; }
-bool key_held(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
-
-const struct {
-    const char* name;
-    int vk;
-} kKeys[] = {
-    { "Space", VK_SPACE },       { "Enter", VK_RETURN },    { "Tab", VK_TAB },
-    { "Esc", VK_ESCAPE },        { "Backspace", VK_BACK },  { "Shift", VK_SHIFT },
-    { "Ctrl", VK_CONTROL },      { "Alt", VK_MENU },        { "LShift", VK_LSHIFT },
-    { "RShift", VK_RSHIFT },     { "LCtrl", VK_LCONTROL },  { "RCtrl", VK_RCONTROL },
-    { "LAlt", VK_LMENU },        { "RAlt", VK_RMENU },      { "Up", VK_UP },
-    { "Down", VK_DOWN },         { "Left", VK_LEFT },       { "Right", VK_RIGHT },
-    { "Insert", VK_INSERT },     { "Delete", VK_DELETE },   { "Home", VK_HOME },
-    { "End", VK_END },           { "PageUp", VK_PRIOR },    { "PageDown", VK_NEXT },
-    { "CapsLock", VK_CAPITAL },  { "Minus", VK_OEM_MINUS }, { "Equals", VK_OEM_PLUS },
-    { "LBracket", VK_OEM_4 },    { "RBracket", VK_OEM_6 },  { "Semicolon", VK_OEM_1 },
-    { "Quote", VK_OEM_7 },       { "Comma", VK_OEM_COMMA }, { "Period", VK_OEM_PERIOD },
-    { "Slash", VK_OEM_2 },       { "Backslash", VK_OEM_5 }, { "Grave", VK_OEM_3 },
-    { "Mouse1", VK_LBUTTON },    { "Mouse2", VK_RBUTTON },  { "Mouse3", VK_MBUTTON },
-    { "Mouse4", VK_XBUTTON1 },   { "Mouse5", VK_XBUTTON2 }, { "WheelUp", kWheelUp },
-    { "WheelDown", kWheelDown },
-};
-#endif
 
 const struct {
     const char* key;        /* dod3.ini */
@@ -406,7 +291,6 @@ int host_input(void*, int focused, CellPadHostInput* out)
 
 }  // namespace
 
-#ifdef __linux__
 /* A Steam Deck (its DMI board: Valve's Jupiter, or Galileo for the OLED). */
 static bool on_steam_deck()
 {
@@ -423,13 +307,11 @@ static bool on_steam_deck()
     const std::string vendor = read("/sys/class/dmi/id/board_vendor"), product = read("/sys/class/dmi/id/product_name");
     return vendor == "Valve" && (product == "Jupiter" || product == "Galileo");
 }
-#endif
 
 void dod3_kbm_install()
 {
     if (const char* e = getenv("DOD3_KEYBOARD"))
         if (!strcmp(e, "0")) return;
-#ifdef __linux__
     /* A Steam Deck, started outside Steam (Desktop Mode, from a terminal or
      * the file manager): Steam's Desktop Configuration turns the Deck's own
      * buttons into keys and its trackpad into the mouse, so every press came
@@ -443,7 +325,6 @@ void dod3_kbm_install()
                         "(DOD3_KEYBOARD=1 for a keyboard of your own)\n");
         return;
     }
-#endif
     for (int b = 0; b < kBinds; b++) {
         const char* e = getenv(kBind[b].key);
         parse(b, e && *e ? e : kBind[b].defaults);
@@ -459,12 +340,3 @@ void dod3_kbm_install()
 bool dod3_kbm_present() { return s_installed; }
 bool dod3_kbm_mouse_look() { return s_installed && s_mouse_look; }
 const char* dod3_kbm_key(Dod3Bind b) { return s_installed && !s_keys[b].empty() ? s_keys[b][0].name.c_str() : nullptr; }
-
-#else /* no keyboard and mouse of the port's own on this platform yet */
-
-void dod3_kbm_install() {}
-bool dod3_kbm_present() { return false; }
-bool dod3_kbm_mouse_look() { return false; }
-const char* dod3_kbm_key(Dod3Bind) { return nullptr; }
-
-#endif

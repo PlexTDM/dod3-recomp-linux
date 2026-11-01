@@ -63,6 +63,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <atomic>
 #include <string>
 #include <sys/stat.h>
@@ -70,9 +71,6 @@
 #include "cpu/eboot.h"   /* the EBOOT version's addresses */
 #include "cpu/ppu.h"
 #include "patches/sysset.h"
-#ifdef _WIN32
-#define strcasecmp _stricmp   /* the CRT's spelling */
-#endif
 
 namespace {
 
@@ -636,14 +634,7 @@ void dod3_sysset_poll()
         if ((tick++ & 63) != 0) return;
         struct stat st;
         if (stat(file, &st) != 0) return;
-        const long long m = (long long)st.st_mtime * 1000000000ll +
-#ifdef __APPLE__
-                            st.st_mtimespec.tv_nsec;
-#elif defined(__linux__)
-                            st.st_mtim.tv_nsec;
-#else
-                            0;
-#endif
+        const long long m = (long long)st.st_mtime * 1000000000ll + st.st_mtim.tv_nsec;
         if (m == last) return;
         last = m;
         FILE* fp = fopen(file, "rb");

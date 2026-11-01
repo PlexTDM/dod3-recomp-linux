@@ -35,6 +35,11 @@ const ImU32 kLine = IM_COL32(255, 255, 255, 20);
 
 const double kLongAgo = -10;   /* a time (ImGui's clock) for "never": an animation long finished */
 
+/* A trophy grade's colour ('P' 'G' 'S' 'B') */
+ImU32 grade_colour(char grade);
+/* A trophy cup `size` tall, centred at c (the Trophies panel, ui/trophies.cpp) */
+void trophy_cup(ImDrawList* dl, ImVec2 c, float size, ImU32 col);
+
 ImU32 alpha(ImU32 c, float a);
 ImU32 mix(ImU32 a, ImU32 b, float t);
 float ease_out(float t);

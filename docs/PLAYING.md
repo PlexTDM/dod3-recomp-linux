@@ -30,10 +30,67 @@ DOD3_INSTALL_BASE="$HOME/.local/share/dod3-recomp" dod3
 
 By default, game files, settings, saves, shader cache and logs are under
 `$XDG_DATA_HOME/dod3-recomp`, or `~/.local/share/dod3-recomp` when
-`XDG_DATA_HOME` is unset. Set `DOD3_INSTALL_BASE` to use another data
-directory. The native game has no graphical launcher. The separate optional
-`dod3-setup` target is a Linux GUI installer for the Windows release under
-Wine or Proton; it is not needed for the native game.
+`XDG_DATA_HOME` is unset. `DOD3_GAMEDATA_ROOT` moves the saves alone.
+
+**The install folder is remembered.** When an install finishes -- the
+launcher's Game Files page or `dod3 --install` -- the folder it went to is
+written to `dod3.ini` as `DOD3_INSTALL_BASE`, and every start reads it back,
+so the game is found whatever directory you start it from and wherever the
+program is unpacked. To use another folder, either give it at install time:
+
+```sh
+DOD3_INSTALL_BASE=~/Games/drakengard-data dod3 --install \
+    <disc-or-folder> <update.pkg> [DLC.pkg ...]
+```
+
+or set `DOD3_INSTALL_BASE = /home/you/Games/drakengard-data` in `dod3.ini`
+and move the `game`, `gamedata` and `elf` folders there (the launcher shows
+which folder it is using, under Game Files). The environment variable wins
+over the file for one run; if the recorded folder has gone, the program says
+so and falls back to the default.
+
+Starting `dod3` from a folder that holds the game's files (`game/disc/...`)
+uses that folder too -- that is how a build tree is played, and it is why the
+launcher's key art appears when the game is where you start it.
+
+## The launcher
+
+`dod3` with no arguments opens the launcher: **Play**, **Mods**, **DLC**,
+**Trophies**, **Settings**, **Quit**, over the game's own key art. Game Files (at
+the bottom) runs the installer, so a fresh download can be installed from the
+window: the first Play with nothing installed opens it too.
+
+- Settings here edits `dod3.ini` -- the same rows as the game's own Settings
+  menu, plus the ones only the file has (window size, mouse camera, camera
+  speed, whether this launcher opens).
+- Trophies shows the 72 trophies with their icons, grades, chapters and the
+  dates you earned them (see [Trophies](#trophies)).
+- Mods shows the fan translations and the DLC undub that are installed, with a
+  switch to turn one off and on, Remove, and Add Files / Add Folder.
+- DLC lists the 20 packs and adds more.
+
+Mouse, keyboard and controller all work; the game's own Settings menu has the
+same options while playing.
+
+To start without it: `DOD3_LAUNCHER = 0` in `dod3.ini` (Settings > System >
+Launcher at Start, or edit the file), or `DOD3_LAUNCHER=0 dod3` for one run.
+`dod3 --launcher` opens it anyway and `dod3 --setup` goes straight to the
+installer.
+
+## The icon
+
+The game's window carries its own icon, and `tools/install_desktop_entry.sh`
+(in the release: `install-desktop-entry.sh`) adds a menu entry with the same
+icon, so the dock and the taskbar show it and the game is listed as a game:
+
+```sh
+~/Games/dod3-recomp/install-desktop-entry.sh        # the dod3 beside it
+~/Games/dod3-recomp/install-desktop-entry.sh --remove
+```
+
+It writes `~/.local/share/applications/dod3-recomp.desktop` and the icon
+under `~/.local/share/icons/hicolor`, for the current user only; move the
+folder and run it again.
 
 ## Settings
 
@@ -47,41 +104,42 @@ Settings controls HDR and the post-processing quality.
 
 Settings can also be changed in `dod3.ini` in the install directory:
 
-| Setting | What it does |
-|---|---|
-| `RSX_SCALE` | Internal resolution as a multiple of 1280x720; values above the window resolution enable supersampling |
-| `RSX_DISPLAY` | `windowed`, `borderless` or `fullscreen` |
-| `RSX_WINDOW` | Window size in windowed mode, e.g. `1920x1080` |
-| `RSX_VSYNC` | `1` syncs to the display; `0` allows the game to exceed its refresh rate |
-| `DOD3_FPS` | Frame cap; `60` is tested, `120` works, `adaptive` selects a rate from 30 to 120 |
-| `DOD3_FOV` | Additional gameplay camera field of view, in degrees |
-| `DOD3_ASPECT` | `16:10`, `21:9`, `32:9`, a ratio such as `2.39`, or `auto` |
-| `RSX_ANISO` | Texture filtering, from 1x to 16x |
-| `RSX_AA` | `fxaa`, `msaa2`, `msaa4` or `msaa8`; unset disables anti-aliasing |
-| `DOD3_SHADOWS` | `high` or `ultra` for sharper shadows |
-| `DOD3_MOTION_BLUR` | `0` disables motion blur |
-| `DOD3_POSTFX` | `0` disables depth of field, bloom and color grading |
-| `DOD3_DOF` | `0` disables only the depth of field; the bloom stays |
-| `RSX_HDR` | `1` shows the game in HDR where the display and compositor offer an HDR surface |
-| `DOD3_POSTFX_QUALITY` | `high` draws the depth of field and bloom smoothly above 720p, with the port's own version of the game's post-processing shader; from the next start |
-| `RSX_HDR_WHITE` | White in HDR, in nits: `100` to `400`; unset is 200 |
-| `RSX_HDR_PEAK` | The brightest highlight, in nits; unset is 1000 |
-| `RSX_HDR_HIGHLIGHTS` | `0` keeps the HDR picture within white |
-| `RSX_HDR_GAMMA` | `srgb` uses the sRGB curve instead of a 2.2 power |
-| `DOD3_SCREEN_BLOOD` | `border` leaves out the blood splashes and keeps the low-health border; `0` leaves out both |
-| `DOD3_DRAW_DISTANCE` | `2`, `3`, `5` or `10` for increased scenery distance |
-| `DOD3_TREE_LOD` | `2`, `3`, `5` or `10` for increased tree distance and detail |
-| `DOD3_SKIP_INTRO` | `1` skips the logos and opening movie; `0` keeps them |
-| `DOD3_UNFOCUSED` | `mute` silences audio when unfocused; `pause` also pauses the game |
-| `DOD3_SONG_AUTOPLAY` | `1` plays branch D's final song for you: every note is pressed on its time (the RPCS3 patch "Auto Play Song of The D Branch Final Mission", by bucanero). In the game: Settings > System Settings > Final Song Auto-Play; unset is off |
-| `DOD3_PROMPTS` | `ps3`, `ps4`, `ps5`, `xbox`, `switch` or `keyboard`; unset follows the active controller |
-| `DOD3_MOUSE_SENS` | Mouse camera sensitivity; `DOD3_MOUSE=0` disables mouse camera control |
-| `KEY_CROSS`, `KEY_MOVE_UP`, ... | Keys for each pad button and stick direction; the file lists all supported keys |
-| `DOD3_CAMERA_SPEED` | `original` restores the game's original camera speed behavior |
-| `DOD3_CHEAT_HEALTH` | `1` keeps your health full (Zero's or the dragon's); enemies are hurt as usual |
-| `DOD3_CHEAT_INTONER` | `1` fills the Intoner gauge at the first blood and keeps it full |
-| `DOD3_CHEAT_ITEMS` | `1` stops items being used up |
-| `DOD3_CHEAT_TIME` | `1` stops a mission's time limit counting down |
+| Setting                         | What it does                                                                                                                                                                                                                           |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RSX_SCALE`                     | Internal resolution as a multiple of 1280x720; values above the window resolution enable supersampling                                                                                                                                 |
+| `RSX_DISPLAY`                   | `windowed`, `borderless` or `fullscreen`                                                                                                                                                                                               |
+| `RSX_WINDOW`                    | Window size in windowed mode, e.g. `1920x1080`                                                                                                                                                                                         |
+| `RSX_VSYNC`                     | `1` syncs to the display; `0` allows the game to exceed its refresh rate                                                                                                                                                               |
+| `DOD3_FPS`                      | Frame cap; `60` is tested, `120` works, `adaptive` selects a rate from 30 to 120                                                                                                                                                       |
+| `DOD3_INSTALL_BASE`             | The folder the game's files are in; the installer writes it, and every start reads it back (the environment variable of the same name wins for one run)                                                                                |
+| `DOD3_FOV`                      | Additional gameplay camera field of view, in degrees                                                                                                                                                                                   |
+| `DOD3_ASPECT`                   | `16:10`, `21:9`, `32:9`, a ratio such as `2.39`, or `auto`                                                                                                                                                                             |
+| `RSX_ANISO`                     | Texture filtering, from 1x to 16x                                                                                                                                                                                                      |
+| `RSX_AA`                        | `fxaa`, `msaa2`, `msaa4` or `msaa8`; unset disables anti-aliasing                                                                                                                                                                      |
+| `DOD3_SHADOWS`                  | `high` or `ultra` for sharper shadows                                                                                                                                                                                                  |
+| `DOD3_MOTION_BLUR`              | `0` disables motion blur                                                                                                                                                                                                               |
+| `DOD3_POSTFX`                   | `0` disables depth of field, bloom and color grading                                                                                                                                                                                   |
+| `DOD3_DOF`                      | `0` disables only the depth of field; the bloom stays                                                                                                                                                                                  |
+| `RSX_HDR`                       | `1` shows the game in HDR where the display and compositor offer an HDR surface                                                                                                                                                        |
+| `DOD3_POSTFX_QUALITY`           | `high` draws the depth of field and bloom smoothly above 720p, with the port's own version of the game's post-processing shader; from the next start                                                                                   |
+| `RSX_HDR_WHITE`                 | White in HDR, in nits: `100` to `400`; unset is 200                                                                                                                                                                                    |
+| `RSX_HDR_PEAK`                  | The brightest highlight, in nits; unset is 1000                                                                                                                                                                                        |
+| `RSX_HDR_HIGHLIGHTS`            | `0` keeps the HDR picture within white                                                                                                                                                                                                 |
+| `RSX_HDR_GAMMA`                 | `srgb` uses the sRGB curve instead of a 2.2 power                                                                                                                                                                                      |
+| `DOD3_SCREEN_BLOOD`             | `border` leaves out the blood splashes and keeps the low-health border; `0` leaves out both                                                                                                                                            |
+| `DOD3_DRAW_DISTANCE`            | `2`, `3`, `5` or `10` for increased scenery distance                                                                                                                                                                                   |
+| `DOD3_TREE_LOD`                 | `2`, `3`, `5` or `10` for increased tree distance and detail                                                                                                                                                                           |
+| `DOD3_SKIP_INTRO`               | `1` skips the logos and opening movie; `0` keeps them                                                                                                                                                                                  |
+| `DOD3_UNFOCUSED`                | `mute` silences audio when unfocused; `pause` also pauses the game                                                                                                                                                                     |
+| `DOD3_SONG_AUTOPLAY`            | `1` plays branch D's final song for you: every note is pressed on its time (the RPCS3 patch "Auto Play Song of The D Branch Final Mission", by bucanero). In the game: Settings > System Settings > Final Song Auto-Play; unset is off |
+| `DOD3_PROMPTS`                  | `ps3`, `ps4`, `ps5`, `xbox`, `switch` or `keyboard`; unset follows the active controller                                                                                                                                               |
+| `DOD3_MOUSE_SENS`               | Mouse camera sensitivity; `DOD3_MOUSE=0` disables mouse camera control                                                                                                                                                                 |
+| `KEY_CROSS`, `KEY_MOVE_UP`, ... | Keys for each pad button and stick direction; the file lists all supported keys                                                                                                                                                        |
+| `DOD3_CAMERA_SPEED`             | `original` restores the game's original camera speed behavior                                                                                                                                                                          |
+| `DOD3_CHEAT_HEALTH`             | `1` keeps your health full (Zero's or the dragon's); enemies are hurt as usual                                                                                                                                                         |
+| `DOD3_CHEAT_INTONER`            | `1` fills the Intoner gauge at the first blood and keeps it full                                                                                                                                                                       |
+| `DOD3_CHEAT_ITEMS`              | `1` stops items being used up                                                                                                                                                                                                          |
+| `DOD3_CHEAT_TIME`               | `1` stops a mission's time limit counting down                                                                                                                                                                                         |
 
 ## Cheats
 
@@ -150,13 +208,19 @@ The game's 72 trophies are earned as on the console, read from your copy's own
 trophy list, and kept in `gamedata/trophies` (NPWR04682.json) with your saves:
 back that folder up with them. Nothing goes to PSN or anywhere else.
 
-- In the game, trophies are unlocked and saved; the pop-up over the game is
-  drawn on Windows with Direct3D 12 only so far.
+- **Trophies, in the launcher**: the launcher's **Trophies** page shows the
+  whole list -- each trophy's icon, its grade and what it is for -- grouped by
+  chapter (the DLC's included), with how far along you are and a count for
+  each grade. Earned ones carry the date; hidden ones stay a question mark
+  until earned (Show Hidden reveals them). All / Earned / Not Earned filter
+  the list, and L1/R1 switch the filter with a pad.
+- In the game, trophies are unlocked and saved; a trophy's unlock is written
+  to the log, and no pop-up is drawn over the game yet.
 - On the command line, `dod3 --trophies` lists them all -- grade, the date you
   earned each and its name (a hidden trophy keeps its secret until earned):
 
   ```sh
-  DOD3_INSTALL_BASE=. build/dod3 --trophies
+  build/dod3 --trophies
   ```
 
 - `PS3_TROPHY_PREVIEW=<id>[,<id>]` shows those pop-ups at boot without
@@ -168,22 +232,22 @@ Xbox, PlayStation (DualShock 4 and DualSense) and Switch Pro controllers are
 supported over USB or Bluetooth. The first connected controller is player 1.
 The game can also be played with keyboard and mouse.
 
-| Key | Button | In play |
-|---|---|---|
-| W A S D | Left stick | Move |
-| Mouse | Right stick | Camera |
-| Left mouse button | Square | Attack |
-| Right mouse button | Triangle | Strong attack |
-| Space | Cross | Jump; confirm in menus |
-| E, Backspace, Esc | Circle | Guard; back in menus |
-| Shift | R1 | Evade |
-| Q, middle mouse button | L1 | Lock on |
-| Mouse wheel | Right stick left/right | Switch target |
-| R, F | L2, R2 | Weapon menus |
-| V | L3 and R3 together | Intoner Mode |
-| Arrow keys, 1 2 3 4 | D-pad | Menus; items |
-| Enter | Start | Pause |
-| Tab | Select | Select menu |
+| Key                    | Button                 | In play                |
+| ---------------------- | ---------------------- | ---------------------- |
+| W A S D                | Left stick             | Move                   |
+| Mouse                  | Right stick            | Camera                 |
+| Left mouse button      | Square                 | Attack                 |
+| Right mouse button     | Triangle               | Strong attack          |
+| Space                  | Cross                  | Jump; confirm in menus |
+| E, Backspace, Esc      | Circle                 | Guard; back in menus   |
+| Shift                  | R1                     | Evade                  |
+| Q, middle mouse button | L1                     | Lock on                |
+| Mouse wheel            | Right stick left/right | Switch target          |
+| R, F                   | L2, R2                 | Weapon menus           |
+| V                      | L3 and R3 together     | Intoner Mode           |
+| Arrow keys, 1 2 3 4    | D-pad                  | Menus; items           |
+| Enter                  | Start                  | Pause                  |
+| Tab                    | Select                 | Select menu            |
 
 Keys are configurable in `dod3.ini`. Escape is always the back button: it
 closes a menu or steps back, and closes the window only if you ask it to
@@ -203,8 +267,9 @@ turns the Deck's buttons into keys (and every press came twice). Set
 ## Japanese voices and mods
 
 With the Japanese Voice Pack installed, choose Change Outfits/Music > Voice
+
 > Language: Japanese on the title menu. The official pack does not include
-Japanese for the six DLC chapters. The DLC Undub mod provides those voices.
+> Japanese for the six DLC chapters. The DLC Undub mod provides those voices.
 
 The Linux game has no graphical mod manager. Mods must be installed manually
 in the corresponding game data folders. For example, a patch mod can be

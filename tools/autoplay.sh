@@ -1,7 +1,6 @@
 #!/bin/bash
 # autoplay.sh <log> <padfile> [grab-prefix] -- drive a new game into the
-# chapter 1 battle and keep it there, hands off. Bash on macOS, Git Bash on
-# Windows.
+# chapter 1 battle and keep it there, hands off.
 #
 # Presses go through PAD_FILE (libs/input/cellPad.c): each line written to
 # <padfile> is one press ("<mask> [polls]"), consumed by the next pad poll.

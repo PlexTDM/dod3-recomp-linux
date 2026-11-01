@@ -486,7 +486,7 @@ struct Wizard : Kit {
                 else
                     dot(dl, ImVec2(right, mid), kWarn);
             }
-            char id[16];
+            char id[32];
             snprintf(id, sizeof id, "##key%zu", i);
             ImGui::PushFont(F.medium, 15);
             ImGui::SetNextItemWidth(-FLT_MIN);
@@ -708,7 +708,7 @@ struct Wizard : Kit {
             if (i + 1 < (int)list.size())   /* the line down to the next step */
                 dl->AddLine(ImVec2(c.x, c.y + r + px(5)), ImVec2(c.x, c.y + step - r - px(5)),
                             past && i + 1 <= at ? alpha(kOk, 0.35f) : kLine, px(1.5f));
-            char num[8];
+            char num[16];
             snprintf(num, sizeof num, "%d", i + 1);
             const ImVec2 ns = text_size(F.semibold, 12, num);
             if (cur && page != Page::Done) {
@@ -921,6 +921,7 @@ struct Wizard : Kit {
             have = installed(base);
             if (job.ok) {
                 plan = Plan();
+                remember_install_base(base);   /* so the next start finds them */
                 go(Page::Done);
             } else
                 go(Page::Failed);
@@ -972,7 +973,7 @@ int run_installer(const fs::path& base)
     if (const char* g = getenv("DOD3_SETUP_GRAB")) w.tests.grab = g;
     if (const char* g = getenv("DOD3_SETUP_GRAB_AT")) w.tests.grab_at = std::max(21, atoi(g));   /* the request goes 20 frames before */
     std::vector<fs::path> paths;
-    for (const std::string& f : env_list("DOD3_SETUP_ADD", '|')) paths.push_back(fs::u8path(f));
+    for (const std::string& f : env_list("DOD3_SETUP_ADD", '|')) paths.push_back(fs::path(f));
     w.add(paths);
     w.have = installed(base);
     {   /* the keys this install was made with, if any */

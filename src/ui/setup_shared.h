@@ -84,4 +84,10 @@ bool known_mod(std::string_view id);   /* a part of kSpanish or kUndub */
 /* The environment variable `var` split at `sep`, empty parts left out. */
 std::vector<std::string> env_list(const char* var, char sep);
 
+/* Record where the game's files went, in dod3.ini (DOD3_INSTALL_BASE), so the
+ * next start finds them there whatever folder the program is started from.
+ * The installer calls it when an install finishes, and `dod3 --install` with
+ * it. An absolute path is stored. */
+void remember_install_base(const fs::path& base);
+
 }  // namespace dod3setup

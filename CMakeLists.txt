@@ -37,130 +37,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(DOD3_RECOMP_OPT "-O2" CACHE STRING
     "Optimization level for the lifted PPU sources (empty: the build type's)")
 
-# ---------------------------------------------------------------------------
-# The Linux installer alone (dod3-setup)
-# ---------------------------------------------------------------------------
-# Optional Linux installer-only target; the native game target is the default.
-option(DOD3_SETUP_ONLY "Build only the Linux installer (dod3-setup)" OFF)
-if(DOD3_SETUP_ONLY)
-    if(NOT CMAKE_BUILD_TYPE)
-        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-    endif()
-    if(NOT DEFINED PS3RECOMP_DIR)
-        set(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp-soyjxck")
-    endif()
-    get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
-    if(NOT EXISTS "${PS3RECOMP_DIR}/tools/pkg_extract.py")
-        message(FATAL_ERROR
-            "The ps3recomp runtime checkout is missing. Clone it beside the "
-            "project: git clone --branch linux-fixes "
-            "https://github.com/PlexTDM/ps3recomp.git ps3recomp-soyjxck "
-            "(docs/BUILDING-LINUX-NATIVE.md)")
-    endif()
-
-    set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
-
-    # The retail PKG key, from the submodule's tools/pkg_extract.py.
-    set(_pkg_py "${PS3RECOMP_DIR}/tools/pkg_extract.py")
-    file(STRINGS "${_pkg_py}" _pkgkey_line REGEX "^PS3_GPKG_KEY *= *bytes\\.fromhex")
-    string(REGEX MATCH "\"([0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])\"" _m "${_pkgkey_line}")
-    if(NOT CMAKE_MATCH_1)
-        message(FATAL_ERROR "${_pkg_py}: no PS3_GPKG_KEY")
-    endif()
-    string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _pkgkey_c "${CMAKE_MATCH_1}")
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/ps3recomp_pkg_key.h" CONTENT
-"/* Generated from the ps3recomp checkout's tools/pkg_extract.py (PS3_GPKG_KEY); not in git. */
-static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
-")
-
-    # The installer's typeface, as arrays in gen/setup_fonts.h
-    set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
-    foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
-        set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
-        file(READ "${_ttf}" _hex HEX)
-        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
-        string(MAKE_C_IDENTIFIER "${_font}" _id)
-        string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
-    endforeach()
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/setup_fonts.h" CONTENT "${_font_h}" @ONLY)
-
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/app_version.h" CONTENT
-"/* Generated from CMakeLists.txt: the port's own version. */
-#define DOD3_VER_MAJOR ${PROJECT_VERSION_MAJOR}
-#define DOD3_VER_MINOR ${PROJECT_VERSION_MINOR}
-#define DOD3_VER_PATCH ${PROJECT_VERSION_PATCH}
-#define DOD3_VERSION_STRING \"${DOD3_VERSION_LABEL}\"
-")
-
-    find_package(ZLIB REQUIRED)
-    find_package(Threads REQUIRED)
-    find_package(OpenGL REQUIRED)
-    find_package(SDL2 CONFIG QUIET)
-    if(TARGET SDL2::SDL2)
-        set(DOD3_SDL2 SDL2::SDL2)
-    elseif(TARGET SDL2::SDL2-static)
-        set(DOD3_SDL2 SDL2::SDL2-static)
-    else()
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
-        set(DOD3_SDL2 PkgConfig::SDL2)
-    endif()
-
-    set(SETUP_CORE
-        src/install/install.cpp
-        src/install/iso.cpp
-        src/install/pkg.cpp
-        src/install/zip.cpp
-        src/install/crypto.cpp
-        src/install/self.cpp
-        src/install/keys.cpp
-        src/kernel/dlc.cpp
-        src/util.cpp)
-    set(SETUP_UI
-        src/ui/wizard.cpp
-        src/ui/look.cpp
-        src/ui/setup_shared.cpp
-        src/ui/png.cpp
-        src/ui/ui_linux.cpp)
-    set(IMGUI_SOURCES
-        "${IMGUI_DIR}/imgui.cpp"
-        "${IMGUI_DIR}/imgui_draw.cpp"
-        "${IMGUI_DIR}/imgui_tables.cpp"
-        "${IMGUI_DIR}/imgui_widgets.cpp"
-        "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
-        "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
-
-    add_executable(dod3-setup
-        src/os/linux/setup_linux.cpp
-        ${SETUP_CORE}
-        ${SETUP_UI}
-        ${IMGUI_SOURCES})
-
-    target_include_directories(dod3-setup PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        "${IMGUI_DIR}"
-        "${CMAKE_BINARY_DIR}/gen"
-        "${PS3RECOMP_DIR}/libs/codec")
-    target_compile_features(dod3-setup PRIVATE cxx_std_20)
-    target_compile_definitions(dod3-setup PRIVATE DOD3_EBOOT=101)
-    target_compile_options(dod3-setup PRIVATE
-        -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
-    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
-    set_source_files_properties(src/ui/png.cpp PROPERTIES COMPILE_OPTIONS "-w")
-    set_source_files_properties(src/install/iso.cpp PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
-    target_link_libraries(dod3-setup PRIVATE
-        ${DOD3_SDL2}
-        OpenGL::GL
-        ZLIB::ZLIB
-        Threads::Threads
-        ${CMAKE_DL_LIBS}
-        m)
-    install(TARGETS dod3-setup RUNTIME DESTINATION bin)
-
-    message(STATUS "dod3-setup:      Linux installer only (no lifted game code)")
-    message(STATUS "Install folder:  --base DIR, DOD3_INSTALL_BASE, or ~/.local/share/Drakengard 3 Recompiled")
-    return()
-endif()
 
 # Prefer Ninja if available
 if(NOT CMAKE_GENERATOR MATCHES "Ninja" AND NOT DEFINED ENV{CMAKE_GENERATOR})
@@ -211,9 +87,9 @@ if(_native_hook_arg EQUAL -1)
         "checkout of https://github.com/PlexTDM/ps3recomp (branch linux-fixes).")
 endif()
 
-# The renderer is the draw engine's Vulkan backend, rsx_vulkan_engine.c: the
-# one the Windows build runs with RSX_BACKEND=vulkan, with HDR output, the
-# host's keyboard and mouse, and the guest's programs translated to SPIR-V.
+# The renderer is the draw engine's Vulkan backend, rsx_vulkan_engine.c, with
+# HDR output, the host's keyboard and mouse, and the guest's programs
+# translated to SPIR-V.
 # It is built when PS3RECOMP_RSX_VULKAN is on (and glslang is found); the
 # runtime then defines PS3RECOMP_VULKAN_ENGINE_SDL for the port, checked after
 # add_subdirectory.
@@ -510,10 +386,20 @@ set_source_files_properties("${LIBSRE_LIFTED_CPP}" PROPERTIES COMPILE_OPTIONS "-
 # (rsx_host_mouse.c), so the port has no platform source of its own here.
 set(PORT_PLATFORM_SOURCES "")
 
-# The installer (src/install/install.h): the core on every platform; the pages
-# (src/ui/wizard.cpp) in Dear ImGui (third_party/imgui, v1.92.9b), in a
-# window from one layer per platform (src/ui/ui.h).
+# The installer and the launcher (src/install/install.h, src/ui/launcher.cpp):
+# Dear ImGui (third_party/imgui, v1.92.9b) in an SDL2 + OpenGL window from
+# src/ui/ui_linux.cpp. The launcher owns the window at start -- Play, Mods,
+# DLC, Settings, and the installer behind Game Files -- and the game's own
+# Vulkan window opens after it, in this process.
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+set(IMGUI_SOURCES
+    "${IMGUI_DIR}/imgui.cpp"
+    "${IMGUI_DIR}/imgui_draw.cpp"
+    "${IMGUI_DIR}/imgui_tables.cpp"
+    "${IMGUI_DIR}/imgui_widgets.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
+find_package(OpenGL REQUIRED)
 set(SETUP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/install.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp"
@@ -521,6 +407,30 @@ set(SETUP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/crypto.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/self.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/install/keys.cpp")
+# The launcher's and installer's typeface, as arrays in gen/setup_fonts.h
+# (ui/look.cpp).
+set(_font_h "/* Generated from third_party/fonts/inter by CMakeLists.txt. */\n")
+foreach(_font Inter-Regular Inter-Medium Inter-SemiBold InterDisplay-Bold)
+    set(_ttf "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/inter/${_font}.ttf")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ttf}")
+    file(READ "${_ttf}" _hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+    string(MAKE_C_IDENTIFIER "${_font}" _id)
+    string(APPEND _font_h "static const unsigned char kFont_${_id}[] = {${_bytes}};\n")
+endforeach()
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/setup_fonts.h" CONTENT "${_font_h}" @ONLY)
+# The window icon (src/res/icon.png, the 256x256 entry of src/res/icon.ico,
+# extracted by tools/make_window_icon.py), as an array in gen/window_icon.h:
+# the launcher's window carries it (ui/ui_linux.cpp) and the release installs
+# the same PNG for the desktop entry.
+set(_icon_png "${CMAKE_CURRENT_SOURCE_DIR}/src/res/icon.png")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_icon_png}")
+file(READ "${_icon_png}" _icon_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _icon_bytes "${_icon_hex}")
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/gen/window_icon.h" CONTENT
+"/* Generated from src/res/icon.png by CMakeLists.txt (made from src/res/icon.ico). */
+static const unsigned char kWindowIconPng[] = {${_icon_bytes}};
+")
 # The retail PKG key, read from the submodule's tools/pkg_extract.py
 # (PS3_GPKG_KEY) into a header in the build tree: this repository carries no
 # copy, and the key stays off the compile command lines and build logs.
@@ -538,6 +448,16 @@ static const unsigned char k_ps3recomp_pkg_key[16] = {${_pkgkey_c}};
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_pkg_py}")
 set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/install/pkg.cpp" APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/gen")
 set_property(SOURCE ${SETUP_SOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGUI_DIR}")
+# The launcher, the installer's pages and Dear ImGui itself, scoped to those
+# files so the lifted units' compile commands stay as they are.
+set_property(SOURCE src/ui/launcher.cpp src/ui/wizard.cpp src/ui/look.cpp
+                    src/ui/setup_shared.cpp src/ui/ui_linux.cpp src/ui/trophies.cpp ${IMGUI_SOURCES}
+             APPEND PROPERTY INCLUDE_DIRECTORIES "${IMGUI_DIR}")
+set_source_files_properties(${IMGUI_SOURCES} src/ui/png.cpp PROPERTIES COMPILE_OPTIONS "-w")
+# png.cpp decodes the key art and the window icon with the runtime's stb_image
+# (the same one the game's textures go through).
+set_property(SOURCE src/ui/png.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+             "${PS3RECOMP_DIR}/libs/codec")
 
 # The port's own sources, grouped by module under src/.
 set(PORT_CPU_SOURCES                 # the lifted code's glue
@@ -565,13 +485,21 @@ set(PORT_PATCH_SOURCES               # native replacements of the game's own cod
     src/patches/cheats.cpp           # the cheats (DOD3_CHEAT_*)
     src/patches/dragon_cursor.cpp    # the mouse moves the dragon's shooting cursor
     src/patches/sysset.cpp)
-set(PORT_UI_SOURCES                  # the in-game settings pages
+set(PORT_UI_SOURCES                  # the in-game settings pages, the launcher and the installer
     src/ui/settings_menu.cpp
     src/ui/overlay.cpp               # the in-game layer: the trophies' listener
-    src/ui/ini.cpp)                  # dod3.ini, edited in place
+    src/ui/ini.cpp                   # dod3.ini, edited in place
+    src/ui/launcher.cpp              # Play, Mods, DLC, Trophies, Settings: the window at start
+    src/ui/trophies.cpp              # the disc's trophy list, its icons and dates
+    src/ui/wizard.cpp                # the installer, behind the launcher's Game Files
+    src/ui/look.cpp                  # the look the two share
+    src/ui/setup_shared.cpp
+    src/ui/png.cpp                   # the key art and the icons, decoded
+    src/ui/ui_linux.cpp              # the SDL2 + OpenGL window and Dear ImGui's backends
+    ${IMGUI_SOURCES})
 # The trophies (trophy_host.h, trophy_pack.h): only for the file that reads
 # them, so the lifted code's command lines stay as they are.
-set_property(SOURCE src/ui/overlay.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+set_property(SOURCE src/ui/overlay.cpp src/ui/trophies.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
              "${PS3RECOMP_DIR}/libs/network")
 set(PORT_SOURCES
     src/main.cpp
@@ -685,6 +613,7 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
+    OpenGL::GL
 )
 # Let CMake infer the C++ linker for the runtime and generated C sources.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
@@ -696,7 +625,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 # searched first. DT_RPATH rather than DT_RUNPATH (--disable-new-dtags) so it
 # also finds those libraries' own dependencies (glslang's libSPIRV-Tools); a
 # build tree has no lib/, and the system's own are found as before.
-if(UNIX AND NOT APPLE)
+if(UNIX)
     target_link_options(${PROJECT_NAME} PRIVATE
         "LINKER:--disable-new-dtags" "LINKER:-rpath,$ORIGIN/lib")
 endif()

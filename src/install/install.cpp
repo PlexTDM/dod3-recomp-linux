@@ -16,12 +16,6 @@
 #include <optional>
 #include <set>
 #include <thread>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#include <winioctl.h>
-#endif
 
 namespace dod3setup {
 
@@ -126,9 +120,8 @@ std::vector<std::string> read_lines(const fs::path& p)
 }
 
 /* fs::rename, tried again for a few seconds while it is refused: right after
- * thousands of files are written, a scanner (Windows Defender, the search
- * indexer) may still hold one of them open, and the folder cannot move until
- * it lets go ("Access is denied"). */
+ * thousands of files are written, a scanner may still hold one of them open,
+ * and the folder cannot move until it lets go ("Access is denied"). */
 void move_patiently(const fs::path& from, const fs::path& to, std::error_code& ec)
 {
     for (int i = 0;; i++) {
@@ -167,74 +160,27 @@ bool merge_move(const fs::path& from, const fs::path& to, std::string* err)
 
 /* ---- links onto the disc (the game-data layout) -------------------------- */
 
-/* Is `p` a link (a junction or a symlink), whatever it points at? */
+/* Is `p` a link (a symlink), whatever it points at? */
 bool is_link(const fs::path& p)
 {
-#ifdef _WIN32
-    const DWORD a = GetFileAttributesW(p.c_str());
-    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT);
-#else
     std::error_code ec;
     return fs::is_symlink(fs::symlink_status(p, ec));
-#endif
 }
 
 /* Remove the link itself, never what it points at. */
 bool remove_link(const fs::path& p)
 {
-#ifdef _WIN32
-    return RemoveDirectoryW(p.c_str()) != 0;
-#else
     std::error_code ec;
     return fs::remove(p, ec);
-#endif
 }
 
-/* A directory link at `link` onto `target`. On Windows a junction (unlike a
- * symlink it needs no privilege; it holds an absolute path, so a moved folder
- * is repaired at the next boot), elsewhere a relative symlink. */
+/* A directory link at `link` onto `target`: a relative symlink, so a moved
+ * folder is repaired at the next boot. */
 bool make_link(const fs::path& target, const fs::path& link)
 {
     std::error_code ec;
-#ifdef _WIN32
-    const std::wstring abs = fs::absolute(target, ec).wstring();
-    if (abs.size() < 3 || abs[1] != L':') return false;   /* a junction needs a drive path */
-    const std::wstring sub = L"\\??\\" + abs;
-    if (!CreateDirectoryW(link.c_str(), nullptr)) return false;
-    HANDLE h = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-                           FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
-        RemoveDirectoryW(link.c_str());
-        return false;
-    }
-    /* REPARSE_DATA_BUFFER, mount-point form (ntifs.h): tag, data length,
-     * reserved; substitute name offset/length, print name offset/length
-     * (bytes); the two names, each NUL-terminated */
-    const size_t subb = sub.size() * 2, absb = abs.size() * 2;
-    std::vector<uint8_t> buf(16 + subb + 2 + absb + 2);
-    auto put16 = [&](size_t o, size_t v) {
-        buf[o] = (uint8_t)v;
-        buf[o + 1] = (uint8_t)(v >> 8);
-    };
-    const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
-    memcpy(&buf[0], &tag, 4);
-    put16(4, buf.size() - 8);
-    put16(8, 0);
-    put16(10, subb);
-    put16(12, subb + 2);
-    put16(14, absb);
-    memcpy(&buf[16], sub.c_str(), subb);
-    memcpy(&buf[16 + subb + 2], abs.c_str(), absb);
-    DWORD got = 0;
-    const BOOL ok =
-        DeviceIoControl(h, FSCTL_SET_REPARSE_POINT, buf.data(), (DWORD)buf.size(), nullptr, 0, &got, nullptr);
-    CloseHandle(h);
-    if (!ok) RemoveDirectoryW(link.c_str());
-    return ok != 0;
-#else
     fs::create_directory_symlink(fs::relative(target, link.parent_path(), ec), link, ec);
     return !ec;
-#endif
 }
 
 size_t count_files(const fs::path& d)
@@ -620,7 +566,7 @@ bool mod_files(const fs::path& base, const std::string& id, std::vector<ModFile>
         const size_t sl = l.find('/');
         if (sl == std::string::npos || l.find("..") != std::string::npos) continue;
         m.kind = l.substr(0, sl);
-        m.rel = fs::u8path(l.substr(sl + 1));
+        m.rel = fs::path(l.substr(sl + 1));
         if ((m.kind != "patch" && m.kind != "tree") || m.rel.empty() || m.rel.is_absolute()) continue;
         out->push_back(m);
     }
@@ -1188,7 +1134,7 @@ bool identify_zip(const fs::path& p, Source* s, std::string* err)
     size_t n = 0;
     for (const ZipEntry& e : es) {
         if (e.dir) continue;
-        const std::string name = upper(utf8(fs::u8path(e.name).filename()));
+        const std::string name = upper(utf8(fs::path(e.name).filename()));
         es_movies &= std::any_of(std::begin(kEsMovies), std::end(kEsMovies),
                                  [&](const auto& k) { return name == k.name && e.crc == k.crc; });
         n++;

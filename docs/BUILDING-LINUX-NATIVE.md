@@ -53,17 +53,12 @@ backend.
 
 ## Install your game files
 
-The game files have to be in place before the first lift, so use the
-installer-only target, which needs none of the game's code:
+The game files have to be in place before the first lift, and only a built
+`dod3` installs them: use a release's binary (its launcher's Game Files, or
+`dod3 --install`), then build from source.
 
 ```sh
-tools/build_linux_setup.sh
-```
-
-Install to the repository root:
-
-```sh
-./build-installer/dod3-setup --install --base "$PWD" \
+./dod3 --install --base "$PWD" \
     "/path/Drakengard 3 (USA) (En,Fr).iso" \
     "/path/UP0082-BLUS31197_00-DOD3PATCH0000000-A0101-V0101-PE.pkg"
 ```
@@ -113,8 +108,10 @@ To keep the game in `$XDG_DATA_HOME/dod3-recomp` (or
 `build/dod3 --install <disc-or-folder> <update.pkg> [DLC.pkg ...]`, then run
 `build/dod3` with no variable set.
 
-There is no graphical launcher: the game's own Settings pages cover the
-options, and `dod3.ini` in the install directory the rest.
+`build/dod3` with no arguments opens the launcher (Play, Mods, DLC, Settings),
+which reads the same `dod3.ini` and installs from its Game Files page; the
+game's own Settings pages cover the options while playing, and `dod3.ini` in
+the install directory the rest. `DOD3_LAUNCHER=0` skips the launcher.
 
 ## Frame capture
 

@@ -204,8 +204,10 @@ bool apply_patch(std::vector<uint8_t>& u)
     return true;
 }
 
-/* PS3TOC.TXT: "<size> <uncompressed size> <path> 0" a line. */
-bool toc_rewrite(const std::vector<uint8_t>& in, std::string& out, uint32_t csize, uint32_t usize)
+/* PS3TOC.TXT: "<size> <uncompressed size> <path> 0" a line. Only the
+ * 1.00 package has one (the 1.01 update ships the cooked file whole), so a
+ * 1.01 build compiles it and never calls it. */
+[[maybe_unused]] bool toc_rewrite(const std::vector<uint8_t>& in, std::string& out, uint32_t csize, uint32_t usize)
 {
     std::string t(in.begin(), in.end());
     int hits = 0;

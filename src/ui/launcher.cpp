@@ -10,6 +10,10 @@
  *             Voice option), Remove, and Add Files / Add Folder for more
  *             (install/install.h does the work)
  *   DLC       the 20 packs, which are in, and Add DLC Packages
+ *   Trophies  the disc's trophy list with what this install has earned:
+ *             by grade and by chapter, the earned ones with their dates, the
+ *             hidden ones kept secret until earned (Show Hidden reveals them)
+ *             (ui/trophies.h)
  *   Settings  dod3.ini: the in-game Settings pages' rows (src/ui/settings_menu.cpp,
  *             one list for both), a few that are only in the file (window size,
  *             mouse camera, camera speed, this launcher) and the keyboard's keys.
@@ -19,7 +23,7 @@
  * too (ui/look.h). Keyboard, mouse and controller all work (the backends feed
  * ImGui's navigation).
  *
- * Tests: DOD3_LAUNCHER_OPEN=mods|dlc|settings[:<n>] opens a panel at start
+ * Tests: DOD3_LAUNCHER_OPEN=mods|dlc|settings[:<n>]|trophies opens a panel at start
  * (n: the settings tab, 0 Display to 3 System), DOD3_LAUNCHER_ADD=
  * '<file>|<file>' adds files as Add Files would, and DOD3_SETUP_GRAB=<prefix>
  * saves the window as <prefix>_0.ppm once it has settled (the platform's
@@ -33,6 +37,7 @@
 #include "ui/ini.h"
 #include "ui/look.h"           /* the type, the colours, the art, the widgets */
 #include "ui/setup_shared.h"   /* the files added and the install, on their own threads */
+#include "ui/trophies.h"       /* the Trophies panel */
 #include "install/install.h"
 #include "patches/sysset.h"    /* Dod3RowSpec, dod3_setting_rows */
 #include "util.h"
@@ -90,7 +95,7 @@ void extra_rows(std::vector<Dod3RowSpec>& rows)
                      .choices = { { nullptr, "Console" }, { "original", "Original" } } });
     rows.push_back({ .key = "DOD3_LAUNCHER",
                      .label = "Launcher at Start",
-                     .desc = "Open this at start. Hold Shift (Option on a Mac) to open it anyway.",
+                     .desc = "Open this at start. --launcher opens it anyway.",
                      .choices = { { nullptr, "On" }, { "0", "Off" } } });
 }
 
@@ -185,9 +190,7 @@ const char* key_name(ImGuiKey k)
     case ImGuiKey_End: return "End";
     case ImGuiKey_PageUp: return "PageUp";
     case ImGuiKey_PageDown: return "PageDown";
-#ifndef __APPLE__
     case ImGuiKey_CapsLock: return "CapsLock";
-#endif
     case ImGuiKey_Minus: return "Minus";
     case ImGuiKey_Equal: return "Equals";
     case ImGuiKey_LeftBracket: return "LBracket";
@@ -205,7 +208,7 @@ const char* key_name(ImGuiKey k)
 
 /* ---- the launcher -------------------------------------------------------------- */
 
-enum class Panel { None, Mods, Dlc, Settings };
+enum class Panel { None, Mods, Dlc, Settings, Trophies };
 
 const float kPanelSlide = 0.25f;   /* seconds a panel takes to come in */
 const char kOffNote[] = "Switched off: the game starts without it. Its files are kept, to switch it on again.";
@@ -239,6 +242,7 @@ struct Launcher : Kit {
 
     /* the settings */
     std::map<std::string, std::string> kv;   /* dod3.ini */
+    TrophiesPanel trophies;   /* the disc's trophy list, read on its own thread */
     std::vector<Dod3RowSpec> rows;
     int tab = kDisplay;
     int capture = -1, capture_frames = 0;   /* a key binding being set */
@@ -454,7 +458,7 @@ struct Launcher : Kit {
     {
         /* while files are being recognised, leaving would wait for them with the window still */
         const bool busy = working() || checks.pending() > 0;
-        float y = H * 0.40f;
+        float y = H * 0.36f;   /* six entries now: Play, Mods, DLC, Settings, Trophies, Quit */
         int result = kGoOn;
         if (play_item(y, !busy)) result = kPlay;
         /* Enter, or a pad's confirm button, plays straight away when nothing
@@ -488,6 +492,10 @@ struct Launcher : Kit {
         back_here(Panel::Settings);
         if (menu_item("##settings", "Settings", settings_summary().c_str(), y, panel == Panel::Settings, true))
             open(Panel::Settings);
+        y += px(62);
+        back_here(Panel::Trophies);
+        if (menu_item("##trophies", "Trophies", trophies.summary().c_str(), y, panel == Panel::Trophies, true))
+            open(Panel::Trophies);
         y += px(62);
         if (menu_item("##quit", "Quit", nullptr, y, false, !working())) result = kQuit;
         return result;
@@ -1051,20 +1059,29 @@ struct Launcher : Kit {
 
         if (panel != Panel::None) {
             ImVec2 body, size;
-            const char* heading = panel == Panel::Mods ? "Mods" : panel == Panel::Dlc ? "DLC" : "Settings";
+            const char* heading = panel == Panel::Mods       ? "Mods"
+                                  : panel == Panel::Dlc      ? "DLC"
+                                  : panel == Panel::Trophies ? "Trophies"
+                                                             : "Settings";
             const char* sub = panel == Panel::Mods ? "Fan-made additions, installed beside your own game files."
                               : panel == Panel::Dlc ? "The downloadable content you own."
-                                                    : "Saved to dod3.ini as you change them; used at the next start.";
+                              : panel == Panel::Trophies ? "Earned as you play; kept with your saves."
+                                                         : "Saved to dod3.ini as you change them; used at the next start.";
             const bool close = panel_frame(heading, sub, panel_in(), true, &body, &size);
             if (panel == Panel::Settings)
                 settings_panel(body, size);
-            else if (flow != Flow::Idle)
+            else if (panel == Panel::Trophies) {
+                trophies.draw(*this, body, size, focus_panel);
+                focus_panel = false;
+            } else if (flow != Flow::Idle)
                 flow_page(body, size);
             else if (panel == Panel::Mods)
                 mods_panel(body, size);
             else
                 dlc_panel(body, size);
-            const bool back = back_pressed() && capture < 0 && cooldown == 0;
+            /* Esc and the pad's back leave the panel -- except while typing in
+             * the Trophies panel's search field (ui/trophies.h) */
+            const bool back = back_pressed() && capture < 0 && cooldown == 0 && !trophies.typing();
             if ((close || back) && !working()) {
                 if (ImGui::GetIO().NavVisible) refocus = panel;
                 panel = Panel::None;
@@ -1089,11 +1106,12 @@ struct Launcher : Kit {
             panel = !strncmp(o, "mods", 4)       ? Panel::Mods
                     : !strncmp(o, "dlc", 3)      ? Panel::Dlc
                     : !strncmp(o, "settings", 8) ? Panel::Settings
+                    : !strncmp(o, "trophies", 8) ? Panel::Trophies
                                                  : Panel::None;
             if (const char* c = strchr(o, ':')) tab = std::clamp(atoi(c + 1), 0, kTabs - 1);
         }
         std::vector<fs::path> paths;
-        for (const std::string& f : env_list("DOD3_LAUNCHER_ADD", '|')) paths.push_back(fs::u8path(f));
+        for (const std::string& f : env_list("DOD3_LAUNCHER_ADD", '|')) paths.push_back(fs::path(f));
         add(paths);
         static const struct {
             const char* name;
@@ -1162,6 +1180,7 @@ int run_launcher(const fs::path& base)
     L.base = base;
     L.ini = fs::path(dod3_settings_path_now());
     L.art = look::load_art(base);
+    L.trophies.start(base);   /* the disc's trophy list, read on its own thread */
     L.refresh();
     L.kv = dod3::ini_read(L.ini);
     dod3_setting_rows(L.rows);
@@ -1186,7 +1205,10 @@ int run_launcher(const fs::path& base)
 int run_launcher_loop(const fs::path& base)
 {
     for (;;) {
-        const int r = run_launcher(base);
+        int r = run_launcher(base);
+        /* Play with nothing installed (a fresh download): the installer, as
+         * Game Files would, instead of failing to boot afterwards. */
+        if (r == kPlay && !installed(base).ready()) r = kGameFiles;
         if (r != kGameFiles) return r < 0 ? kPlay : r;   /* no window: the game starts as before */
         /* Game Files: the installer -- its Play starts the game; closing it comes back here */
         const int i = run_installer(base);

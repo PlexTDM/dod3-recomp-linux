@@ -1,11 +1,26 @@
 /* What the launcher and the setup share besides their look (ui/setup_shared.h). */
 #include "ui/setup_shared.h"
+#include "ui/ini.h"   /* the dod3.ini it records the game folder in */
 #include "util.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
+/* main.cpp: the dod3.ini beside the program, the one the game will read. */
+const char* dod3_settings_path_now();
+
 namespace dod3setup {
+
+void remember_install_base(const fs::path& base)
+{
+    std::error_code ec;
+    const fs::path abs = fs::absolute(base, ec);
+    const std::string value = (ec ? base : abs).string();
+    const char* ini = dod3_settings_path_now();
+    if (!dod3::ini_write(fs::path(ini), {{ "DOD3_INSTALL_BASE", value.c_str() }}))
+        fprintf(stderr, "[install] could not record the game folder in %s\n", ini);
+}
 
 void FileChecks::add(const std::vector<fs::path>& paths)
 {

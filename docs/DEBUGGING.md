@@ -74,10 +74,9 @@ has no console; the previous run is `dod3.prev.log`.
   light shafts and the bloom, which show their taps when scaled).
 - `RSX_HITCH_LOG=<ms>` lists frames over that, with the walker's GPU-blocked
   time and what it uploaded in the frame (textures: creating, decoding and
-  staging them; vertex buffers; pipelines); with `DOD3_PROF` also the sampled
-  stacks of the frame; `DOD3_TRACE_HITCH=1` adds the events of the frame
-  before it (guest sleeps, drains, label writes, flips, ring recycles) as
-  `[trace]` lines.
+  staging them; vertex buffers; pipelines); `DOD3_TRACE_HITCH=1` adds the
+  events of the frame before it (guest sleeps, drains, label writes, flips,
+  ring recycles) as `[trace]` lines.
 - `DOD3_STUTTER_MS=<n>`: per slow frame, `[stutter-rsx]` (textures, vertex
   conversions, pipelines built) and `[stutter]` (guest threads).
 - `RSX_DRAW_STATS=1`, `RSX_SNAP_STATS=1` (snapshots), `RSX_SYNC_STATS=1` (the
@@ -124,10 +123,6 @@ has no console; the previous run is `dod3.prev.log`.
 
 ## Profiling
 
-- `DOD3_STALL_MS=<n>`: when no frame has been presented for n ms, every
-  thread's stack, at most `DOD3_STALL_MAX` times (12), into
-  `DOD3_STALL_SAMPLE=<dir>` or the log; `tools/stack_summary.py` condenses its
-  output.
 - `PPU_WAITPROF=1`: time in syscalls by thread and guest call site, every 5 s,
   with the fence poll's statistics; `=2` adds the most frequent calls (who
   sends or signals how often: which thread answers a wait).

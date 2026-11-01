@@ -29,9 +29,7 @@
  * looks every 2 ms: when packages became pending and when the last one was
  * done, the frames in between and the longest of them, and every frame over
  * 100 ms whether a package is pending or not (a blocking load: the map
- * itself, LoadMap on the game thread). With DOD3_PROF on macOS each load is a
- * report window of its own.
- */
+ * itself, LoadMap on the game thread). */
 #include "cpu/ppu.h"
 #include "cpu/eboot.h"   /* the EBOOT version's addresses */
 #include "util.h"
@@ -39,41 +37,12 @@
 #include <stdlib.h>
 #include <thread>
 #include <chrono>
-#ifdef __APPLE__
 #include <pthread.h>
-#include <sys/sysctl.h>
-#include <sys/time.h>
-#include <unistd.h>
-#elif defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__linux__)
-#include <pthread.h>
-#endif
 
 extern "C" uint32_t g_rsx_engine_frame;            /* rsx_draw_engine.c: the present count */
 extern "C" volatile unsigned g_rsx_frame_draws;    /* and the draws of the last frame presented */
-#ifdef __APPLE__
-/* src/os/macos/prof_mac.cpp */
-extern "C" void dod3_prof_mark(const char* why);
-extern "C" void dod3_prof_slow_frame(uint64_t start_us, uint64_t end_us, double frame_ms);
-#elif defined(_WIN32)
-/* src/os/win32/prof.cpp */
-extern "C" void win_prof_slow_frame_async(uint64_t start_us, uint64_t end_us, double frame_ms);
-static void dod3_prof_mark(const char*) {}
-static void dod3_prof_slow_frame(uint64_t start_us, uint64_t end_us, double frame_ms)
-{
-    win_prof_slow_frame_async(start_us, end_us, frame_ms);
-}
-#else
 static void dod3_prof_mark(const char*) {}
 static void dod3_prof_slow_frame(uint64_t, uint64_t, double) {}
-#endif
 
 extern "C" void dod3_archive_native_counts(uint64_t* native, uint64_t* lifted);   /* archive_native.cpp */
 
@@ -143,35 +112,11 @@ void dod3_load_in_limiter(ppu_context* ctx, uint64_t* usec)
 #endif
 }
 
-/* Seconds since the process started (elsewhere than macOS and Windows: since
- * the first call). */
+/* Seconds since the process started, from the first call. */
 static double since_process_start()
 {
-#ifdef _WIN32
-    FILETIME created, exited, kernel, user, now;
-    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0.0;
-    GetSystemTimeAsFileTime(&now);
-    const uint64_t c = (uint64_t)created.dwHighDateTime << 32 | created.dwLowDateTime;
-    const uint64_t n = (uint64_t)now.dwHighDateTime << 32 | now.dwLowDateTime;
-    return n > c ? (n - c) / 1e7 : 0.0;   /* 100 ns units */
-#elif defined(__APPLE__)
-    static double start = -1.0;
-    if (start < 0.0) {
-        struct kinfo_proc kp;
-        size_t len = sizeof kp;
-        int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
-        if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0)
-            start = kp.kp_proc.p_starttime.tv_sec + kp.kp_proc.p_starttime.tv_usec / 1e6;
-        else
-            start = 0.0;
-    }
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    return start > 0.0 ? now.tv_sec + now.tv_usec / 1e6 - start : 0.0;
-#else
     static const uint64_t t0 = dod3_now_us();
     return (dod3_now_us() - t0) / 1e6;
-#endif
 }
 
 /* DOD3_LOAD_LOG: a step of the start-up, with the time since the process
@@ -185,11 +130,7 @@ extern "C" void dod3_boot_mark(const char* what)
 #if defined(DOD3_A_GOBJ_ASYNC_PACKAGES)
 static void load_log_thread()
 {
-#ifdef __APPLE__
-    pthread_setname_np("dod3 load log");
-#elif defined(__linux__)
     pthread_setname_np(pthread_self(), "dod3 load log");
-#endif
     const uint64_t t0 = dod3_now_us();
     dod3_boot_mark("t=0 of the [load] lines");
     uint64_t since = 0, frame_at = t0, longest = 0, lim0 = 0;

@@ -31,10 +31,9 @@ enum Dod3Bind {
     kBinds
 };
 
-/* Once at boot. Nothing where the port has no keyboard and mouse of its own
- * (neither Windows nor macOS: the toolkit's built-in keys stay). */
+/* Once at boot. */
 void dod3_kbm_install();
-/* Is the port's keyboard and mouse the one in use on this platform? */
+/* Is the port's keyboard and mouse in use? */
 bool dod3_kbm_present();
 /* The first key bound to it, as the settings file names keys (the button
  * prompts draw it); NULL when nothing is. */
