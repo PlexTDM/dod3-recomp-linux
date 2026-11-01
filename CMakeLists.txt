@@ -689,6 +689,18 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Let CMake infer the C++ linker for the runtime and generated C sources.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 
+# The release's layout (tools/package_linux.sh): the glslang and SPIRV-Tools
+# that translate the guest's programs travel beside dod3, in lib/, because
+# the distributions differ -- Ubuntu's glslang-dev ships static libraries the
+# binary takes in, Arch's and Fedora's only shared ones. $ORIGIN/lib is
+# searched first. DT_RPATH rather than DT_RUNPATH (--disable-new-dtags) so it
+# also finds those libraries' own dependencies (glslang's libSPIRV-Tools); a
+# build tree has no lib/, and the system's own are found as before.
+if(UNIX AND NOT APPLE)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        "LINKER:--disable-new-dtags" "LINKER:-rpath,$ORIGIN/lib")
+endif()
+
 # ---------------------------------------------------------------------------
 # Compiler-specific flags
 # ---------------------------------------------------------------------------

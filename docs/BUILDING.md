@@ -16,7 +16,7 @@ Linux (x86-64):
 
 - GCC 12+ or Clang 14+, CMake 3.20+, Ninja, Python 3.11+, Git and zlib.
 - SDL2, Vulkan and glslang development packages (`libsdl2-dev libvulkan-dev
-  glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
+glslang-dev` on Debian/Ubuntu; `SDL2-devel vulkan-headers glslang-devel` on
   Fedora), plus a Vulkan-capable driver.
 
 Clone the project, then the runtime fork beside it:
@@ -49,7 +49,7 @@ DOD3_INSTALL_BASE=. path/to/dod3 --install <disc .iso or folder, or PSN game .pk
 ```
 
 Any other decrypted copy of the update's EBOOT.BIN with that hash works too
-(RPCS3's *Utilities > Decrypt PS3 Binaries*, for one). `dod3 --check
+(RPCS3's _Utilities > Decrypt PS3 Binaries_, for one). `dod3 --check
 <file>...` says what the installer makes of a file.
 
 ## Lifting the PPU code
@@ -121,15 +121,15 @@ lift must be removed, or given `-DRECOMP_DIR=` explicitly (the scripts do).
 
 Options:
 
-| Option | Default | |
-|---|---|---|
-| `DOD3_EBOOT` | 101 | the version the lift is from. 100 builds the disc version instead (`elf/EBOOT.ELF`, `recompiled/`, `src/cpu/eboot.h`'s other column); kept for comparison, not maintained |
-| `RECOMP_DIR` | `recompiled_101` | the lifted PPU C++ |
-| `DOD3_X86_LEVEL` | x86-64-v3 | the lifted code's x86 level; empty for the baseline. The default needs AVX2, FMA and BMI2, and the executable checks for them at start |
-| `DOD3_INLINE_VM` | ON | inline the guest-memory fast path into the lifted code |
-| `DOD3_RECOMP_OPT` | `-O2` | optimization of the lifted PPU sources. Compile time is what it changes, not memory: the largest unit takes 13.5 minutes at `-O3`, 10 at `-O2` and 5.3 at `-O1` with GCC, and game performance moves the other way |
-| `DOD3_COMPILE_JOBS` | 0 (automatic) | lifted units compiled at once (the `dod3_compile` job pool), sized from the lift's largest unit, the machine's RAM and the compiler; a positive number pins it. Raise it if the machine has RAM to spare, lower it if the build swaps |
-| `LIBSRE_PRX` | `fw_spu/libsre.prx` | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`) |
+| Option              | Default             |                                                                                                                                                                                                                                       |
+| ------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOD3_EBOOT`        | 101                 | the version the lift is from. 100 builds the disc version instead (`elf/EBOOT.ELF`, `recompiled/`, `src/cpu/eboot.h`'s other column); kept for comparison, not maintained                                                             |
+| `RECOMP_DIR`        | `recompiled_101`    | the lifted PPU C++                                                                                                                                                                                                                    |
+| `DOD3_X86_LEVEL`    | x86-64-v3           | the lifted code's x86 level; empty for the baseline. The default needs AVX2, FMA and BMI2, and the executable checks for them at start                                                                                                |
+| `DOD3_INLINE_VM`    | ON                  | inline the guest-memory fast path into the lifted code                                                                                                                                                                                |
+| `DOD3_RECOMP_OPT`   | `-O2`               | optimization of the lifted PPU sources. Compile time is what it changes, not memory: the largest unit takes 13.5 minutes at `-O3`, 10 at `-O2` and 5.3 at `-O1` with GCC, and game performance moves the other way                    |
+| `DOD3_COMPILE_JOBS` | 0 (automatic)       | lifted units compiled at once (the `dod3_compile` job pool), sized from the lift's largest unit, the machine's RAM and the compiler; a positive number pins it. Raise it if the machine has RAM to spare, lower it if the build swaps |
+| `LIBSRE_PRX`        | `fw_spu/libsre.prx` | the module the SPURS queue paths are lifted from at build time (`tools/gen_libsre.py`)                                                                                                                                                |
 
 The replay tool (`rsx_replay`, for the rendering regression) is not part of
 the default target: `cmake --build build --target rsx_replay`.
@@ -158,26 +158,30 @@ environment wins over it.
 
 ## Packaging a release
 
-`tools/package_linux.sh` writes `dist/dod3-recomp-<version>-linux-x86_64.tar.gz`:
-the executable, the default `dod3.ini`, the player guide and the licences.
-Nothing of the game goes in it -- players run `dod3 --install` in the folder
-the archive unpacks to. It refuses a binary that needs more than glibc,
-libstdc++, zlib and SDL2, and prints the newest glibc it asks for.
+`tools/package_linux.sh` writes `dist/dod3-recomp-<version>-linux-x86_64.tar.gz`
+and the same tree as a `.zip`: the executable, the default `dod3.ini`, the
+player guide and the licences. Nothing of the game goes in it -- players run
+`dod3 --install` in the folder the archive unpacks to. It refuses a binary
+that needs more than glibc, libstdc++, zlib and SDL2, and prints the newest
+glibc it asks for. The shader translators (glslang, SPIRV-Tools) are linked
+in where the distribution ships them static and copied into `lib/` where it
+ships them shared only (`Arch`, Fedora): `CMakeLists.txt` puts `$ORIGIN/lib`
+in the binary's RPATH, so either way the archive runs on its own.
 
 ```sh
-bash tools/package_linux.sh v0.5.0              # build/dod3
-bash tools/package_linux.sh v0.5.0 build-linux  # another build folder
+bash tools/package_linux.sh v0.5.0-alpha              # build/dod3
+bash tools/package_linux.sh v0.5.0-alpha build-linux  # another build folder
 ```
 
 ## Regenerating the committed tables
 
-| File | Tool |
-|---|---|
-| `src/patches/menu_patch_data_101.h` | `python tools/menu_patch.py --eboot=101 --header=src/patches/menu_patch_data_101.h` (`src/patches/menu_patch_data.h` without `--eboot`, for 1.00) |
-| `src/apu/mp3dec_tables.h` | `python tools/gen_mp3_tables.py <minimp3.h> > src/apu/mp3dec_tables.h` |
-| `src/apu/mp3_standin.h` | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`) |
-| `src/res/prompts/*.png` | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`) |
-| `src/patches/collision_native.cpp` | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |
+| File                                | Tool                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/patches/menu_patch_data_101.h` | `python tools/menu_patch.py --eboot=101 --header=src/patches/menu_patch_data_101.h` (`src/patches/menu_patch_data.h` without `--eboot`, for 1.00)                                                                                                                                                                                                                                                                                                                              |
+| `src/apu/mp3dec_tables.h`           | `python tools/gen_mp3_tables.py <minimp3.h> > src/apu/mp3dec_tables.h`                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `src/apu/mp3_standin.h`             | `tools/lift_spu.sh` (through `tools/make_spu_overlays.py standin`)                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `src/res/prompts/*.png`             | `python tools/prompt_atlas.py --font Roboto-Bold.ttf` (the button-prompt atlases and the sheet of key caps the keyboard's is made from; the build embeds them as `gen/prompts_data.h`)                                                                                                                                                                                                                                                                                         |
+| `src/patches/collision_native.cpp`  | `python tools/lift_native.py <lift>/ppu_recomp_010.cpp func_00272E58 --name dod3_collision_native --inline-zero func_00252A70 -o src/patches/collision_native.cpp`, from a lift made with `PPU_NV_DIRTY=0` in the environment into a folder of its own (`-o <lift>/`): the tool reads the form in which every register is written back at every call, not the one the game is built from. The lifted body may be in another unit (`grep -l func_00272E58_lifted <lift>/*.cpp`) |
 
 ## The Linux installer (`dod3-setup`)
 
