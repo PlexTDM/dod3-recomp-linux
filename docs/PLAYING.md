@@ -40,9 +40,9 @@ Wine or Proton; it is not needed for the native game.
 In the game, Settings > Graphics Settings sets resolution, display mode,
 frame rate, v-sync, anti-aliasing, texture filtering and field of view.
 System Settings controls intro skipping, behavior when unfocused, the final
-song's auto-play, controller prompts and mouse sensitivity. Advanced Graphics
-controls aspect ratio, shadows, motion blur, post-processing, draw distance
-and tree detail.
+song's auto-play, controller prompts, mouse sensitivity and the blood on
+screen. Advanced Graphics controls aspect ratio, shadows, motion blur,
+post-processing, depth of field, draw distance and tree detail.
 
 Settings can also be changed in `dod3.ini` in the install directory:
 
@@ -60,6 +60,8 @@ Settings can also be changed in `dod3.ini` in the install directory:
 | `DOD3_SHADOWS` | `high` or `ultra` for sharper shadows |
 | `DOD3_MOTION_BLUR` | `0` disables motion blur |
 | `DOD3_POSTFX` | `0` disables depth of field, bloom and color grading |
+| `DOD3_DOF` | `0` disables only the depth of field; the bloom stays |
+| `DOD3_SCREEN_BLOOD` | `border` leaves out the blood splashes and keeps the low-health border; `0` leaves out both |
 | `DOD3_DRAW_DISTANCE` | `2`, `3`, `5` or `10` for increased scenery distance |
 | `DOD3_TREE_LOD` | `2`, `3`, `5` or `10` for increased tree distance and detail |
 | `DOD3_SKIP_INTRO` | `1` skips the logos and opening movie; `0` keeps them |
@@ -69,6 +71,32 @@ Settings can also be changed in `dod3.ini` in the install directory:
 | `DOD3_MOUSE_SENS` | Mouse camera sensitivity; `DOD3_MOUSE=0` disables mouse camera control |
 | `KEY_CROSS`, `KEY_MOVE_UP`, ... | Keys for each pad button and stick direction; the file lists all supported keys |
 | `DOD3_CAMERA_SPEED` | `original` restores the game's original camera speed behavior |
+| `DOD3_CHEAT_HEALTH` | `1` keeps your health full (Zero's or the dragon's); enemies are hurt as usual |
+| `DOD3_CHEAT_INTONER` | `1` fills the Intoner gauge at the first blood and keeps it full |
+| `DOD3_CHEAT_ITEMS` | `1` stops items being used up |
+| `DOD3_CHEAT_TIME` | `1` stops a mission's time limit counting down |
+
+## Cheats
+
+The cheats come from a code list for the PS3 game and are off unless asked
+for. Each takes effect at the next start; put them in `dod3.ini` (or the
+environment):
+
+```ini
+DOD3_CHEAT_HEALTH = 1
+DOD3_CHEAT_INTONER = 1
+DOD3_CHEAT_ITEMS = 1
+DOD3_CHEAT_TIME = 1
+```
+
+- **Health**: your health stays full -- Zero's, or the dragon's in the sky.
+  Enemies are hurt as usual.
+- **Intoner gauge**: the gauge fills at the first blood and stays full, in
+  Intoner mode too.
+- **Items**: items are not used up.
+- **Time limits**: a mission's time limit does not count down.
+
+`DOD3_CHEAT_LOG=1` says what each wrapped call was asked for.
 
 ## Controls
 
@@ -98,6 +126,15 @@ closes a menu or steps back, and closes the window only if you ask it to
 (`PS3RECOMP_ESCAPE_QUITS=1` in `dod3.ini` or the environment). To quit, close
 the window or press Alt+F4. When the game has focus the cursor is hidden and
 the mouse controls the camera.
+
+In the sky the dragon aims with a cursor on the screen; while it is shown the
+mouse moves that cursor, and only what goes past the screen's edge turns the
+view (`DOD3_CURSOR_LOG=1` says when it does).
+
+Started outside Steam on a Steam Deck (Desktop Mode), the port leaves the
+keyboard and mouse alone and uses the pad only, since Steam's desktop layout
+turns the Deck's buttons into keys (and every press came twice). Set
+`DOD3_KEYBOARD=1` for a keyboard of your own.
 
 ## Japanese voices and mods
 

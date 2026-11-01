@@ -30,7 +30,8 @@ has no console; the previous run is `dod3.prev.log`.
   `texwatch`, `patchhook`, `lzfmemo`, `vcwatch`, `snapincr`, `aniso`,
   `collnative`, `fifofast` (the walker's bulk constant/program uploads),
   `engslow` (the draw engine's old per-draw paths; on means slow),
-  `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `hleindex`, `texreads`
+  `icallflat`, `usleepspin`, `pumpsleep`, `kickhr`, `slack` (Linux: every
+  thread's timer slack, 1 ns against the kernel's 50 us), `hleindex`, `texreads`
   (only the texture units a fragment program samples bound), `none` (the
   control, which must report no difference). `DOD3_AB_FROM=<s>` skips the boot
   and menus (default 70).
@@ -83,6 +84,26 @@ has no console; the previous run is `dod3.prev.log`.
   walker's GPU waits), `RSX_PIPE_LOG=1` (pipelines built),
   `RSX_SURF_DUMP_DIR=<dir>` (every surface). `RSX_VK_VALIDATION=1` enables the
   Vulkan validation layer.
+
+## Loads
+
+- `DOD3_LOAD_LOG=1`: a timeline of the loads from a thread of its own that
+  looks every 2 ms -- when packages became pending and when the last one was
+  done, the frames in between and the longest of them, and every frame over
+  100 ms (a blocking load) -- and the steps of the start-up
+  (`[load] t=...` lines). With `PPU_WAITPROF` the same reports the guest
+  sleeps by caller and thread (`DOD3_USLEEP_SITES=1`).
+- `DOD3_ARCHIVE_NATIVE=0`: the package loader's reads (`FArchiveAsync::Serialize`,
+  `src/patches/archive_native.cpp`) run lifted again instead of copying out of
+  the archive's precache buffer. `DOD3_LOAD_LOG` splits the reads into native
+  and lifted.
+- `DOD3_TIMERSLACK_NS=<ns>`: every thread's timer slack (default 1 ns, set
+  before any thread starts; `0` the kernel's). `DOD3_AB=slack` compares the
+  two in one run.
+- `DOD3_CURSOR_LOG=1`: when the mouse takes the dragon's shooting cursor and
+  when it gives it back. `DOD3_MOUSE_TEST_FILE=<path>`: "dx dy" in the file is
+  added to the mouse's counts every frame, the window's focus not needed.
+- `DOD3_CHEAT_LOG=1`: what each wrapped call of the cheats was asked for.
 
 ## Profiling
 

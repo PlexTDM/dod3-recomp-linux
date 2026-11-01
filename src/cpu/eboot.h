@@ -54,6 +54,18 @@
 #define DOD3_FN_SET_MOTION_BLUR        func_00A54578
 #define DOD3_FN_FLIP_DEPTH_OF_FIELD    func_00A54720
 #define DOD3_FN_FLIP_MOTION_BLUR       func_00A5474C
+#define DOD3_FN_DRAGON_SHOOTING_CURSOR func_009D26F8 /* ASqex03GamePawnPlayerDragon::UpdateShootingCursor (patches/dragon_cursor.cpp) */
+#define DOD3_FN_ARCHIVE_ASYNC_SERIALIZE func_00141420 /* FArchiveAsync::Serialize, the package loader's reads (patches/archive_native.cpp) */
+#define DOD3_FN_LINKER_SERIALIZE       func_0014A32C /* FLinkerLoad::Serialize: Loader->Serialize (patches/archive_native.cpp) */
+#define DOD3_FN_LINKER_NAME            func_0014A62C /* FLinkerLoad::operator<<(FName&), the FArchive's thunk (patches/archive_native.cpp) */
+#define DOD3_FN_GAUGE_SET              func_0095B0CC /* a pawn's gauge set, clamped to its range (patches/cheats.cpp) */
+#define DOD3_FN_ITEM_REMOVE            func_00A6C560 /* the inventory's RemoveItem(id, count) (patches/cheats.cpp) */
+#define DOD3_FN_TIME_LIMIT_TICK        func_009F3ED8 /* a mission's time limit counting down (patches/cheats.cpp) */
+#define DOD3_FN_SHOOTING_CURSOR_ON     func_0096B9A8 /* ASqex03GamePawn::IsEnableShootingCursor */
+#define DOD3_FN_UBER_CREATE_PROXY      func_00306728 /* UUberPostProcessEffect::CreateSceneProxy (patches/sysset.cpp) */
+#define DOD3_FN_DOFBLOOM_CREATE_PROXY  func_001B1B64 /* UDOFAndBloomEffect::CreateSceneProxy */
+#define DOD3_FN_HUD_BLOOD_DRAW         func_009E5150 /* USqex03GameHUDBlood::Draw (patches/sysset.cpp) */
+#define DOD3_FN_HUD_DYING_UPDATE       func_009E8028 /* USqex03GameHUDDying::Update */
 /* code addresses */
 #define DOD3_A_EXEC_GETSTRING    0x0145E274u
 #define DOD3_A_EXEC_BRIDGE       0x013F43A0u
@@ -88,7 +100,25 @@
 #define DOD3_A_SET_MOTION_BLUR      0x00A54578u
 #define DOD3_A_FLIP_DEPTH_OF_FIELD  0x00A54720u
 #define DOD3_A_FLIP_MOTION_BLUR     0x00A5474Cu
-#define DOD3_O_HUD_CANVAS           0x414u /* ASqex03GameHUD: AHUD::Canvas */
+#define DOD3_A_DRAGON_SHOOTING_CURSOR 0x009D26F8u
+#define DOD3_A_UBER_CREATE_PROXY    0x00306728u
+#define DOD3_A_DOFBLOOM_CREATE_PROXY 0x001B1B64u
+#define DOD3_A_HUD_BLOOD_DRAW       0x009E5150u
+#define DOD3_A_HUD_DYING_UPDATE     0x009E8028u
+#define DOD3_O_HUD_DYING_ALPHA      0xB4u   /* USqex03GameHUDDying: m_fFrameColor */
+#define DOD3_O_DOF_PROXY_BLUR_NEAR  0x14u   /* FDOFPostProcessSceneProxy: MaxNearBlurAmount (MaxFar at +0x1C) */
+#define DOD3_A_ARCHIVE_ASYNC_SERIALIZE 0x00141420u
+#define DOD3_A_LINKER_SERIALIZE       0x0014A32Cu
+#define DOD3_A_LINKER_NAME            0x0014A62Cu
+#define DOD3_A_GAUGE_SET              0x0095B0CCu
+#define DOD3_A_ITEM_REMOVE            0x00A6C560u
+#define DOD3_A_TIME_LIMIT_TICK        0x009F3ED8u
+#define DOD3_A_PLAYER_CONTROLLER_VTABLE 0x0173ADA0u /* the player's controller (patches/cheats.cpp) */
+#define DOD3_O_PAWN_CONTROLLER        0x1E8u /* APawn::Controller */
+#define DOD3_O_CONTROLLER_PAWN        0x1CCu /* AController::Pawn */
+#define DOD3_O_SHOOTING_CURSOR      0x13F4u /* ASqex03GamePawn: m_xTarget.m_xShooting.m_vCurPos, (x, y) of the screen */
+#define DOD3_O_SHOOTING_RECT        0x1448u /* m_xTarget.m_xShooting.m_fShootingRect_Up, _Bottom, _Left, _Right */
+#define DOD3_O_HUD_CANVAS          0x414u /* ASqex03GameHUD: AHUD::Canvas */
 #define DOD3_O_HUD_SCREEN_POS       0x748u /* ASqex03GameHUD: CalcTransformPosition's results, a TArray of (x, y) */
 #define DOD3_A_TREE_PROXY_VTABLE    0x016E8C34u /* FSpeedTreeSceneProxy */
 #else

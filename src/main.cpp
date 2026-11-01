@@ -8,7 +8,8 @@
  * ppu_sysprx_register, ppu_fs_register, lv2_init_syscalls, ppu_run) is the
  * toolkit's; what is here is the port's own part:
  *   - the frame clock: vblanks, flips and FIFO drains, presented through
- *     D3D12 (Windows), Metal (macOS) or the null backend;
+ *     the draw engine over Vulkan (Linux), D3D12 (Windows), Metal (macOS) or
+ *     the null backend;
  *   - the frame-rate lock (DOD3_FPS) and what happens out of focus
  *     (DOD3_UNFOCUSED);
  *   - the title-specific runtime defaults, in main();
@@ -37,6 +38,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if defined(__linux__) && !defined(DOD3_RUNTIME_VM_WATCH)
@@ -77,6 +79,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <sys/prctl.h>                   /* PR_SET_TIMERSLACK */
+#endif
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <spawn.h>
@@ -91,6 +96,9 @@ int dod3_setup_mac(const char* base_dir, int force);
 void dod3_settings_menu_install();  /* src/ui/settings_menu.cpp: the Graphics Settings page */
 void dod3_hud_aspect_install();     /* src/patches/hud_aspect.cpp */
 void dod3_song_autoplay_install();  /* src/patches/song_autoplay.cpp */
+void dod3_cheats_install();         /* src/patches/cheats.cpp */
+void dod3_dragon_cursor_install();  /* src/patches/dragon_cursor.cpp */
+void dod3_archive_native_install(); /* src/patches/archive_native.cpp */
 void dod3_dlc_prepare();            /* src/kernel/dlc.cpp: the installed DLC's file lists */
 void dod3_mods_prepare();           /* src/kernel/mods.cpp: the mods' files, the DLC chapters' voices */
 bool dod3_menu_patch_prepare();     /* src/patches/menu_patch.cpp: the script patch that adds it */
@@ -355,8 +363,82 @@ static std::atomic<uint64_t> s_fp_calls{ 0 }, s_fp_early{ 0 }, s_fp_us{ 0 };
  * switches it in a run. */
 static std::atomic<int> s_kick_busy{ 1 };
 static void ab_kickbusy(int on) { s_kick_busy = on; }
+
+/* Linux: timer slack. The kernel adds up to 50 us to every timed sleep and
+ * wait of a thread (its default timer slack, to batch wake-ups), and the
+ * frame is a hand-off chain of short waits -- the guest's usleeps, its
+ * fence polls, the walker's waits between drains. 1 ns for every thread, set
+ * in main() before any starts (threads inherit it): on a Steam Deck in the
+ * chapter 1 battle, +2.29 +/- 1.27 fps over 24 pairs and half the frames over
+ * 25 ms (17.6 against 38.3 per 1000). DOD3_TIMERSLACK_NS=<n> another value,
+ * 0 the kernel's. DOD3_AB=slack switches 1 ns against 50 us in a run; prctl
+ * sets only the calling thread's, so each thread applies the switch at its
+ * next guest sleep or walker pass. */
+#ifdef __linux__
+static std::atomic<int> s_slack_ns{ 0 };   /* 0: no switch asked for */
+static void slack_apply(void)
+{
+    static thread_local int have = 0;
+    const int want = s_slack_ns.load(std::memory_order_relaxed);
+    if (!want || want == have) return;
+    prctl(PR_SET_TIMERSLACK, (unsigned long)want);
+    have = want;
+}
+static void ab_slack(int on) { s_slack_ns = on ? 1 : 50000; }
+#else
+static void slack_apply(void) {}
+#endif
+
+/* DOD3_USLEEP_SITES=1: guest sleeps counted by caller (the guest lr at the
+ * usleep, so the return address into whoever called appSleep and friends)
+ * and host thread, the top ones printed every 5 s with PPU_WAITPROF's report.
+ * Which loop a sleeping thread polls in, when PPU_WAITPROF only names the
+ * function that makes the syscall. */
+static int s_usleep_sites = -1;
+struct UsleepSite {
+    std::atomic<uint64_t> key{ 0 };   /* lr << 32 | tid, 0 = free */
+    std::atomic<uint64_t> n{ 0 }, us{ 0 };
+};
+static UsleepSite s_us_site[512];
+static void usleep_site_note(uint32_t lr, uint64_t usec)
+{
+    const uint64_t key = ((uint64_t)lr << 32) | (uint32_t)GetCurrentThreadId();
+    for (uint32_t i = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 55), k = 0; k < 512; k++, i = (i + 1) & 511) {
+        uint64_t have = s_us_site[i].key.load(std::memory_order_relaxed);
+        if (have == 0 && s_us_site[i].key.compare_exchange_strong(have, key)) have = key;
+        if (have == key) {
+            s_us_site[i].n.fetch_add(1, std::memory_order_relaxed);
+            s_us_site[i].us.fetch_add(usec, std::memory_order_relaxed);
+            return;
+        }
+    }
+}
+static void usleep_site_report(double secs)
+{
+    struct Row { uint32_t lr, tid; uint64_t n, us; };
+    std::vector<Row> rows;
+    for (auto& e : s_us_site) {
+        const uint64_t k = e.key.load(), n = e.n.exchange(0), us = e.us.exchange(0);
+        if (k && n) rows.push_back({ (uint32_t)(k >> 32), (uint32_t)k, n, us });
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.n > b.n; });
+    for (size_t i = 0; i < rows.size() && i < 8; i++) {
+        char name[32] = "?";
+#ifdef __linux__
+        char path[64];
+        snprintf(path, sizeof path, "/proc/self/task/%u/comm", rows[i].tid);
+        if (FILE* f = fopen(path, "r")) { if (fgets(name, sizeof name, f)) name[strcspn(name, "\n")] = 0; fclose(f); }
+#endif
+        fprintf(stderr, "[usleep-site] lr %08X  %-16s %7.0f/s  asked %6.1f us avg\n", rows[i].lr, name,
+                rows[i].n / secs, (double)rows[i].us / (double)rows[i].n);
+    }
+}
+
 static int guest_usleep_hook(uint32_t lr, uint64_t usec)
 {
+    slack_apply();
+    if (s_usleep_sites < 0) s_usleep_sites = getenv("DOD3_USLEEP_SITES") ? 1 : 0;
+    if (s_usleep_sites) usleep_site_note(lr, usec);
     if (s_trace) trace(1, lr, (uint32_t)usec);
     if (!s_kick_busy.load(std::memory_order_relaxed) ||
         vm_read32(ppu_hle_inject_base + 0x2000u) != vm_read32(ppu_hle_inject_base + 0x2004u))
@@ -390,6 +472,8 @@ static int guest_usleep_hook(uint32_t lr, uint64_t usec)
         (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
     return 1;
 }
+extern "C" void dod3_load_log_start(void);   /* src/patches/load_idle.cpp: DOD3_LOAD_LOG */
+extern "C" void dod3_boot_mark(const char* what);
 extern "C" int ppu_waitprof_on(void);
 extern "C" void ppu_waitprof_report(double window_s);
 
@@ -1005,6 +1089,8 @@ static void* cpu_watch(void*)
  *            / every unit that is switched on (RSX_BIND_UNREAD)
  *   kickhr   (Windows) the walker's wait between drains on an event and a
  *            high-resolution timer / on the condition variable
+ *   slack    (Linux) every thread's timer slack 1 ns (the default) / the
+ *            kernel's 50 us, applied at each guest sleep and walker pass
  *   none     nothing: the control, which has to report no difference
  * On Windows each report also gives the CPU time per frame of the busiest
  * threads in either state (thread cycle counters, so exact): a switch that
@@ -1091,6 +1177,9 @@ static const struct {
 #endif
 #if defined(_WIN32) || defined(__APPLE__)
     { "aniso", ab_aniso },
+#endif
+#ifdef __linux__
+    { "slack", ab_slack },
 #endif
     { "none", ab_none },
 };
@@ -1340,7 +1429,9 @@ static DWORD WINAPI frame_clock(LPVOID)
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "ps3recomp";
 
+    dod3_boot_mark("the renderer's start");
     int rsx_ok = (rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
+    dod3_boot_mark("the renderer up");
     s_window_up = rsx_ok != 0;
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME, rsx_ok ? "OK -- window open" : "FAILED");
 #if defined(PS3RECOMP_RSX_VULKAN)
@@ -1434,6 +1525,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             if (!wp_last) wp_last = now;
             if (now - wp_last >= 5000000ull && ppu_waitprof_on()) {
                 ppu_waitprof_report((double)(now - wp_last) / 1e6);
+                if (s_usleep_sites > 0) usleep_site_report((double)(now - wp_last) / 1e6);
                 const uint64_t c = s_fp_calls.exchange(0), e = s_fp_early.exchange(0), u = s_fp_us.exchange(0);
                 fprintf(stderr, "[fast-poll] %llu fence polls, %llu woken by a drain, %.1f us avg; drains %llu\n",
                         (unsigned long long)c, (unsigned long long)e, c ? (double)u / (double)c : 0.0,
@@ -1443,6 +1535,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         }
 
         ab_step(now);
+        slack_apply();
 
         int fired = 0;
         while ((long long)(now - next_tick) >= 0 && fired < 240) {
@@ -1596,7 +1689,13 @@ static bool alloc_guest_vm(void)
      * ppu_vm_size arms the loader's bounds check for what is left. An mmap
      * rather than the calloc it was: the texture write-watch mprotects pages
      * of it, which wants a page-aligned mapping of its own. */
+#ifdef MAP_NORESERVE
+    /* Linux: not counted against memory up front (the overcommit heuristic
+     * could refuse 3.5 GB at once); only the pages touched are ever backed. */
+    void* m = mmap(nullptr, 0xE0000000u, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+#else
     void* m = mmap(nullptr, 0xE0000000u, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+#endif
     vm_base = (m == MAP_FAILED) ? nullptr : (uint8_t*)m;
     ppu_vm_size = 0xE0000000u;
     if (vm_base) {
@@ -1645,6 +1744,18 @@ __attribute__((target("xsave"))) static bool x86_v3_cpu(void)
     const bool os_avx = (r1[2] & (1 << 27)) && ((_xgetbv(0) & 6) == 6);
     return os_avx && (r1[2] & (1 << 12)) /* FMA */ && (r1[2] & (1 << 22)) /* MOVBE */ &&
            (r7[1] & (1 << 5)) /* AVX2 */ && (r7[1] & (1 << 3)) && (r7[1] & (1 << 8)) /* BMI1, BMI2 */;
+}
+#elif defined(DOD3_X86_V3) && defined(__linux__)
+/* As the Windows check above: the same CPUID bits, and the OS saving the AVX
+ * state (XGETBV). */
+#include <cpuid.h>
+__attribute__((target("xsave"))) static bool x86_v3_cpu(void)
+{
+    unsigned a, b, c1, d, b7, c7;
+    if (!__get_cpuid(1, &a, &b, &c1, &d) || !__get_cpuid_count(7, 0, &a, &b7, &c7, &d)) return false;
+    const bool os_avx = (c1 & (1u << 27)) && ((__builtin_ia32_xgetbv(0) & 6) == 6);
+    return os_avx && (c1 & (1u << 12)) /* FMA */ && (c1 & (1u << 22)) /* MOVBE */ &&
+           (b7 & (1u << 5)) /* AVX2 */ && (b7 & (1u << 3)) && (b7 & (1u << 8)) /* BMI1, BMI2 */;
 }
 #endif
 
@@ -1847,6 +1958,7 @@ static std::filesystem::path linux_install_base(const char* executable)
 
 int main(int argc, char** argv)
 {
+    dod3_boot_mark("main");
 #ifdef _WIN32
     win_stdio_init();
 #endif
@@ -1863,6 +1975,21 @@ int main(int argc, char** argv)
         fprintf(stderr, "%s\n", msg);
         MessageBoxA(NULL, msg, "Drakengard 3 Recompiled", MB_OK | MB_ICONERROR);
         return 1;
+    }
+#elif defined(DOD3_X86_V3) && defined(__linux__)
+    if (!x86_v3_cpu()) {
+        fprintf(stderr,
+                "This build needs a CPU with AVX2, FMA and BMI2 (x86-64-v3: Intel Haswell "
+                "or AMD Excavator/Zen and newer). Rebuild with -DDOD3_X86_LEVEL= for older processors.\n");
+        return 1;
+    }
+#endif
+#ifdef __linux__
+    /* Timer slack (see slack_apply): before any thread starts, so all inherit it */
+    {
+        const char* e = getenv("DOD3_TIMERSLACK_NS");
+        const long ns = e && *e ? atol(e) : 1;
+        if (ns > 0) prctl(PR_SET_TIMERSLACK, (unsigned long)ns);
     }
 #endif
     /* No arguments -- a double-click, a shortcut -- or --setup: the release
@@ -1996,6 +2123,8 @@ int main(int argc, char** argv)
     setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
     win_stdio_buffer();                 /* ...except into a file or a pipe: buffered, flushed every 200 ms */
     pgo_writer_start();                 /* nothing unless DOD3_PGO=generate */
+#else
+    pgo_writer_start();                 /* nothing unless DOD3_PGO=generate */
 #endif
 
     printf("=== Drakengard 3 Recompiled %s (BLUS31197 %s) ===\n", DOD3_VERSION_STRING, DOD3_EBOOT_NAME);
@@ -2100,8 +2229,10 @@ int main(int argc, char** argv)
         fprintf(stderr, "ERROR: could not allocate the guest address space\n");
         return 1;
     }
+    dod3_boot_mark("the guest address space");
 
     uint32_t entry = ppu_load_elf(argv[1]);
+    dod3_boot_mark("the ELF loaded");
     if (!entry) {
         fprintf(stderr, "ERROR: could not load %s\n", argv[1]);
 #ifdef _WIN32
@@ -2123,12 +2254,16 @@ int main(int argc, char** argv)
     apply_fps_unlock();
     apply_unfocused();
     apply_sha_overrides();
+    dod3_boot_mark("patches applied");
     /* the title's game-data install as links onto the disc (install/install.h) */
     if (const char* root = getenv("PS3_VFS_ROOT"))
         if (*root) dod3setup::gamedata_layout(std::filesystem::u8path(root));
+    dod3_boot_mark("the game-data layout");
     dod3_menu_patch_prepare();
+    dod3_boot_mark("the menu patch");
     dod3_dlc_prepare();
     dod3_mods_prepare();
+    dod3_boot_mark("DLC and mods");
 #ifdef _WIN32
     /* DOD3_PROF / DOD3_STALL_MS / DOD3_STALL_SAMPLE: src/os/win32/prof.cpp. */
     win_prof_start();
@@ -2150,10 +2285,15 @@ int main(int argc, char** argv)
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
 
     ppu_recomp_register();   /* lifted function table -> address map */
+    dod3_boot_mark("the function table registered");
+    dod3_load_log_start();   /* DOD3_LOAD_LOG: patches/load_idle.cpp */
     dod3_settings_menu_install();   /* the Graphics Settings page's two natives */
     dod3_sysset_install();          /* the tree detail row's hook */
     dod3_hud_aspect_install();      /* the HUD's markers in a view of another shape */
     dod3_song_autoplay_install();   /* branch D's final song, if DOD3_SONG_AUTOPLAY=1 */
+    dod3_cheats_install();          /* DOD3_CHEAT_* (cheats.cpp) */
+    dod3_dragon_cursor_install();   /* the mouse moves the dragon's shooting cursor */
+    dod3_archive_native_install();  /* the package loader's reads, natively */
     dod3_kbm_install();
     dod3_prompts_install();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */

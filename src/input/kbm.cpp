@@ -406,10 +406,44 @@ int host_input(void*, int focused, CellPadHostInput* out)
 
 }  // namespace
 
+#ifdef __linux__
+/* A Steam Deck (its DMI board: Valve's Jupiter, or Galileo for the OLED). */
+static bool on_steam_deck()
+{
+    auto read = [](const char* path) {
+        std::string v;
+        if (FILE* f = fopen(path, "r")) {
+            char b[64] = {};
+            if (fgets(b, sizeof b, f)) v = b;
+            fclose(f);
+        }
+        while (!v.empty() && (v.back() == '\n' || v.back() == ' ')) v.pop_back();
+        return v;
+    };
+    const std::string vendor = read("/sys/class/dmi/id/board_vendor"), product = read("/sys/class/dmi/id/product_name");
+    return vendor == "Valve" && (product == "Jupiter" || product == "Galileo");
+}
+#endif
+
 void dod3_kbm_install()
 {
     if (const char* e = getenv("DOD3_KEYBOARD"))
         if (!strcmp(e, "0")) return;
+#ifdef __linux__
+    /* A Steam Deck, started outside Steam (Desktop Mode, from a terminal or
+     * the file manager): Steam's Desktop Configuration turns the Deck's own
+     * buttons into keys and its trackpad into the mouse, so every press came
+     * twice -- once from the pad, once as Esc or Enter, which is Start -- and
+     * the pause menu kept opening. The pad alone, then, unless DOD3_KEYBOARD=1
+     * asks for the keys (a real keyboard plugged in). Started from Steam (a
+     * non-Steam shortcut too), Steam gives the game a pad layout instead and
+     * the keys are the player's. */
+    if (!getenv("DOD3_KEYBOARD") && !getenv("SteamGameId") && !getenv("SteamAppId") && on_steam_deck()) {
+        fprintf(stderr, "[kbm] Steam Deck outside Steam: keyboard and mouse off, the pad alone "
+                        "(DOD3_KEYBOARD=1 for a keyboard of your own)\n");
+        return;
+    }
+#endif
     for (int b = 0; b < kBinds; b++) {
         const char* e = getenv(kBind[b].key);
         parse(b, e && *e ? e : kBind[b].defaults);

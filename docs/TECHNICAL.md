@@ -100,6 +100,7 @@ check mode that runs both and compares:
 | ShaderPatching's LZF decoder (an SPU job run ~200 times a frame on the render thread): the copy loops, whole tokens, and a memo of decoded shaders | `src/patches/spu_hooks.c` | `DOD3_SPU_NATIVE_CHECK=1` |
 | MultiStream's DSP biquads (half of the audio SPU task) | `src/apu/msdsp_hooks.c` | `DOD3_SPU_NATIVE_CHECK=1` |
 | The MP3 decoder MultiStream loads from the console's firmware: a native decoder (`src/apu/mp3dec.c`) behind a stand-in image of our own that the runtime serves in its place | `src/apu/mp3_native.c`, `tools/make_spu_overlays.py` | `DOD3_MP3_CHECK=1` |
+| Unreal's package loader reads (`FArchiveAsync::Serialize`): a copy out of the archive's precache buffer when the bytes are there, the lifted function otherwise; the linker's Serialize goes straight to it, and a name is one read | `src/patches/archive_native.cpp` | `DOD3_ARCHIVE_NATIVE=0`; `DOD3_LOAD_LOG` splits native and lifted reads |
 | The package inflate the game sends to an SPU zlib task through a SPURS LFQueue | `src/patches/edgezlib.cpp` | each chunk's Adler-32 |
 | The SPURS queue and LFQueue paths, lifted from libsre at build time (the HLE's own were not enough for this game) | `src/kernel/spurs_queue.cpp`, `src/kernel/spurs_lfqueue.cpp`, `tools/gen_libsre.py` | |
 
@@ -170,6 +171,18 @@ A script package that is not the update's -- a mod copied over the update
 by hand -- is not patched: its own hash goes into the table instead, so it
 plays as it is, without the pages.
 
+## Cheats
+
+The cheats are the PS3 code list's, found again in the 1.01 EBOOT by their
+byte patterns (`src/patches/cheats.cpp`). A list's code rewrites an
+instruction; lifted code is not patched in memory, so each is the function
+the code patches, wrapped -- all are reached through a vtable, so the
+function registry replaces them without a re-lift. A pawn's gauges go
+through one setter, for the pawn the player's controller holds (Zero, or the
+dragon in the sky); `RemoveItem` is given a count of 0; a mission's time
+limit tick gets 0. The rest of the list (jump height, the camera's pitch
+limit) patches functions with direct callers and would need a re-lift.
+
 ## Button prompts
 
 Every button the game draws, in its text, its menus' help bar and its HUD,
@@ -223,6 +236,14 @@ quarter of that at 120. The stick's value is scaled by (1/30)/dt above 30
 frames a second, so the camera turns as on the console at any rate
 (`DOD3_CAMERA_SPEED=original` for the game's own). The dragon's camera has
 not been measured and its stick is left alone.
+
+In the sky the dragon's shooting cursor is moved by the pawn's own update
+(`ASqex03GamePawnPlayerDragon::UpdateShootingCursor`) reading the left stick,
+while the mouse turns the view. So while the cursor is on screen the mouse
+moves the cursor instead (`src/patches/dragon_cursor.cpp`), and only what
+goes past the edge of its rectangle turns the view; until a stick moves it
+again, the cursor stays where the mouse left it, and the title's own spring
+back to the top is undone after its update.
 
 ## The 1.01 update
 

@@ -149,9 +149,12 @@ included), windowed, borderless or full-screen display, wider screens (16:10,
 21:9, 32:9), a frame-rate cap of your choice (60 and 120 tested) or one that
 follows the scene, with the frames shown at even intervals, FXAA or MSAA,
 anisotropic filtering, a wider field of view, sharper shadows, a longer draw
-distance for scenery and for trees, skipping the intro logos and movie,
-auto-play for branch D's final song, pausing or muting when the window is in
-the background, keyboard and mouse, and the button prompts of the pad you
+distance for scenery and for trees, depth of field on its own and the blood on
+the screen on, border-only or off, skipping the intro logos and movie,
+auto-play for branch D's final song, cheats (full health, a full Intoner
+gauge, items kept, time limits stopped), pausing or muting when the window is
+in the background, keyboard and mouse (the mouse moves the dragon's shooting
+cursor in the sky too), and the button prompts of the pad you
 hold -- set in `dod3.ini`, or in a Graphics Settings, a System Settings and
 an Advanced Graphics page added to the game's own Settings menu.
 

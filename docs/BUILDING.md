@@ -156,6 +156,19 @@ tools/run_timed.sh 120 out/run.log        # a bounded run with a log
 `dod3.ini` is read from the install directory; a variable set in the
 environment wins over it.
 
+## Packaging a release
+
+`tools/package_linux.sh` writes `dist/dod3-recomp-<version>-linux-x86_64.tar.gz`:
+the executable, the default `dod3.ini`, the player guide and the licences.
+Nothing of the game goes in it -- players run `dod3 --install` in the folder
+the archive unpacks to. It refuses a binary that needs more than glibc,
+libstdc++, zlib and SDL2, and prints the newest glibc it asks for.
+
+```sh
+bash tools/package_linux.sh v0.5.0              # build/dod3
+bash tools/package_linux.sh v0.5.0 build-linux  # another build folder
+```
+
 ## Regenerating the committed tables
 
 | File | Tool |
